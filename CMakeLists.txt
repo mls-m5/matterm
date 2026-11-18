@@ -1,32 +1,38 @@
-
 cmake_minimum_required(VERSION 3.23)
 project(matterm LANGUAGES CXX)
 
 find_package(SDL2 2.0.18 REQUIRED)
 find_package(SDL2_ttf 2.0.18 REQUIRED)
 
-add_library(cellbuffer src/cellbuffer.cpp)
+# Common cells, storage, and presentation state: no terminal protocol or SDL.
+add_library(cellbuffer src/core/cellbuffer.cpp)
 target_compile_features(cellbuffer PUBLIC cxx_std_17)
-target_include_directories(cellbuffer PUBLIC src)
+target_include_directories(cellbuffer PUBLIC src src/core)
 
-add_library(terminalmemory src/terminalmemory.cpp src/scrollviewport.cpp)
+add_library(terminalmemory src/core/terminalmemory.cpp src/core/scrollviewport.cpp)
 target_compile_features(terminalmemory PUBLIC cxx_std_17)
-target_include_directories(terminalmemory PUBLIC src)
+target_include_directories(terminalmemory PUBLIC src src/core)
 
-# CPU-only terminal behavior, independent of rendering and SDL initialization.
-add_library(terminalmodel src/terminalmodel.cpp src/utf8decoder.cpp)
+# CPU screen behavior and stream decoding are independent library layers.
+add_library(terminalmodel src/terminal/terminalmodel.cpp)
 add_library(matterm::terminal ALIAS terminalmodel)
+target_include_directories(terminalmodel PUBLIC src/terminal)
 target_link_libraries(terminalmodel PUBLIC terminalmemory)
 
-add_library(glyphatlas src/glyphatlas.cpp)
+add_library(utf8decoder src/terminal/vt/utf8decoder.cpp)
+add_library(matterm::utf8 ALIAS utf8decoder)
+target_compile_features(utf8decoder PUBLIC cxx_std_17)
+target_include_directories(utf8decoder PUBLIC src src/terminal/vt)
+
+# Graphical resources and backends do not depend on terminal emulation.
+add_library(glyphatlas src/render/glyphatlas.cpp)
 target_compile_features(glyphatlas PUBLIC cxx_std_17)
-target_include_directories(glyphatlas PUBLIC src)
+target_include_directories(glyphatlas PUBLIC src src/render)
 target_link_libraries(glyphatlas PUBLIC SDL2::SDL2 SDL2_ttf::SDL2_ttf)
 
-add_library(sdlbackend src/sdlbackend.cpp)
-target_link_libraries(sdlbackend PUBLIC glyphatlas)
+add_library(sdlbackend src/render/sdlbackend.cpp)
+target_link_libraries(sdlbackend PUBLIC glyphatlas cellbuffer)
 
-# Shared rendering API for demos, future terminal emulation, and other clients.
 add_library(matterm-renderer INTERFACE)
 add_library(matterm::renderer ALIAS matterm-renderer)
 target_link_libraries(matterm-renderer INTERFACE cellbuffer terminalmemory sdlbackend)
@@ -34,7 +40,6 @@ target_link_libraries(matterm-renderer INTERFACE cellbuffer terminalmemory sdlba
 include(CTest)
 option(MATTERM_BUILD_DEMO "Build the standalone matterm demos" ON)
 
-# Demo helpers are deliberately separate from the reusable renderer.
 if(MATTERM_BUILD_DEMO OR BUILD_TESTING)
     add_library(democontent demo/democontent.cpp)
     target_include_directories(democontent PUBLIC demo)
@@ -45,8 +50,7 @@ if(MATTERM_BUILD_DEMO)
     add_executable(matterm-demo demo/main.cpp)
     target_link_libraries(matterm-demo PRIVATE matterm::renderer democontent)
     add_executable(matterm-terminal-demo demo/terminalmain.cpp)
-    target_link_libraries(matterm-terminal-demo PRIVATE matterm::terminal matterm::renderer democontent)
+    target_link_libraries(matterm-terminal-demo PRIVATE matterm::terminal matterm::utf8 matterm::renderer democontent)
 endif()
 add_subdirectory(lib)
 add_subdirectory(test)
-

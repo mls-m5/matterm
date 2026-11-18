@@ -8,7 +8,7 @@ if(BUILD_TESTING)
         mls-unit-test/test_main.cpp
     )
     target_compile_features(cellgridview_test PRIVATE cxx_std_17)
-    target_include_directories(cellgridview_test PRIVATE ../src)
+    target_include_directories(cellgridview_test PRIVATE ../src/core)
     add_test(NAME cell_grid_view COMMAND cellgridview_test)
 
     add_executable(cellbuffer_test
@@ -36,7 +36,7 @@ if(BUILD_TESTING)
         utf8decoder_test.cpp
         mls-unit-test/test_main.cpp
     )
-    target_link_libraries(utf8decoder_test PRIVATE matterm::terminal)
+    target_link_libraries(utf8decoder_test PRIVATE matterm::utf8)
     add_test(NAME utf8_decoder COMMAND utf8decoder_test)
 
     add_executable(scrollviewport_test
