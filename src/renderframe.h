@@ -14,5 +14,5 @@ struct RenderFrame {
     // -1 uses the drawable height; otherwise clip the text to this pixel
     // height.
     int textHeightPixels = -1;
-    ScrollbarState scrollbar;
+    ScrollbarState scrollbar{};
 };

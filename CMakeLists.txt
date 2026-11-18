@@ -13,6 +13,11 @@ add_library(terminalmemory src/terminalmemory.cpp src/scrollviewport.cpp)
 target_compile_features(terminalmemory PUBLIC cxx_std_17)
 target_include_directories(terminalmemory PUBLIC src)
 
+# CPU-only terminal behavior, independent of rendering and SDL initialization.
+add_library(terminalmodel src/terminalmodel.cpp src/utf8decoder.cpp)
+add_library(matterm::terminal ALIAS terminalmodel)
+target_link_libraries(terminalmodel PUBLIC terminalmemory)
+
 add_library(glyphatlas src/glyphatlas.cpp)
 target_compile_features(glyphatlas PUBLIC cxx_std_17)
 target_include_directories(glyphatlas PUBLIC src)
@@ -27,7 +32,7 @@ add_library(matterm::renderer ALIAS matterm-renderer)
 target_link_libraries(matterm-renderer INTERFACE cellbuffer terminalmemory sdlbackend)
 
 include(CTest)
-option(MATTERM_BUILD_DEMO "Build the standalone matterm rendering demo" ON)
+option(MATTERM_BUILD_DEMO "Build the standalone matterm demos" ON)
 
 # Demo helpers are deliberately separate from the reusable renderer.
 if(MATTERM_BUILD_DEMO OR BUILD_TESTING)
@@ -39,6 +44,8 @@ endif()
 if(MATTERM_BUILD_DEMO)
     add_executable(matterm-demo demo/main.cpp)
     target_link_libraries(matterm-demo PRIVATE matterm::renderer democontent)
+    add_executable(matterm-terminal-demo demo/terminalmain.cpp)
+    target_link_libraries(matterm-terminal-demo PRIVATE matterm::terminal matterm::renderer democontent)
 endif()
 add_subdirectory(lib)
 add_subdirectory(test)

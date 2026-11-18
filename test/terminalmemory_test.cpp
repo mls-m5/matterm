@@ -67,6 +67,21 @@ TEST_CASE(
     EXPECT(memory.row(0).data()[0].codePoint == U' ');
 }
 
+TEST_CASE("Checked cell edits use logical row order after ring wraparound") {
+    TerminalMemory memory(2, 3, 2);
+    memory.append(U"aa");
+    memory.append(U"bb");
+    memory.append(U"cc");
+    memory.append(U"dd");
+    memory.at(1, 0).codePoint = U'X';
+    const TerminalMemory &readOnly = memory;
+    EXPECT(readOnly.at(0, 0).codePoint == U'b');
+    EXPECT(readOnly.at(1, 0).codePoint == U'X');
+    EXPECT(memory.row(2).data()[0].codePoint == U'd');
+    EXPECT_THROW(memory.at(2, 0), std::out_of_range);
+    EXPECT_THROW(readOnly.at(0, 3), std::out_of_range);
+}
+
 TEST_CASE("Resize preserves logical order after wraparound without reflow") {
     TerminalMemory memory(2, 3, 2);
     memory.append(U"aa");

@@ -33,6 +33,10 @@ public:
     FStringView row(std::size_t index) const &;
     FStringView row(std::size_t index) const && = delete;
 
+    // Checked cell access in logical history order (oldest row first).
+    FChar &at(std::size_t column, std::size_t row);
+    const FChar &at(std::size_t column, std::size_t row) const;
+
     // Clip to the stored width; fill the remainder. Formatted input may refer
     // to a retained row in this memory, including the row being evicted.
     void append(FStringView text, FChar fill = {});
