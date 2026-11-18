@@ -33,6 +33,18 @@ rendering library interface. Keep it usable independently of terminal emulation.
 MATTERM_BUILD_DEMO controls both standalone demo builds. With BUILD_TESTING also
 OFF, only the reusable libraries are built. No installable package is provided yet.
 
+## Source Boundaries and Checklist
+
+See ROADMAP.md for the checked implementation plan. Common cells/storage live in
+src/core/, graphical backends in src/render/, screen semantics in src/terminal/,
+and byte-stream decoding/parsing in src/terminal/vt/. The decoder is separately
+linkable as matterm::utf8; the model does not require it. Both existing demos must
+retain their behavior; a separate matterm application will host VT/PTY integration.
+
+A deferred reverse-direction backend could turn the same drawing/cell API into
+ANSI/VT output for an existing terminal, potentially replacing ncurses for clients.
+This is an output encoder/backend, not the input parser, and is not implemented.
+
 ## Responsibilities and Ownership
 
 - The GUI loop owns the rendering backend and keeps its window and context alive.
@@ -214,8 +226,8 @@ Atlas positions and glyph indices are backend details and must not live in FChar
 
 ### Initial Glyph Atlas
 
-The implementation is in src/glyphatlas.cpp, with its interface in
-src/glyphatlas.h and per-glyph metrics in src/glyph.h. It is an SDL-specific
+The implementation is in src/render/glyphatlas.cpp, with its interface in
+src/render/glyphatlas.h and per-glyph metrics in src/render/glyph.h. It is an SDL-specific
 backend resource, not a shared terminal model abstraction. Implement an OpenGL
 counterpart separately when needed; extract shared code only when its value is
 clear from both implementations.

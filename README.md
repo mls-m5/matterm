@@ -163,8 +163,8 @@ There is no text cluster pool yet.
 
 ## Terminal Model Library
 
-`matterm::terminal` provides `TerminalModel` and `Utf8Decoder` without SDL
-dependencies or a required GUI loop. Its UTF-32 `write()` handles CR, LF, backspace, and 8-column tabs;
+`matterm::terminal` provides `TerminalModel`; `matterm::utf8` independently
+provides `Utf8Decoder`, without SDL dependencies or a required GUI loop. Its UTF-32 `write()` handles CR, LF, backspace, and 8-column tabs;
 printable characters wrap only when another character follows the last column.
 LF preserves the column, so use `U"\r\n"` to start a new line at column zero.
 
@@ -215,6 +215,11 @@ in both modes so hiding the sidebar does not itself resize the primary screen.
 Actual Vim support still requires the future VT parser, input encoding, and PTY.
 
 ## Design and Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for the implementation checklist, parser/PTY stages,
+and the deferred terminal-output backend idea. Source layers are `src/core/`
+(cells/storage), `src/render/` (graphics), and `src/terminal/` with `vt/` for stream
+parsing. Both existing demos remain independent of the future `matterm` app.
 
 See [DESIGN.md](DESIGN.md) for ownership, cell layout, scrollback storage, backend
 boundaries, and planned milestones. The current atlas is deliberately SDL-specific;

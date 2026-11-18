@@ -20,3 +20,8 @@ and generated content belong under `demo/`, not in the reusable renderer.
 Keep `matterm-terminal-demo` as a second, separate client of the CPU-only
 `matterm::terminal` model. Scrollback and primary/alternate modes must remain
 available to library users, not only to a future terminal executable.
+Keep both existing demos' behavior intact; VT/PTY integration belongs in the
+separate `matterm` application. Track implementation progress in `ROADMAP.md`.
+Common types/storage belong in `src/core/`, graphical backends in `src/render/`,
+and terminal emulation/stream parsing in `src/terminal/` and its `vt/` subdirectory.
+The reverse-direction ANSI output backend idea is deferred, not current work.
