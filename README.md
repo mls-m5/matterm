@@ -1,14 +1,22 @@
 # 2026 Terminal Renderer
 
-An interactive cell-grid demo, working toward a terminal emulator. A CPU
-`CellBuffer` supplies a borrowed `RenderFrame` to `SdlBackend`, which draws cell
-backgrounds and atlas glyphs in separate indexed geometry batches. SDL2_ttf
-rasterizes glyphs on cache misses. This is not a terminal yet.
+An interactive scrollback demo, working toward a terminal emulator.
+`TerminalMemory` supplies a borrowed row view through `RenderFrame` to
+`SdlBackend`, which draws cell backgrounds and atlas glyphs in separate indexed
+geometry batches. SDL2_ttf rasterizes glyphs on cache misses. This is not a
+terminal yet.
 
-- Arrow keys move the blinking cursor.
-- Tab cycles underline, bar, and translucent block cursor shapes.
-- Resizing the window rebuilds the temporary demo grid.
-- Escape or closing the window exits.
+The demo retains 256 rows in reusable 16-row blocks, prefills beyond capacity,
+and appends a numbered row every 100 ms. Controls:
+
+- Mouse wheel or Up/Down scroll through history; Page Up/Down scroll by a page.
+- Home jumps to the oldest retained page; End follows new output.
+- Space pauses/resumes output; Tab cycles cursor shapes.
+- The cursor blinks only at the live bottom. Reading history stays anchored as
+  new rows arrive, until the viewed rows are evicted.
+- Resize adjusts the visible row count and clips/fills stored row widths without
+  reflow. Clipped text is not restored when widening again.
+- Escape or closing the window exits. The title shows pause and scroll state.
 
 ## Build and Run
 
@@ -42,8 +50,10 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Without `TEST_FONT_FILE`, CTest runs the font-independent cell view and cell
-buffer tests. Backend tests verify independent rows, cell colors, cursor shapes,
+Without `TEST_FONT_FILE`, CTest runs the font-independent cell view, cell buffer,
+and terminal memory tests. History tests cover exact-capacity eviction, block and
+ring boundaries, aliased input, resize, clear, and repeated wraps against a
+reference queue. Backend tests verify history views, cell colors, cursor shapes,
 cell updates, and complete-frame clearing using framebuffer readback.
 The smoke test uses SDL's dummy video driver and software renderer and verifies
 that glyph pixels reach the framebuffer. It does not validate accelerated GPU
@@ -61,9 +71,27 @@ wrapping or interpreting terminal control characters. Input can be formatted
 `FStringView` cells or UTF-32 text with foreground/background colors; it does not
 decode UTF-8 or handle wide characters yet.
 
-`CellGridView` borrows row descriptors, allowing non-adjacent rows in future
-scrollback storage. A buffer's views reflect cell edits and remain valid until
-resize or destruction. The demo writes text and colored cells through this buffer.
+`CellGridView` borrows row descriptors and supports non-adjacent rows. A
+CellBuffer's views reflect cell edits and remain valid until resize or destruction.
+CellBuffer remains available for scratch surfaces; the demo now reads terminal
+memory directly instead of copying the visible cells into a separate buffer.
+
+## Terminal Memory
+
+`TerminalMemory` stores fixed-width rows in a bounded, block-backed ring.
+Capacity includes all retained rows, both visible and historical. Storage is
+allocated upfront; append reuses a row slot and never shifts surviving cells.
+Each block stores contiguous cells. A partial last block allows exact capacities
+that are not multiples of the block size.
+
+`append()` clips/pads a row, `row(0)` reads the oldest retained row, and
+`view(first, count)` builds only visible row descriptors without copying cells.
+Borrowed views expire on the next `view()` call, mutation, or destruction.
+`clear()` reuses storage. `resizeColumns()` explicitly reallocates and copies
+retained cells, without text reflow; ordinary appends do not allocate row storage.
+The demo owns scroll position separately from the stored history.
+
+This is row storage, not yet a terminal screen model, parser, or text cluster pool.
 
 ## Rendering Boundary
 

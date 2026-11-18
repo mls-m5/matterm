@@ -1,6 +1,7 @@
 #include "cellbuffer.h"
 #include "mls-unit-test/unittest.h"
 #include "sdlbackend.h"
+#include "terminalmemory.h"
 
 #include <SDL.h>
 #include <SDL_ttf.h>
@@ -78,6 +79,24 @@ TEST_CASE("Backend renders independent rows and per-cell backgrounds") {
     EXPECT_EQ(fixture.pixel(w + 1, h + 1), Uint32(0x5a5046));
     EXPECT_EQ(fixture.pixel(w * 3, 1), Uint32(0x0e1116));
     backend.present();
+}
+
+TEST_CASE("Backend renders a history view across ring and block boundaries") {
+    Fixture fixture;
+    TerminalMemory memory(1, 3, 2);
+    memory.append(U" ", {}, {10, 0, 0});
+    memory.append(U" ", {}, {20, 0, 0});
+    memory.append(U" ", {}, {30, 0, 0});
+    memory.append(U" ", {}, {40, 0, 0});
+    fixture.backend->render({memory.view(0, 3), {}});
+    const int h = fixture.backend->cellHeight();
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x140000));
+    EXPECT_EQ(fixture.pixel(0, h), Uint32(0x1e0000));
+    EXPECT_EQ(fixture.pixel(0, h * 2), Uint32(0x280000));
+    fixture.backend->render({memory.view(1, 2), {}});
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x1e0000));
+    EXPECT_EQ(fixture.pixel(0, h), Uint32(0x280000));
+    EXPECT_EQ(fixture.pixel(0, h * 2), Uint32(0x0e1116));
 }
 
 TEST_CASE("Glyph geometry uses the cell foreground color") {
