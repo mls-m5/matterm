@@ -1,8 +1,14 @@
 # 2026 Terminal Renderer
 
-An SDL2 glyph-atlas demo, working toward a terminal emulator. It rasterizes glyphs
-with SDL2_ttf, caches them in one texture, and draws colored text in one indexed
-geometry batch. Escape or closing the window exits. This is not a terminal yet.
+An interactive cell-grid demo, working toward a terminal emulator. A CPU
+`CellBuffer` supplies a borrowed `RenderFrame` to `SdlBackend`, which draws cell
+backgrounds and atlas glyphs in separate indexed geometry batches. SDL2_ttf
+rasterizes glyphs on cache misses. This is not a terminal yet.
+
+- Arrow keys move the blinking cursor.
+- Tab cycles underline, bar, and translucent block cursor shapes.
+- Resizing the window rebuilds the temporary demo grid.
+- Escape or closing the window exits.
 
 ## Build and Run
 
@@ -26,8 +32,8 @@ and reports an error if full; it does not evict glyphs yet.
 ## Tests
 
 Tests use the `mls-unit-test` submodule. Configure with `-DBUILD_TESTING=OFF` for
-an application-only build. To enable the font-dependent atlas tests and a headless
-rendering smoke test, supply a font file:
+an application-only build. To enable font-dependent atlas/backend tests and a
+headless rendering smoke test, supply a font file:
 
 ```sh
 cmake -S . -B build \
@@ -37,7 +43,8 @@ ctest --test-dir build --output-on-failure
 ```
 
 Without `TEST_FONT_FILE`, CTest runs the font-independent cell view and cell
-buffer tests.
+buffer tests. Backend tests verify independent rows, cell colors, cursor shapes,
+cell updates, and complete-frame clearing using framebuffer readback.
 The smoke test uses SDL's dummy video driver and software renderer and verifies
 that glyph pixels reach the framebuffer. It does not validate accelerated GPU
 performance or visual quality on a real display. It can also be run directly:
@@ -56,7 +63,19 @@ decode UTF-8 or handle wide characters yet.
 
 `CellGridView` borrows row descriptors, allowing non-adjacent rows in future
 scrollback storage. A buffer's views reflect cell edits and remain valid until
-resize or destruction. The demo is not connected to the cell buffer yet.
+resize or destruction. The demo writes text and colored cells through this buffer.
+
+## Rendering Boundary
+
+`RenderFrame` borrows the cell view and carries `CursorState`. `RenderBackend`
+exposes `render(frame)` and `present()`. `SdlBackend` owns the SDL renderer and
+atlas; the GUI loop owns the backend and keeps its window alive until after the
+backend is destroyed. Frame views are not retained after rendering.
+
+The SDL backend renders at the drawable's pixel resolution and reports cell
+pixel metrics and how many whole cells fit. It redraws the complete frame,
+including clearing areas outside the grid. Cursor blinking belongs to the app;
+the backend only draws the supplied state, without changing stored cells.
 
 ## Design and Roadmap
 

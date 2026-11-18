@@ -14,9 +14,12 @@ target_compile_features(glyphatlas PUBLIC cxx_std_17)
 target_include_directories(glyphatlas PUBLIC src)
 target_link_libraries(glyphatlas PUBLIC SDL2::SDL2 SDL2_ttf::SDL2_ttf)
 
+add_library(sdlbackend src/sdlbackend.cpp)
+target_link_libraries(sdlbackend PUBLIC glyphatlas)
+
 add_executable(2026-terminal-renderer src/main.cpp)
 target_compile_features(2026-terminal-renderer PRIVATE cxx_std_17)
-target_link_libraries(2026-terminal-renderer PRIVATE glyphatlas)
+target_link_libraries(2026-terminal-renderer PRIVATE cellbuffer sdlbackend)
 
 include(CTest)
 add_subdirectory(lib)

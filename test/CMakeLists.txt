@@ -24,6 +24,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(glyphatlas_test PRIVATE glyphatlas)
 
+    add_executable(sdlbackend_test
+        sdlbackend_test.cpp
+        mls-unit-test/test_main.cpp
+    )
+    target_link_libraries(sdlbackend_test PRIVATE cellbuffer sdlbackend)
+
     set(TEST_FONT_FILE "" CACHE FILEPATH "TrueType font for atlas and rendering tests")
     if(TEST_FONT_FILE)
         if(NOT EXISTS "${TEST_FONT_FILE}")
@@ -32,6 +38,9 @@ if(BUILD_TESTING)
         add_test(NAME glyph_atlas COMMAND glyphatlas_test)
         set_tests_properties(glyph_atlas PROPERTIES
             ENVIRONMENT "GLYPH_TEST_FONT=${TEST_FONT_FILE}")
+        add_test(NAME sdl_backend COMMAND sdlbackend_test)
+        set_tests_properties(sdl_backend PROPERTIES
+            ENVIRONMENT "GLYPH_TEST_FONT=${TEST_FONT_FILE};SDL_VIDEODRIVER=dummy")
         add_test(NAME glyph_render_smoke
             COMMAND 2026-terminal-renderer "${TEST_FONT_FILE}" --smoke-test)
         set_tests_properties(glyph_render_smoke PROPERTIES
