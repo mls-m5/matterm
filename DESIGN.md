@@ -1,7 +1,8 @@
-# Terminal Architecture and Roadmap
+# matterm Architecture and Roadmap
 
 This document records the agreed direction, not a completed implementation.
-The application currently renders a streaming scrollback demo using TerminalMemory,
+The matterm-demo application starts with ASCII branding and a static gradient
+welcome screen. User-triggered streaming and burst output exercise TerminalMemory,
 RenderFrame, and SdlBackend. It draws numbered rows from a block-backed ring directly
 through a borrowed cell view, without a separate visible-cell copy. Mouse wheel
 and keyboard controls navigate history; a blinking cursor is shown at the live
@@ -9,6 +10,23 @@ bottom. ScrollViewport now provides smooth fractional-row navigation and scrollb
 proportions; SdlBackend clips shifted text and draws a right-hand scrollbar.
 CellBuffer remains available as a CPU-only scratch surface. A complete
 terminal screen model, parser, and text cluster pool are not implemented yet.
+
+## Library and Application Boundaries
+
+matterm is the project name. The build-tree target matterm::renderer is the common
+rendering library interface. Keep it usable independently of terminal emulation.
+
+- matterm-demo is a permanent, separate example application. Its welcome artwork,
+  generated rows, and demo controls live under demo/, outside the renderer.
+- The future matterm terminal application will use the same renderer, adding a
+  terminal screen model, VT parser, input encoding, and PTY ownership.
+- A future standalone memory viewer can use a separate adapter to feed cells to
+  the renderer without using the terminal emulator. Current CellGridView borrows
+  same-process storage. Shared-memory/IPC support needs a defined layout, lifetime,
+  and synchronization protocol; it is not implemented.
+
+MATTERM_BUILD_DEMO controls the standalone demo build. With BUILD_TESTING also
+OFF, only the reusable libraries are built. No installable package is provided yet.
 
 ## Responsibilities and Ownership
 
@@ -224,7 +242,10 @@ measurements justify them; no performance target has been verified yet.
 5. Smooth user scrolling, viewport anchoring, and a non-interactive scrollbar
    are implemented, with CPU and framebuffer tests. Optional scrollbar interaction
    and smooth live-output scrolling can be considered separately.
-6. Next, build terminal screen semantics on top of storage (cursor movement,
+6. Branding and the static gradient welcome screen are implemented in the
+   permanent matterm-demo client. S/Space toggles output, B bursts 300 rows, and
+   R restores the welcome screen. Startup is idle, not a continuous stress test.
+7. Next, build terminal screen semantics on top of storage (cursor movement,
    writing/erasing cells, line feed, and scrolling), before ANSI/VT parsing and
    a real shell/PTY. Include independent primary/alternate screen state and
    switching tests for future editors. Measure, then extend Unicode and optimize
