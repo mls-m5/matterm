@@ -1,7 +1,12 @@
-# Agentinstruktioner
+# Agent Instructions
 
-När projektfiler skapas eller ändras, uppdatera `.2026-terminal-renderer.files` så att den innehåller filerna som ingår i projektet. Lägg till nya projektfiler där; ta bort poster när filer tas bort.
+When creating or modifying project files, update `.2026-terminal-renderer.files`
+to reflect the files in the project. Add new project files and remove entries
+for deleted files.
 
-Committa efter varje större, sammanhängande ändring. Ta inte med orelaterade lokala ändringar.
+Commit after each significant, coherent change. Do not include unrelated local
+changes.
 
-Skriv enhetstester med ramverket i `test/mls-unit-test`.
+Write unit tests using the framework in `test/mls-unit-test`.
+
+Write project documentation in English.
