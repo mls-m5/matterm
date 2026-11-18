@@ -5,11 +5,14 @@
 #include <SDL.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <vector>
 
 namespace {
+constexpr int scrollbarWidth = 12;
+
 void check(int result) {
     if (result < 0) {
         throw std::runtime_error(SDL_GetError());
@@ -112,12 +115,29 @@ void SdlBackend::render(const RenderFrame &frame) {
     auto &s = *impl_;
     int width, height;
     check(SDL_GetRendererOutputSize(s.renderer.get(), &width, &height));
-    const auto columns =
-        std::min(frame.cells.columns(),
-                 std::size_t(width / s.cellWidth + (width % s.cellWidth != 0)));
-    const auto rows = std::min(
-        frame.cells.rows(),
-        std::size_t(height / s.cellHeight + (height % s.cellHeight != 0)));
+    if (!std::isfinite(frame.verticalOffsetPixels) ||
+        frame.verticalOffsetPixels > 0 ||
+        frame.verticalOffsetPixels <= -s.cellHeight ||
+        frame.textHeightPixels < -1 ||
+        (frame.scrollbar.visible && (!std::isfinite(frame.scrollbar.position) ||
+                                     !std::isfinite(frame.scrollbar.size)))) {
+        throw std::invalid_argument("Invalid frame viewport");
+    }
+    const int textWidth =
+        frame.scrollbar.visible ? std::max(0, width - scrollbarWidth) : width;
+    const int textHeight = frame.textHeightPixels < 0
+                               ? height
+                               : std::min(height, frame.textHeightPixels);
+    const auto columns = std::min(
+        frame.cells.columns(),
+        std::size_t(textWidth / s.cellWidth + (textWidth % s.cellWidth != 0)));
+    const auto rows =
+        textHeight == 0
+            ? std::size_t(0)
+            : std::min(frame.cells.rows(),
+                       std::size_t(std::ceil(
+                           (double(textHeight) - frame.verticalOffsetPixels) /
+                           s.cellHeight)));
     s.backgrounds.clear();
     s.glyphs.clear();
 
@@ -134,7 +154,8 @@ void SdlBackend::render(const RenderFrame &frame) {
         for (std::size_t x = 0; x < columns; ++x) {
             const auto &cell = row.data()[x];
             const float left = float(x) * s.cellWidth;
-            const float top = float(y) * s.cellHeight;
+            const float top =
+                float(y) * s.cellHeight + frame.verticalOffsetPixels;
             s.backgrounds.quad(
                 left,
                 top,
@@ -159,6 +180,15 @@ void SdlBackend::render(const RenderFrame &frame) {
     }
     check(SDL_SetRenderDrawColor(s.renderer.get(), 14, 17, 22, 255));
     check(SDL_RenderClear(s.renderer.get()));
+    const SDL_Rect textClip{0, 0, textWidth, textHeight};
+    check(SDL_RenderSetClipRect(s.renderer.get(), &textClip));
+    // Restore clipping even if a draw fails. The backend owns the renderer.
+    struct ClipReset {
+        SDL_Renderer *renderer;
+        ~ClipReset() {
+            SDL_RenderSetClipRect(renderer, nullptr);
+        }
+    } clipReset{s.renderer.get()};
     s.backgrounds.draw(*s.renderer, nullptr);
     s.glyphs.draw(*s.renderer, s.atlas.texture());
 
@@ -167,7 +197,8 @@ void SdlBackend::render(const RenderFrame &frame) {
         std::size_t(cursor.column) < columns &&
         std::size_t(cursor.row) < rows) {
         SDL_FRect rect{float(cursor.column) * s.cellWidth,
-                       float(cursor.row) * s.cellHeight,
+                       float(cursor.row) * s.cellHeight +
+                           frame.verticalOffsetPixels,
                        float(s.cellWidth),
                        float(s.cellHeight)};
         Uint8 alpha = 255;
@@ -192,6 +223,25 @@ void SdlBackend::render(const RenderFrame &frame) {
         check(SDL_RenderFillRectF(s.renderer.get(), &rect));
         check(SDL_SetRenderDrawBlendMode(s.renderer.get(), SDL_BLENDMODE_NONE));
     }
+    check(SDL_RenderSetClipRect(s.renderer.get(), nullptr));
+    if (frame.scrollbar.visible && width > 0 && height > 0) {
+        const int stripWidth = width - textWidth;
+        const SDL_Rect track{textWidth, 0, stripWidth, height};
+        check(SDL_SetRenderDrawColor(s.renderer.get(), 25, 29, 36, 255));
+        check(SDL_RenderFillRect(s.renderer.get(), &track));
+        const float thumbHeight = std::clamp(
+            float(height) * std::clamp(frame.scrollbar.size, 0.0f, 1.0f),
+            float(std::min(16, height)),
+            float(height));
+        const float thumbY = std::clamp(frame.scrollbar.position, 0.0f, 1.0f) *
+                             (height - thumbHeight);
+        const SDL_FRect thumb{float(textWidth + 2),
+                              thumbY,
+                              float(std::max(0, stripWidth - 4)),
+                              thumbHeight};
+        check(SDL_SetRenderDrawColor(s.renderer.get(), 110, 122, 142, 255));
+        check(SDL_RenderFillRectF(s.renderer.get(), &thumb));
+    }
 }
 
 void SdlBackend::present() {
@@ -203,10 +253,11 @@ int SdlBackend::cellWidth() const noexcept {
 int SdlBackend::cellHeight() const noexcept {
     return impl_->cellHeight;
 }
-int SdlBackend::columns() const {
+int SdlBackend::columns(bool scrollbarVisible) const {
     int width, height;
     check(SDL_GetRendererOutputSize(impl_->renderer.get(), &width, &height));
-    return width / cellWidth();
+    return (scrollbarVisible ? std::max(0, width - scrollbarWidth) : width) /
+           cellWidth();
 }
 int SdlBackend::rows() const {
     int width, height;

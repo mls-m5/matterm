@@ -28,7 +28,8 @@ public:
     // Drawable-pixel metrics; placement in RenderFrame is always in cells.
     int cellWidth() const noexcept;
     int cellHeight() const noexcept;
-    int columns() const;
+    // Reserve the scrollbar strip when computing text width if requested.
+    int columns(bool scrollbarVisible = false) const;
     int rows() const;
     const char *rendererName() const noexcept;
 

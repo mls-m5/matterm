@@ -25,6 +25,13 @@ if(BUILD_TESTING)
     target_link_libraries(terminalmemory_test PRIVATE terminalmemory)
     add_test(NAME terminal_memory COMMAND terminalmemory_test)
 
+    add_executable(scrollviewport_test
+        scrollviewport_test.cpp
+        mls-unit-test/test_main.cpp
+    )
+    target_link_libraries(scrollviewport_test PRIVATE terminalmemory)
+    add_test(NAME scroll_viewport COMMAND scrollviewport_test)
+
     add_executable(glyphatlas_test
         glyphatlas_test.cpp
         mls-unit-test/test_main.cpp

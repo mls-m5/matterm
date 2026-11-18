@@ -9,9 +9,12 @@ terminal yet.
 The demo retains 256 rows in reusable 16-row blocks, prefills beyond capacity,
 and appends a numbered row every 100 ms. Controls:
 
-- Mouse wheel or Up/Down scroll through history; Page Up/Down scroll by a page.
+- Mouse wheel or Up/Down scroll smoothly through history; Page Up/Down scroll by
+  a page. Fractional wheel input is preserved for trackpads.
 - Home jumps to the oldest retained page; End follows new output.
 - Space pauses/resumes output; Tab cycles cursor shapes.
+- A simple scrollbar on the right indicates the visible fraction and position;
+  it is not clickable or draggable yet.
 - The cursor blinks only at the live bottom. Reading history stays anchored as
   new rows arrive, until the viewed rows are evicted.
 - Resize adjusts the visible row count and clips/fills stored row widths without
@@ -51,9 +54,11 @@ ctest --test-dir build --output-on-failure
 ```
 
 Without `TEST_FONT_FILE`, CTest runs the font-independent cell view, cell buffer,
-and terminal memory tests. History tests cover exact-capacity eviction, block and
+terminal memory, and scroll viewport tests. History tests cover exact-capacity eviction, block and
 ring boundaries, aliased input, resize, clear, and repeated wraps against a
-reference queue. Backend tests verify history views, cell colors, cursor shapes,
+reference queue. Viewport tests cover fractional offsets, animation convergence,
+frame-rate independence, and anchoring during output/eviction. Backend tests verify
+history views, cell colors, cursor shapes, fractional clipping, scrollbar geometry,
 cell updates, and complete-frame clearing using framebuffer readback.
 The smoke test uses SDL's dummy video driver and software renderer and verifies
 that glyph pixels reach the framebuffer. It does not validate accelerated GPU
@@ -104,6 +109,19 @@ The SDL backend renders at the drawable's pixel resolution and reports cell
 pixel metrics and how many whole cells fit. It redraws the complete frame,
 including clearing areas outside the grid. Cursor blinking belongs to the app;
 the backend only draws the supplied state, without changing stored cells.
+
+`ScrollViewport` separates the desired and displayed offsets in fractional rows,
+using frame-rate-independent easing. `RenderFrame` supplies a negative pixel
+offset, an extra partially visible row, text clip height, and scrollbar proportions.
+The SDL backend clips text/cursor drawing and reserves a 12-pixel scrollbar strip
+when requested; `columns(true)` accounts for that strip. The demo uses a whole-cell
+text height, leaving any remainder pixels below the text clear. Live output still
+advances by whole rows; smooth animation currently applies to user navigation.
+
+Alternate-screen support for editors is planned, not implemented. The future
+terminal model will preserve primary history, cursor, and viewport while showing
+a separate screen-sized buffer without scrollback. The renderer needs no special
+mode: the model supplies the active cell view and can hide the scrollbar.
 
 ## Design and Roadmap
 

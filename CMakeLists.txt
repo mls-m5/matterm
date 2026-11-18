@@ -9,7 +9,7 @@ add_library(cellbuffer src/cellbuffer.cpp)
 target_compile_features(cellbuffer PUBLIC cxx_std_17)
 target_include_directories(cellbuffer PUBLIC src)
 
-add_library(terminalmemory src/terminalmemory.cpp)
+add_library(terminalmemory src/terminalmemory.cpp src/scrollviewport.cpp)
 target_compile_features(terminalmemory PUBLIC cxx_std_17)
 target_include_directories(terminalmemory PUBLIC src)
 
