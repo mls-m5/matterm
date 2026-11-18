@@ -18,6 +18,13 @@ if(BUILD_TESTING)
     target_link_libraries(cellbuffer_test PRIVATE cellbuffer)
     add_test(NAME cell_buffer COMMAND cellbuffer_test)
 
+    add_executable(terminalmemory_test
+        terminalmemory_test.cpp
+        mls-unit-test/test_main.cpp
+    )
+    target_link_libraries(terminalmemory_test PRIVATE terminalmemory)
+    add_test(NAME terminal_memory COMMAND terminalmemory_test)
+
     add_executable(glyphatlas_test
         glyphatlas_test.cpp
         mls-unit-test/test_main.cpp
@@ -28,7 +35,7 @@ if(BUILD_TESTING)
         sdlbackend_test.cpp
         mls-unit-test/test_main.cpp
     )
-    target_link_libraries(sdlbackend_test PRIVATE cellbuffer sdlbackend)
+    target_link_libraries(sdlbackend_test PRIVATE cellbuffer terminalmemory sdlbackend)
 
     set(TEST_FONT_FILE "" CACHE FILEPATH "TrueType font for atlas and rendering tests")
     if(TEST_FONT_FILE)

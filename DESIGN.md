@@ -1,12 +1,12 @@
 # Terminal Architecture and Roadmap
 
 This document records the agreed direction, not a completed implementation.
-The application currently renders an interactive cell-grid demo using CellBuffer,
-RenderFrame, and SdlBackend. It draws colored backgrounds and atlas glyphs in
-separate batches and overlays a movable, blinking cursor. A CPU-only CellBuffer
-supports clipped text placement, clearing, checked access, and resize.
-CellGridView borrows rows rather than requiring contiguous storage across the
-screen. The old MatrixRenderer pseudocode has been removed.
+The application currently renders a streaming scrollback demo using TerminalMemory,
+RenderFrame, and SdlBackend. It draws numbered rows from a block-backed ring directly
+through a borrowed cell view, without a separate visible-cell copy. Mouse wheel
+and keyboard controls navigate history; a blinking cursor is shown at the live
+bottom. CellBuffer remains available as a CPU-only scratch surface. A complete
+terminal screen model, parser, and text cluster pool are not implemented yet.
 
 ## Responsibilities and Ownership
 
@@ -46,18 +46,29 @@ and full Unicode handling separately.
 
 ## Terminal Memory and Scrollback
 
-Use a ring structure of row blocks, with contiguous cells within each block.
-The block size is a later decision; 64 rows is an example starting point to
-measure. Dropping old rows advances the start position and reuses retired blocks
-rather than shifting all remaining cells. Bound scrollback to keep memory usage
-predictable.
+TerminalMemory now uses a fixed-capacity ring of physical row slots backed by
+blocks, with contiguous cells within each block. Blocks are allocated upfront;
+rows and eventually whole blocks are overwritten in ring order without shifting
+surviving cells. A partial final block keeps capacity exact. The configurable
+block size defaults to 64 rows; the demo uses 16-row blocks and retains 256 rows
+in total. These sizes are starting points, not measured optima.
 
 A visible cell view should expose one row at a time. Each row is contiguous,
 but different rows need not be adjacent. The backend interface must not require
 a single contiguous vector for the entire screen. A view must also be able to
 start inside scrollback and cross the ring buffer's wraparound point.
 
-Resize, line wrapping/reflow, and history details remain open questions.
+Current width resize clips or pads each retained row, preserving chronological
+order and colors but not reflowing text. It explicitly reallocates and copies
+retained cells; failure preserves the original storage. Height only changes the
+visible slice. Reflow and terminal screen semantics remain open questions.
+
+view(first, count) rebuilds only a bounded list of borrowed row descriptors,
+clipping count to retained rows. Descriptors expire on the next view call,
+mutation, or destruction; backends consume them synchronously. The demo tracks
+scroll offset independently. Zero offset follows output; a historical offset is
+advanced on append to keep the viewed rows anchored, then clamped when those
+rows are evicted.
 
 ### Possible Future Cluster Reclamation
 
@@ -174,7 +185,10 @@ measurements justify them; no performance target has been verified yet.
    loop. Font-dependent tests cover atlas behavior, cell colors, cursor shapes,
    cell updates, and empty frames. The interactive demo is temporary, not a
    terminal input or parsing implementation.
-4. Implement terminal memory's row blocks/ring buffer and test wraparound,
-   eviction of old rows, and visible views crossing block boundaries. Connect
-   it to rendering.
-5. Measure, then extend with terminal parsing, Unicode, and optimizations.
+4. TerminalMemory's block-backed ring, eviction, width resize, and borrowed views
+   are implemented and tested, including comparison with a reference queue across
+   repeated wraps. The streaming demo exercises scrollback and bounded retention;
+   backend tests render views crossing block and ring boundaries.
+5. Next, build terminal screen semantics on top of storage (cursor movement,
+   writing/erasing cells, line feed, and scrolling), before ANSI/VT parsing and
+   a real shell/PTY. Measure, then extend Unicode and optimize where justified.

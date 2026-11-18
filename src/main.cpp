@@ -1,67 +1,27 @@
-#include "cellbuffer.h"
 #include "sdlbackend.h"
+#include "terminalmemory.h"
 
 #include <SDL.h>
 #include <SDL_ttf.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace {
-void paintDemo(CellBuffer &buffer) {
-    const Rgb8 background{14, 17, 22};
-    buffer.clear(FChar{U' ', {220, 225, 245}, background});
-    buffer.draw(1,
-                0,
-                U"CellBuffer -> RenderFrame -> SdlBackend",
-                {120, 220, 170},
-                background);
-    buffer.draw(1,
-                2,
-                U"A temporary cell-grid demo, not a terminal yet.",
-                {220, 225, 245},
-                background);
-    buffer.draw(1,
-                4,
-                U"ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789",
-                {240, 200, 110},
-                background);
-    buffer.draw(1,
-                5,
-                U"Baseline: Agjpqy  Accents: ÅÄÖ åäö éèü",
-                {160, 180, 250},
-                background);
-    buffer.draw(1,
-                7,
-                U"Each cell has its own foreground and background.",
-                {220, 225, 245},
-                background);
-    for (int x = 1; x < 40; ++x) {
-        buffer.draw(x,
-                    9,
-                    U" ",
-                    {255, 255, 255},
-                    {Uint8(40 + x * 4), Uint8(40 + x * 2), Uint8(160 - x * 2)});
-    }
-    buffer.draw(1,
-                11,
-                U"Arrows: move cursor   Tab: cursor shape",
-                {120, 220, 170},
-                background);
-    buffer.draw(1,
-                12,
-                U"Resize: redraw grid   Escape: exit",
-                {120, 220, 170},
-                background);
-    buffer.draw(1,
-                14,
-                U"The marker blinks without changing stored cells.",
-                {180, 185, 200},
-                background);
+void appendDemoRow(TerminalMemory &memory, std::uint64_t number) {
+    const auto label = std::to_string(number);
+    std::u32string text = U"Row ";
+    text.append(label.begin(), label.end());
+    text += U" | block-ring scrollback | Agjpqy ÅÄÖ åäö";
+    const Rgb8 foreground =
+        number % 2 ? Rgb8{120, 220, 170} : Rgb8{220, 225, 245};
+    memory.append(text, foreground, {14, 17, 22});
 }
 
 void verifyGlyphPixels(SDL_Window &window, const SdlBackend &backend) {
@@ -106,36 +66,74 @@ int run(const char *fontPath, bool smokeTest) {
     }
     SdlBackend backend(*window, fontPath, 24, smokeTest);
     std::cout << "SDL renderer: " << backend.rendererName() << '\n';
-    CellBuffer buffer(std::size_t(backend.columns()),
-                      std::size_t(backend.rows()));
-    paintDemo(buffer);
+    TerminalMemory memory(std::size_t(backend.columns()), 256, 16);
+    std::uint64_t nextRow = 1;
+    // Start beyond capacity so wraparound and eviction are exercised
+    // immediately.
+    for (int i = 0; i < 300; ++i) {
+        appendDemoRow(memory, nextRow++);
+    }
+    std::size_t scrollOffset =
+        0; // Rows above the live bottom; zero follows output.
+    bool paused = false;
     CursorState cursor;
-    cursor.column = 2;
-    cursor.row = 16;
     cursor.color = {120, 220, 170};
+    Uint64 lastAppend = SDL_GetTicks64();
     bool running = true;
     while (running) {
+        const auto columns = std::size_t(backend.columns());
+        const auto rows = std::size_t(backend.rows());
+        memory.resizeColumns(columns);
+        const auto maxScroll = memory.size() - std::min(memory.size(), rows);
+        scrollOffset = std::min(scrollOffset, maxScroll);
+        const auto scrollUp = [&](std::size_t amount) {
+            scrollOffset += std::min(amount, maxScroll - scrollOffset);
+        };
+        const auto scrollDown = [&](std::size_t amount) {
+            scrollOffset -= std::min(amount, scrollOffset);
+        };
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
                 running = false;
+            }
+            else if (event.type == SDL_MOUSEWHEEL) {
+                std::int64_t amount = event.wheel.y;
+                if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) {
+                    amount = -amount;
+                }
+                if (amount > 0) {
+                    scrollUp(std::size_t(amount) * 3);
+                }
+                else {
+                    scrollDown(std::size_t(-amount) * 3);
+                }
             }
             else if (event.type == SDL_KEYDOWN) {
                 switch (event.key.keysym.sym) {
                 case SDLK_ESCAPE:
                     running = false;
                     break;
-                case SDLK_LEFT:
-                    --cursor.column;
-                    break;
-                case SDLK_RIGHT:
-                    ++cursor.column;
-                    break;
                 case SDLK_UP:
-                    --cursor.row;
+                    scrollUp(1);
                     break;
                 case SDLK_DOWN:
-                    ++cursor.row;
+                    scrollDown(1);
+                    break;
+                case SDLK_PAGEUP:
+                    scrollUp(std::max<std::size_t>(1, rows));
+                    break;
+                case SDLK_PAGEDOWN:
+                    scrollDown(std::max<std::size_t>(1, rows));
+                    break;
+                case SDLK_HOME:
+                    scrollOffset = maxScroll;
+                    break;
+                case SDLK_END:
+                    scrollOffset = 0;
+                    break;
+                case SDLK_SPACE:
+                    paused = !paused;
                     break;
                 case SDLK_TAB:
                     cursor.shape = cursor.shape == CursorState::Shape::Underline
@@ -152,17 +150,31 @@ int run(const char *fontPath, bool smokeTest) {
         if (!running) {
             break;
         }
-        const auto columns = std::size_t(backend.columns());
-        const auto rows = std::size_t(backend.rows());
-        if (columns != buffer.columns() || rows != buffer.rows()) {
-            buffer.resize(columns, rows);
-            paintDemo(buffer);
+        const Uint64 now = SDL_GetTicks64();
+        if (!paused && !smokeTest && now - lastAppend >= 100) {
+            appendDemoRow(memory, nextRow++);
+            // Preserve the viewed rows while reading history. Once those rows
+            // are evicted, clamp to the oldest remaining page.
+            if (scrollOffset != 0) {
+                ++scrollOffset;
+            }
+            lastAppend = now;
         }
-        cursor.column =
-            std::clamp(cursor.column, 0, std::max(0, int(columns) - 1));
-        cursor.row = std::clamp(cursor.row, 0, std::max(0, int(rows) - 1));
-        cursor.visible = smokeTest || (SDL_GetTicks64() / 500) % 2 == 0;
-        const RenderFrame frame{buffer.view(), cursor};
+        const auto visibleCount = std::min(memory.size(), rows);
+        scrollOffset = std::min(scrollOffset, memory.size() - visibleCount);
+        const auto first = memory.size() - visibleCount - scrollOffset;
+        cursor.column = std::min(4, std::max(0, int(columns) - 1));
+        cursor.row = std::max(0, int(visibleCount) - 1);
+        cursor.visible =
+            scrollOffset == 0 && visibleCount != 0 && (now / 500) % 2 == 0;
+        const auto title = std::string("Scrollback demo | wheel/PgUp/PgDn | "
+                                       "Home/End | Space: pause | ") +
+                           (paused ? "paused" : "streaming") + " | offset " +
+                           std::to_string(scrollOffset) + " | retained " +
+                           std::to_string(memory.size()) + "/" +
+                           std::to_string(memory.capacity());
+        SDL_SetWindowTitle(window.get(), title.c_str());
+        const RenderFrame frame{memory.view(first, visibleCount), cursor};
         backend.render(frame);
         if (smokeTest) {
             verifyGlyphPixels(*window, backend);

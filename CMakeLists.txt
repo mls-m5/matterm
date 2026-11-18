@@ -9,6 +9,10 @@ add_library(cellbuffer src/cellbuffer.cpp)
 target_compile_features(cellbuffer PUBLIC cxx_std_17)
 target_include_directories(cellbuffer PUBLIC src)
 
+add_library(terminalmemory src/terminalmemory.cpp)
+target_compile_features(terminalmemory PUBLIC cxx_std_17)
+target_include_directories(terminalmemory PUBLIC src)
+
 add_library(glyphatlas src/glyphatlas.cpp)
 target_compile_features(glyphatlas PUBLIC cxx_std_17)
 target_include_directories(glyphatlas PUBLIC src)
@@ -19,7 +23,7 @@ target_link_libraries(sdlbackend PUBLIC glyphatlas)
 
 add_executable(2026-terminal-renderer src/main.cpp)
 target_compile_features(2026-terminal-renderer PRIVATE cxx_std_17)
-target_link_libraries(2026-terminal-renderer PRIVATE cellbuffer sdlbackend)
+target_link_libraries(2026-terminal-renderer PRIVATE terminalmemory sdlbackend)
 
 include(CTest)
 add_subdirectory(lib)
