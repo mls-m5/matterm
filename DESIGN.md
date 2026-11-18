@@ -110,9 +110,36 @@ needed initially.
 
 ## Rendering and Performance
 
-Start with OpenGL 3.3, a glyph atlas, and instanced quads. Aim for few draw calls,
-for example one background pass and one glyph pass, not one call per cell.
+Start with SDL2's accelerated renderer and SDL_RenderGeometry (SDL >= 2.0.18).
+Use a glyph atlas and batched indexed quads, for example one background pass and
+one glyph pass, not one call per cell. Check which renderer backend SDL selects.
+This path uses SDL_RenderPresent, not an application-owned OpenGL context.
+A direct OpenGL backend with instanced quads remains a future alternative.
 Atlas positions and glyph indices are backend details and must not live in FChar.
+
+### Initial Glyph Atlas
+
+The interface draft is in src/glyphatlas.h, with per-glyph metrics in src/glyph.h.
+It is an SDL-specific backend resource, not a shared terminal model abstraction.
+Use SDL2_ttf initially, with its 32-bit code point APIs (SDL2_ttf >= 2.0.18).
+Rasterize on cache misses and upload into one fixed-size texture. Cache white
+coverage glyphs and apply foreground colors through geometry vertex colors.
+Store bearings and advance as well as atlas rectangles; place glyphs relative to
+a shared baseline. Spaces can have metrics without visible bitmap pixels.
+Gather glyphs before submitting geometry to avoid uploads interleaved with draws.
+
+The first cache has no eviction: report a full atlas explicitly. This keeps
+returned rectangles stable. Font size and face are fixed per atlas; changing
+either requires a new atlas and rebuilding geometry. A fallback font or shaped
+glyph cache will need a richer key than a Unicode code point.
+
+Later, a bounded cache could track the last frame each entry was used. Do not
+reuse a rectangle referenced by the current frame or queued rendering commands.
+Collect and protect the visible working set before evicting entries, and rebuild
+any geometry that refers to reused slots. Age is a replacement policy, not by
+itself a lifetime guarantee. If the visible working set exceeds capacity, eviction
+alone cannot solve the problem; more atlas pages or explicit failure is needed.
+Glyph atlas eviction is independent of terminal text cluster reclamation.
 
 Each render call draws a complete frame. After a buffer swap, do not assume that
 the next back buffer contains the previous image. Partial GPU uploads are distinct
@@ -130,8 +157,9 @@ measurements justify them; no performance target has been verified yet.
    with cursor state, and RenderBackend. No cluster allocation or GC yet.
 2. Implement a small cell buffer with text placement and tests using
    test/mls-unit-test. Keep the storage boundary compatible with row blocks.
-3. Draw a static ASCII grid and a cursor using the OpenGL backend and an atlas.
-   Let the backend handle presentation too; the GUI loop owns it.
+3. Implement the SDL2_ttf atlas, then draw a static ASCII grid and a cursor using
+   the SDL backend and batched geometry. Let the backend handle presentation too;
+   the GUI loop owns it. Test glyph metrics, cache hits, and full-atlas handling.
 4. Implement terminal memory's row blocks/ring buffer and test wraparound,
    eviction of old rows, and visible views crossing block boundaries. Connect
    it to rendering.
