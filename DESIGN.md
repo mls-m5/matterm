@@ -5,7 +5,9 @@ The application currently renders a streaming scrollback demo using TerminalMemo
 RenderFrame, and SdlBackend. It draws numbered rows from a block-backed ring directly
 through a borrowed cell view, without a separate visible-cell copy. Mouse wheel
 and keyboard controls navigate history; a blinking cursor is shown at the live
-bottom. CellBuffer remains available as a CPU-only scratch surface. A complete
+bottom. ScrollViewport now provides smooth fractional-row navigation and scrollbar
+proportions; SdlBackend clips shifted text and draws a right-hand scrollbar.
+CellBuffer remains available as a CPU-only scratch surface. A complete
 terminal screen model, parser, and text cluster pool are not implemented yet.
 
 ## Responsibilities and Ownership
@@ -116,14 +118,44 @@ appropriate cluster lookup.
 The backend handles cell pixel dimensions, drawable size, and HiDPI. SdlBackend
 currently exposes cellWidth/cellHeight in drawable pixels and columns/rows for
 the number of whole cells that fit. The shared metrics API remains a later
-decision. Sub-cell scrolling could eventually use a pixel offset; it is not
-needed initially.
+decision. RenderFrame now includes verticalOffsetPixels in (-cellHeight, 0],
+textHeightPixels (-1 means full drawable), and normalized ScrollbarState.
+Supply the partially visible extra row when the offset is fractional.
+SdlBackend clips all text and cursor geometry to the text viewport, then draws
+the scrollbar outside that clip. columns(true) reserves the 12-pixel sidebar.
+The scrollbar currently indicates position only; it has a minimum thumb height
+and does not handle clicking or dragging.
+
+ScrollViewport keeps target and displayed offsets in fractional rows above the
+live bottom. advance(seconds) applies exponential easing with a 70 ms time
+constant and snaps near the destination. Mouse wheel preciseY values are retained.
+When the target is historical, new output shifts both offsets to preserve content,
+clamping at eviction boundaries. A zero target continues easing to the live bottom
+without being pushed away again by each arriving row. The demo's
+text viewport is a whole number of rows. Streaming output itself still advances
+by whole rows; fractional animation currently applies to user navigation.
 
 - A future OpenGlBackend will use direct OpenGL calls and SDL_GL_SwapWindow.
 - SdlBackend uses SDL_Renderer and SDL_RenderPresent, owning its renderer and atlas.
   The window is borrowed from the GUI loop.
 - These are alternative rendering paths, not mixed renderers in the same window.
   Construction and switching must respect each backend's graphics resource lifetime.
+
+## Planned Primary and Alternate Screens
+
+The future terminal model, not the backend, will own screen switching:
+
+- Primary screen: visible cells plus bounded scrollback, with its own cursor
+  and viewport state.
+- Alternate screen: a separate screen-sized buffer without normal scrollback.
+- Switching back restores the primary state; alternate writes must not mutate
+  primary history. Cursor save/restore and clearing behavior depend on the VT
+  sequence (for example, DEC private mode 1049) and need explicit parser tests.
+
+RenderFrame stays mode-independent: submit the active cell view and cursor,
+zero pixel offset for a fixed alternate screen, and optionally hide its scrollbar.
+Do not conflate this mode with the keyboard's Alt modifier. Alternate-screen
+storage, switching, and VT parsing are not implemented yet.
 
 ## Rendering and Performance
 
@@ -189,6 +221,11 @@ measurements justify them; no performance target has been verified yet.
    are implemented and tested, including comparison with a reference queue across
    repeated wraps. The streaming demo exercises scrollback and bounded retention;
    backend tests render views crossing block and ring boundaries.
-5. Next, build terminal screen semantics on top of storage (cursor movement,
+5. Smooth user scrolling, viewport anchoring, and a non-interactive scrollbar
+   are implemented, with CPU and framebuffer tests. Optional scrollbar interaction
+   and smooth live-output scrolling can be considered separately.
+6. Next, build terminal screen semantics on top of storage (cursor movement,
    writing/erasing cells, line feed, and scrolling), before ANSI/VT parsing and
-   a real shell/PTY. Measure, then extend Unicode and optimize where justified.
+   a real shell/PTY. Include independent primary/alternate screen state and
+   switching tests for future editors. Measure, then extend Unicode and optimize
+   where justified.

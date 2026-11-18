@@ -1,3 +1,4 @@
+#include "scrollviewport.h"
 #include "sdlbackend.h"
 #include "terminalmemory.h"
 
@@ -66,48 +67,38 @@ int run(const char *fontPath, bool smokeTest) {
     }
     SdlBackend backend(*window, fontPath, 24, smokeTest);
     std::cout << "SDL renderer: " << backend.rendererName() << '\n';
-    TerminalMemory memory(std::size_t(backend.columns()), 256, 16);
+    TerminalMemory memory(std::size_t(backend.columns(true)), 256, 16);
     std::uint64_t nextRow = 1;
     // Start beyond capacity so wraparound and eviction are exercised
     // immediately.
     for (int i = 0; i < 300; ++i) {
         appendDemoRow(memory, nextRow++);
     }
-    std::size_t scrollOffset =
-        0; // Rows above the live bottom; zero follows output.
+    ScrollViewport viewport;
+    viewport.setGeometry(memory.size(), std::size_t(backend.rows()));
     bool paused = false;
     CursorState cursor;
     cursor.color = {120, 220, 170};
     Uint64 lastAppend = SDL_GetTicks64();
+    Uint64 lastFrame = lastAppend;
     bool running = true;
     while (running) {
-        const auto columns = std::size_t(backend.columns());
+        const auto columns = std::size_t(backend.columns(true));
         const auto rows = std::size_t(backend.rows());
         memory.resizeColumns(columns);
-        const auto maxScroll = memory.size() - std::min(memory.size(), rows);
-        scrollOffset = std::min(scrollOffset, maxScroll);
-        const auto scrollUp = [&](std::size_t amount) {
-            scrollOffset += std::min(amount, maxScroll - scrollOffset);
-        };
-        const auto scrollDown = [&](std::size_t amount) {
-            scrollOffset -= std::min(amount, scrollOffset);
-        };
+        viewport.setGeometry(memory.size(), rows);
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
                 running = false;
             }
             else if (event.type == SDL_MOUSEWHEEL) {
-                std::int64_t amount = event.wheel.y;
+                double amount = event.wheel.preciseY != 0 ? event.wheel.preciseY
+                                                          : event.wheel.y;
                 if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) {
                     amount = -amount;
                 }
-                if (amount > 0) {
-                    scrollUp(std::size_t(amount) * 3);
-                }
-                else {
-                    scrollDown(std::size_t(-amount) * 3);
-                }
+                viewport.scrollBy(amount * 3.0);
             }
             else if (event.type == SDL_KEYDOWN) {
                 switch (event.key.keysym.sym) {
@@ -115,22 +106,22 @@ int run(const char *fontPath, bool smokeTest) {
                     running = false;
                     break;
                 case SDLK_UP:
-                    scrollUp(1);
+                    viewport.scrollBy(1);
                     break;
                 case SDLK_DOWN:
-                    scrollDown(1);
+                    viewport.scrollBy(-1);
                     break;
                 case SDLK_PAGEUP:
-                    scrollUp(std::max<std::size_t>(1, rows));
+                    viewport.scrollBy(double(std::max<std::size_t>(1, rows)));
                     break;
                 case SDLK_PAGEDOWN:
-                    scrollDown(std::max<std::size_t>(1, rows));
+                    viewport.scrollBy(-double(std::max<std::size_t>(1, rows)));
                     break;
                 case SDLK_HOME:
-                    scrollOffset = maxScroll;
+                    viewport.oldest();
                     break;
                 case SDLK_END:
-                    scrollOffset = 0;
+                    viewport.followTail();
                     break;
                 case SDLK_SPACE:
                     paused = !paused;
@@ -153,28 +144,27 @@ int run(const char *fontPath, bool smokeTest) {
         const Uint64 now = SDL_GetTicks64();
         if (!paused && !smokeTest && now - lastAppend >= 100) {
             appendDemoRow(memory, nextRow++);
-            // Preserve the viewed rows while reading history. Once those rows
-            // are evicted, clamp to the oldest remaining page.
-            if (scrollOffset != 0) {
-                ++scrollOffset;
-            }
+            viewport.rowsAppended(1, memory.size());
             lastAppend = now;
         }
-        const auto visibleCount = std::min(memory.size(), rows);
-        scrollOffset = std::min(scrollOffset, memory.size() - visibleCount);
-        const auto first = memory.size() - visibleCount - scrollOffset;
+        viewport.advance(double(now - lastFrame) / 1000.0);
+        lastFrame = now;
         cursor.column = std::min(4, std::max(0, int(columns) - 1));
-        cursor.row = std::max(0, int(visibleCount) - 1);
-        cursor.visible =
-            scrollOffset == 0 && visibleCount != 0 && (now / 500) % 2 == 0;
+        cursor.row = std::max(0, int(viewport.rowCount()) - 1);
+        cursor.visible = viewport.atTail() && viewport.rowCount() != 0 &&
+                         rows != 0 && (now / 500) % 2 == 0;
         const auto title = std::string("Scrollback demo | wheel/PgUp/PgDn | "
                                        "Home/End | Space: pause | ") +
                            (paused ? "paused" : "streaming") + " | offset " +
-                           std::to_string(scrollOffset) + " | retained " +
+                           std::to_string(viewport.offset()) + " | retained " +
                            std::to_string(memory.size()) + "/" +
                            std::to_string(memory.capacity());
         SDL_SetWindowTitle(window.get(), title.c_str());
-        const RenderFrame frame{memory.view(first, visibleCount), cursor};
+        RenderFrame frame{memory.view(viewport.firstRow(), viewport.rowCount()),
+                          cursor};
+        frame.verticalOffsetPixels = viewport.pixelOffset(backend.cellHeight());
+        frame.textHeightPixels = int(rows) * backend.cellHeight();
+        frame.scrollbar = viewport.scrollbar();
         backend.render(frame);
         if (smokeTest) {
             verifyGlyphPixels(*window, backend);

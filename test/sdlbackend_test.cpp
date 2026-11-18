@@ -99,6 +99,65 @@ TEST_CASE("Backend renders a history view across ring and block boundaries") {
     EXPECT_EQ(fixture.pixel(0, h * 2), Uint32(0x0e1116));
 }
 
+TEST_CASE("Fractional rows are clipped to text bounds and cannot cover the "
+          "scrollbar") {
+    Fixture fixture;
+    CellBuffer cells(40, 4);
+    cells.clear(FChar{U' ', {}, {200, 30, 40}});
+    for (std::size_t x = 0; x < cells.columns(); ++x) {
+        cells.at(x, 1).background = {20, 180, 50};
+    }
+    const int h = fixture.backend->cellHeight();
+    const int shift = h / 2;
+    RenderFrame frame{cells.view(), {}};
+    frame.verticalOffsetPixels = -float(shift);
+    frame.textHeightPixels = h;
+    frame.scrollbar = {true, 1.0f, 0.25f};
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0xc81e28));
+    EXPECT_EQ(fixture.pixel(0, h - shift), Uint32(0x14b432));
+    EXPECT_EQ(fixture.pixel(0, h + 1), Uint32(0x0e1116));
+    EXPECT_EQ(fixture.pixel(312, 1), Uint32(0x191d24));
+    EXPECT_EQ(fixture.pixel(312, 130), Uint32(0x6e7a8e));
+    EXPECT_EQ(fixture.pixel(319, 130), Uint32(0x191d24));
+    frame.scrollbar.position = 0;
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(312, 1), Uint32(0x6e7a8e));
+    EXPECT_EQ(fixture.pixel(312, 130), Uint32(0x191d24));
+    frame.scrollbar.size = 1;
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(312, 130), Uint32(0x6e7a8e));
+    frame.textHeightPixels = 0;
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x0e1116));
+    frame.textHeightPixels = h;
+    frame.scrollbar.visible = false;
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(319, 0), Uint32(0xc81e28));
+}
+
+TEST_CASE(
+    "Pixel offset also moves the cursor and invalid offsets fail cleanly") {
+    Fixture fixture;
+    CellBuffer cells(2, 3);
+    RenderFrame frame{cells.view(), {}};
+    frame.cursor.visible = true;
+    frame.cursor.row = 1;
+    frame.cursor.shape = CursorState::Shape::Bar;
+    frame.cursor.color = {255, 0, 0};
+    const int h = fixture.backend->cellHeight();
+    frame.verticalOffsetPixels = -float(h / 2);
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(0, h - h / 2), Uint32(0xff0000));
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0));
+    frame.verticalOffsetPixels = -float(h);
+    EXPECT_THROW(fixture.backend->render(frame), std::invalid_argument);
+    frame.verticalOffsetPixels = 1;
+    EXPECT_THROW(fixture.backend->render(frame), std::invalid_argument);
+    fixture.backend->render({});
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x0e1116));
+}
+
 TEST_CASE("Glyph geometry uses the cell foreground color") {
     Fixture fixture;
     CellBuffer cells(1, 1);
