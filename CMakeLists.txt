@@ -5,6 +5,10 @@ project(2026-terminal-renderer LANGUAGES CXX)
 find_package(SDL2 2.0.18 REQUIRED)
 find_package(SDL2_ttf 2.0.18 REQUIRED)
 
+add_library(cellbuffer src/cellbuffer.cpp)
+target_compile_features(cellbuffer PUBLIC cxx_std_17)
+target_include_directories(cellbuffer PUBLIC src)
+
 add_library(glyphatlas src/glyphatlas.cpp)
 target_compile_features(glyphatlas PUBLIC cxx_std_17)
 target_include_directories(glyphatlas PUBLIC src)

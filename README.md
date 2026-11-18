@@ -36,7 +36,8 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Without `TEST_FONT_FILE`, CTest runs only the font-independent cell view test.
+Without `TEST_FONT_FILE`, CTest runs the font-independent cell view and cell
+buffer tests.
 The smoke test uses SDL's dummy video driver and software renderer and verifies
 that glyph pixels reach the framebuffer. It does not validate accelerated GPU
 performance or visual quality on a real display. It can also be run directly:
@@ -44,6 +45,18 @@ performance or visual quality on a real display. It can also be run directly:
 ```sh
 SDL_VIDEODRIVER=dummy ./build/2026-terminal-renderer /path/to/font.ttf --smoke-test
 ```
+
+## CPU Cell Buffer
+
+`CellBuffer` provides cell-coordinate text placement, clearing, checked cell
+access, and resize preserving the top-left intersection. Draws clip without
+wrapping or interpreting terminal control characters. Input can be formatted
+`FStringView` cells or UTF-32 text with foreground/background colors; it does not
+decode UTF-8 or handle wide characters yet.
+
+`CellGridView` borrows row descriptors, allowing non-adjacent rows in future
+scrollback storage. A buffer's views reflect cell edits and remain valid until
+resize or destruction. The demo is not connected to the cell buffer yet.
 
 ## Design and Roadmap
 

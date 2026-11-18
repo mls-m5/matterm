@@ -11,6 +11,13 @@ if(BUILD_TESTING)
     target_include_directories(cellgridview_test PRIVATE ../src)
     add_test(NAME cell_grid_view COMMAND cellgridview_test)
 
+    add_executable(cellbuffer_test
+        cellbuffer_test.cpp
+        mls-unit-test/test_main.cpp
+    )
+    target_link_libraries(cellbuffer_test PRIVATE cellbuffer)
+    add_test(NAME cell_buffer COMMAND cellbuffer_test)
+
     add_executable(glyphatlas_test
         glyphatlas_test.cpp
         mls-unit-test/test_main.cpp
