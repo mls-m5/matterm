@@ -1,8 +1,10 @@
 # Terminal Architecture and Roadmap
 
 This document records the agreed direction, not a completed implementation.
-The application currently opens an SDL/OpenGL window and clears its background.
-The headers are early sketches and will be adapted incrementally to this plan.
+The application currently renders a static glyph-atlas demo using SDL2's renderer
+and SDL2_ttf, with colored geometry and a simple underline cursor. The old
+MatrixRenderer pseudocode has been removed. Cell/frame/backend interfaces will
+be adapted incrementally to this plan.
 
 ## Responsibilities and Ownership
 
@@ -119,8 +121,11 @@ Atlas positions and glyph indices are backend details and must not live in FChar
 
 ### Initial Glyph Atlas
 
-The interface draft is in src/glyphatlas.h, with per-glyph metrics in src/glyph.h.
-It is an SDL-specific backend resource, not a shared terminal model abstraction.
+The implementation is in src/glyphatlas.cpp, with its interface in
+src/glyphatlas.h and per-glyph metrics in src/glyph.h. It is an SDL-specific
+backend resource, not a shared terminal model abstraction. Implement an OpenGL
+counterpart separately when needed; extract shared code only when its value is
+clear from both implementations.
 Use SDL2_ttf initially, with its 32-bit code point APIs (SDL2_ttf >= 2.0.18).
 Rasterize on cache misses and upload into one fixed-size texture. Cache white
 coverage glyphs and apply foreground colors through geometry vertex colors.
@@ -157,9 +162,10 @@ measurements justify them; no performance target has been verified yet.
    with cursor state, and RenderBackend. No cluster allocation or GC yet.
 2. Implement a small cell buffer with text placement and tests using
    test/mls-unit-test. Keep the storage boundary compatible with row blocks.
-3. Implement the SDL2_ttf atlas, then draw a static ASCII grid and a cursor using
-   the SDL backend and batched geometry. Let the backend handle presentation too;
-   the GUI loop owns it. Test glyph metrics, cache hits, and full-atlas handling.
+3. Connect the working SDL2_ttf atlas and static geometry demo to the frame and
+   backend interfaces. Move drawing and presentation from the demo loop into
+   the SDL backend; the GUI loop owns it. Preserve the atlas and headless rendering
+   tests. The initial atlas, colored glyph rendering, and cursor demo are complete.
 4. Implement terminal memory's row blocks/ring buffer and test wraparound,
    eviction of old rows, and visible views crossing block boundaries. Connect
    it to rendering.

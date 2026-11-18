@@ -5,7 +5,7 @@
 #include <memory>
 #include <string>
 
-// SDL2/SDL2_ttf backend resource. Interface draft; not implemented yet.
+// SDL2/SDL2_ttf backend resource.
 // Owns one font at one pixel size and one SDL texture. Use only on the
 // renderer's thread, and destroy the atlas before destroying the renderer.
 class GlyphAtlas {
