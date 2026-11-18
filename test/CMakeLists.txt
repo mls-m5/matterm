@@ -25,6 +25,20 @@ if(BUILD_TESTING)
     target_link_libraries(terminalmemory_test PRIVATE terminalmemory)
     add_test(NAME terminal_memory COMMAND terminalmemory_test)
 
+    add_executable(terminalmodel_test
+        terminalmodel_test.cpp
+        mls-unit-test/test_main.cpp
+    )
+    target_link_libraries(terminalmodel_test PRIVATE matterm::terminal)
+    add_test(NAME terminal_model COMMAND terminalmodel_test)
+
+    add_executable(utf8decoder_test
+        utf8decoder_test.cpp
+        mls-unit-test/test_main.cpp
+    )
+    target_link_libraries(utf8decoder_test PRIVATE matterm::terminal)
+    add_test(NAME utf8_decoder COMMAND utf8decoder_test)
+
     add_executable(scrollviewport_test
         scrollviewport_test.cpp
         mls-unit-test/test_main.cpp
@@ -66,6 +80,10 @@ if(BUILD_TESTING)
             add_test(NAME glyph_render_smoke
                 COMMAND matterm-demo "${TEST_FONT_FILE}" --smoke-test)
             set_tests_properties(glyph_render_smoke PROPERTIES
+                ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+            add_test(NAME terminal_model_render_smoke
+                COMMAND matterm-terminal-demo "${TEST_FONT_FILE}" --smoke-test)
+            set_tests_properties(terminal_model_render_smoke PROPERTIES
                 ENVIRONMENT "SDL_VIDEODRIVER=dummy")
         endif()
     else()

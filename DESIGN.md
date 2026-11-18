@@ -8,8 +8,10 @@ through a borrowed cell view, without a separate visible-cell copy. Mouse wheel
 and keyboard controls navigate history; a blinking cursor is shown at the live
 bottom. ScrollViewport now provides smooth fractional-row navigation and scrollbar
 proportions; SdlBackend clips shifted text and draws a right-hand scrollbar.
-CellBuffer remains available as a CPU-only scratch surface. A complete
-terminal screen model, parser, and text cluster pool are not implemented yet.
+CellBuffer remains available as a CPU-only scratch surface. A separate
+matterm-terminal-demo now uses TerminalModel for writing, cursor/erase operations,
+primary history, and an isolated alternate screen. VT parsing, a PTY, and text
+clusters are not implemented yet.
 
 ## Library and Application Boundaries
 
@@ -18,30 +20,33 @@ rendering library interface. Keep it usable independently of terminal emulation.
 
 - matterm-demo is a permanent, separate example application. Its welcome artwork,
   generated rows, and demo controls live under demo/, outside the renderer.
-- The future matterm terminal application will use the same renderer, adding a
-  terminal screen model, VT parser, input encoding, and PTY ownership.
+- matterm::terminal provides the CPU-only TerminalModel. matterm-terminal-demo
+  exercises its direct API and renders through matterm::renderer. It has no shell.
+- The future matterm terminal application will use these same libraries, adding
+  a streaming UTF-8/VT parser, input encoding, and PTY ownership. The parser will
+  call model operations rather than duplicating terminal behavior.
 - A future standalone memory viewer can use a separate adapter to feed cells to
   the renderer without using the terminal emulator. Current CellGridView borrows
   same-process storage. Shared-memory/IPC support needs a defined layout, lifetime,
   and synchronization protocol; it is not implemented.
 
-MATTERM_BUILD_DEMO controls the standalone demo build. With BUILD_TESTING also
+MATTERM_BUILD_DEMO controls both standalone demo builds. With BUILD_TESTING also
 OFF, only the reusable libraries are built. No installable package is provided yet.
 
 ## Responsibilities and Ownership
 
 - The GUI loop owns the rendering backend and keeps its window and context alive.
   Graphics resources must be destroyed before their context, on the right thread.
-- The terminal model handles terminal state, text placement, cursor, scrolling,
-  and eventually UTF-8/ANSI/VT parsing. Text placement uses cells, not pixels.
+- TerminalModel handles screen state, text placement, cursor, erasure, and
+  scrolling. Text placement uses cells, not pixels. A future separate parser
+  decodes UTF-8/ANSI/VT streams into operations on this same model.
 - Terminal memory owns cell rows, scrollback, and eventually the text cluster table.
 - RenderBackend reads a frame description, draws it, and can present the image.
   Each concrete backend owns its atlases and other graphics resources.
 
-CellBuffer currently provides draw(x, y, text) and a cell matrix. It must not
-require a permanent copy of terminal memory. Eventually,
-text placement can write directly to the terminal model, and rendering can read
-its visible rows without an additional complete CPU copy.
+CellBuffer provides draw(x, y, text) for direct matrix clients. TerminalModel
+instead writes directly to its TerminalMemory screen rows and exposes a borrowed
+RenderFrame, without a separate visible-cell copy. Neither API requires the other.
 
 ## Compact Cells and Text Clusters
 
@@ -81,7 +86,9 @@ start inside scrollback and cross the ring buffer's wraparound point.
 Current width resize clips or pads each retained row, preserving chronological
 order and colors but not reflowing text. It explicitly reallocates and copies
 retained cells; failure preserves the original storage. Height only changes the
-visible slice. Reflow and terminal screen semantics remain open questions.
+visible slice in the direct-memory demo. TerminalModel additionally resizes its
+screen: shrinking keeps bottom rows, growing appends blanks, and both buffers
+resize together. Full text reflow remains open.
 
 view(first, count) rebuilds only a bounded list of borrowed row descriptors,
 clipping count to retained rows. Descriptors expire on the next view call,
@@ -159,21 +166,42 @@ by whole rows; fractional animation currently applies to user navigation.
 - These are alternative rendering paths, not mixed renderers in the same window.
   Construction and switching must respect each backend's graphics resource lifetime.
 
-## Planned Primary and Alternate Screens
+## Terminal Model and Primary/Alternate Screens
 
-The future terminal model, not the backend, will own screen switching:
+TerminalModel now owns screen switching, independently of rendering or a parser:
 
 - Primary screen: visible cells plus bounded scrollback, with its own cursor
   and viewport state.
 - Alternate screen: a separate screen-sized buffer without normal scrollback.
-- Switching back restores the primary state; alternate writes must not mutate
-  primary history. Cursor save/restore and clearing behavior depend on the VT
-  sequence (for example, DEC private mode 1049) and need explicit parser tests.
+- Switching back restores primary cells, cursor, style, pending wrap, and viewport.
+  The direct setAlternateScreen(true) API clears/homes the alternate screen on
+  transition; repeated requests for the active mode are no-ops. The alternate
+  buffer uses its own ring with capacity equal to screen height.
+- This direct policy is not full DEC mode handling. Different VT sequences
+  (including private mode 1049) require distinct save/restore and clearing rules
+  in the future parser, with explicit tests.
 
 RenderFrame stays mode-independent: submit the active cell view and cursor,
 zero pixel offset for a fixed alternate screen, and optionally hide its scrollbar.
-Do not conflate this mode with the keyboard's Alt modifier. Alternate-screen
-storage, switching, and VT parsing are not implemented yet.
+Do not conflate this mode with the keyboard's Alt modifier. Storage and direct
+switching are implemented; VT parsing is not.
+
+write() accepts UTF-32, handles CR/LF/BS/tab, defers wrapping at the last column,
+and ignores unsupported controls. LF alone preserves the column. Erasure uses
+current colors and never removes primary history. Characters currently occupy
+one cell each; invalid scalars become U+FFFD. Resize keeps the insertion point
+when widening a line whose wrap was pending. Screen sizes must be positive.
+
+matterm-terminal-demo converts SDL text input to UTF-32 at its client boundary
+using the shared incremental Utf8Decoder, not platform-dependent iconv formats.
+The decoder buffers split characters, replaces malformed UTF-8, and flushes
+truncated input on finish(). It can later be reused by the VT parser but does not
+interpret terminal escape sequences.
+F2 toggles screens, F3 generates lines, F4 erases the screen, and F5 resets the
+model. Input controls demonstrate the API; they are not shell input encoding.
+CPU tests cover model semantics and headless framebuffer tests compare primary
+pixels and state before/after alternate rendering. Both demos remain permanent
+library clients.
 
 ## Rendering and Performance
 
@@ -245,8 +273,12 @@ measurements justify them; no performance target has been verified yet.
 6. Branding and the static gradient welcome screen are implemented in the
    permanent matterm-demo client. S/Space toggles output, B bursts 300 rows, and
    R restores the welcome screen. Startup is idle, not a continuous stress test.
-7. Next, build terminal screen semantics on top of storage (cursor movement,
-   writing/erasing cells, line feed, and scrolling), before ANSI/VT parsing and
-   a real shell/PTY. Include independent primary/alternate screen state and
-   switching tests for future editors. Measure, then extend Unicode and optimize
-   where justified.
+7. Basic terminal screen semantics and independent primary/alternate state are
+   implemented in matterm::terminal and demonstrated by matterm-terminal-demo.
+   Tests cover wrapping, controls, erasure, history, resize, and screen isolation.
+8. Incremental UTF-8 decoding is implemented and tested independently, including
+   split characters and invalid sequences. Next, design and implement a VT parser
+   feeding the same model, with partial escape sequences and explicit DEC mode
+   semantics.
+   Add PTY/input encoding later; neither demo should be replaced. Measure,
+   extend Unicode support, and optimize where justified.

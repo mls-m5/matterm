@@ -58,6 +58,20 @@ FStringView TerminalMemory::row(std::size_t index) const & {
     return FStringView(slot(physicalRow(index)), columns_);
 }
 
+FChar &TerminalMemory::at(std::size_t column, std::size_t index) {
+    if (column >= columns_ || index >= size_) {
+        throw std::out_of_range("TerminalMemory cell");
+    }
+    return slot(physicalRow(index))[column];
+}
+
+const FChar &TerminalMemory::at(std::size_t column, std::size_t index) const {
+    if (column >= columns_ || index >= size_) {
+        throw std::out_of_range("TerminalMemory cell");
+    }
+    return slot(physicalRow(index))[column];
+}
+
 std::size_t TerminalMemory::appendSlot() const noexcept {
     return size_ == capacity_ ? head_ : physicalRow(size_);
 }
