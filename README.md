@@ -8,7 +8,11 @@ Escape or close the window to exit.
 Requires CMake 3.23+, a C++17 compiler, SDL2 development files, and OpenGL
 development files.
 
+Tests use the `mls-unit-test` submodule. Initialize it before building, or
+configure with `-DBUILD_TESTING=OFF` for an application-only build.
+
 ```sh
+git submodule update --init
 cmake -S . -B build
 cmake --build build
 ./build/2026-terminal-renderer
