@@ -1,18 +1,24 @@
-# 2026 Terminal Renderer
+# matterm
 
-An interactive scrollback demo, working toward a terminal emulator.
+A reusable cell-grid renderer, working toward a terminal emulator. The standalone
+`matterm-demo` demonstrates the library and will remain available independently
+of the future terminal application.
 `TerminalMemory` supplies a borrowed row view through `RenderFrame` to
 `SdlBackend`, which draws cell backgrounds and atlas glyphs in separate indexed
 geometry batches. SDL2_ttf rasterizes glyphs on cache misses. This is not a
 terminal yet.
 
-The demo retains 256 rows in reusable 16-row blocks, prefills beyond capacity,
-and appends a numbered row every 100 ms. Controls:
+Startup prints a matterm ASCII banner and opens a static welcome screen with
+colored text and foreground/background gradients. Nothing streams automatically.
+The demo retains up to 256 rows in reusable 16-row blocks. Controls:
 
 - Mouse wheel or Up/Down scroll smoothly through history; Page Up/Down scroll by
   a page. Fractional wheel input is preserved for trackpads.
 - Home jumps to the oldest retained page; End follows new output.
-- Space pauses/resumes output; Tab cycles cursor shapes.
+- S or Space starts/stops numbered output (one row every 100 ms).
+- B appends a burst of 300 rows to exercise wraparound and eviction.
+- R stops output and restores the welcome screen at the current window size.
+- Tab cycles cursor shapes.
 - A simple scrollbar on the right indicates the visible fraction and position;
   it is not clickable or draggable yet.
 - The cursor blinks only at the live bottom. Reading history stays anchored as
@@ -33,8 +39,11 @@ On Debian/Ubuntu, install `libsdl2-dev`, `libsdl2-ttf-dev`, and optionally
 git submodule update --init
 cmake -S . -B build
 cmake --build build
-./build/2026-terminal-renderer /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
+./build/matterm-demo /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
 ```
+
+The project is named `matterm`; the current demo executable is `matterm-demo`.
+The future terminal executable will be separate, rather than replacing the demo.
 
 The demo requests an accelerated SDL renderer with VSync and prints the selected
 backend. It no longer creates its own OpenGL context. The atlas has fixed capacity
@@ -54,7 +63,8 @@ ctest --test-dir build --output-on-failure
 ```
 
 Without `TEST_FONT_FILE`, CTest runs the font-independent cell view, cell buffer,
-terminal memory, and scroll viewport tests. History tests cover exact-capacity eviction, block and
+terminal memory, scroll viewport, and demo content tests. History tests cover
+exact-capacity eviction, block and
 ring boundaries, aliased input, resize, clear, and repeated wraps against a
 reference queue. Viewport tests cover fractional offsets, animation convergence,
 frame-rate independence, and anchoring during output/eviction. Backend tests verify
@@ -65,8 +75,36 @@ that glyph pixels reach the framebuffer. It does not validate accelerated GPU
 performance or visual quality on a real display. It can also be run directly:
 
 ```sh
-SDL_VIDEODRIVER=dummy ./build/2026-terminal-renderer /path/to/font.ttf --smoke-test
+SDL_VIDEODRIVER=dummy ./build/matterm-demo /path/to/font.ttf --smoke-test
 ```
+
+## Library and Applications
+
+The build-tree CMake target `matterm::renderer` provides cell buffers, history,
+viewport state, the atlas, and the SDL backend. A client can link it after adding
+this project with `add_subdirectory`:
+
+```cmake
+add_subdirectory(path/to/matterm matterm-build)
+target_link_libraries(my-app PRIVATE matterm::renderer)
+```
+
+`demo/main.cpp` shows SDL/SDL_ttf initialization, backend ownership, and rendering
+borrowed cell memory. Demo-specific artwork and generated output live under
+`demo/`, not in the reusable renderer. There is no installed CMake package yet.
+
+For a library-only build, disable the demo and tests:
+
+```sh
+cmake -S . -B build/lib-only -DMATTERM_BUILD_DEMO=OFF -DBUILD_TESTING=OFF
+cmake --build build/lib-only
+```
+
+The future terminal emulator will be another client of the same library, with
+its own screen model, parser, and PTY. A standalone memory viewer could also
+feed cell views into it. Currently views borrow memory in the same process;
+attaching to shared memory or another process will need an explicit adapter and
+synchronization protocol, not raw cross-process pointers.
 
 ## CPU Cell Buffer
 

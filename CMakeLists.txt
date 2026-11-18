@@ -1,6 +1,6 @@
 
 cmake_minimum_required(VERSION 3.23)
-project(2026-terminal-renderer LANGUAGES CXX)
+project(matterm LANGUAGES CXX)
 
 find_package(SDL2 2.0.18 REQUIRED)
 find_package(SDL2_ttf 2.0.18 REQUIRED)
@@ -21,11 +21,25 @@ target_link_libraries(glyphatlas PUBLIC SDL2::SDL2 SDL2_ttf::SDL2_ttf)
 add_library(sdlbackend src/sdlbackend.cpp)
 target_link_libraries(sdlbackend PUBLIC glyphatlas)
 
-add_executable(2026-terminal-renderer src/main.cpp)
-target_compile_features(2026-terminal-renderer PRIVATE cxx_std_17)
-target_link_libraries(2026-terminal-renderer PRIVATE terminalmemory sdlbackend)
+# Shared rendering API for demos, future terminal emulation, and other clients.
+add_library(matterm-renderer INTERFACE)
+add_library(matterm::renderer ALIAS matterm-renderer)
+target_link_libraries(matterm-renderer INTERFACE cellbuffer terminalmemory sdlbackend)
 
 include(CTest)
+option(MATTERM_BUILD_DEMO "Build the standalone matterm rendering demo" ON)
+
+# Demo helpers are deliberately separate from the reusable renderer.
+if(MATTERM_BUILD_DEMO OR BUILD_TESTING)
+    add_library(democontent demo/democontent.cpp)
+    target_include_directories(democontent PUBLIC demo)
+    target_link_libraries(democontent PUBLIC cellbuffer terminalmemory)
+endif()
+
+if(MATTERM_BUILD_DEMO)
+    add_executable(matterm-demo demo/main.cpp)
+    target_link_libraries(matterm-demo PRIVATE matterm::renderer democontent)
+endif()
 add_subdirectory(lib)
 add_subdirectory(test)
 

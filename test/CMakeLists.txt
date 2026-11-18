@@ -32,6 +32,13 @@ if(BUILD_TESTING)
     target_link_libraries(scrollviewport_test PRIVATE terminalmemory)
     add_test(NAME scroll_viewport COMMAND scrollviewport_test)
 
+    add_executable(democontent_test
+        democontent_test.cpp
+        mls-unit-test/test_main.cpp
+    )
+    target_link_libraries(democontent_test PRIVATE democontent)
+    add_test(NAME demo_content COMMAND democontent_test)
+
     add_executable(glyphatlas_test
         glyphatlas_test.cpp
         mls-unit-test/test_main.cpp
@@ -55,10 +62,12 @@ if(BUILD_TESTING)
         add_test(NAME sdl_backend COMMAND sdlbackend_test)
         set_tests_properties(sdl_backend PROPERTIES
             ENVIRONMENT "GLYPH_TEST_FONT=${TEST_FONT_FILE};SDL_VIDEODRIVER=dummy")
-        add_test(NAME glyph_render_smoke
-            COMMAND 2026-terminal-renderer "${TEST_FONT_FILE}" --smoke-test)
-        set_tests_properties(glyph_render_smoke PROPERTIES
-            ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+        if(TARGET matterm-demo)
+            add_test(NAME glyph_render_smoke
+                COMMAND matterm-demo "${TEST_FONT_FILE}" --smoke-test)
+            set_tests_properties(glyph_render_smoke PROPERTIES
+                ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+        endif()
     else()
         message(STATUS "Set TEST_FONT_FILE to enable font-dependent atlas and rendering tests")
     endif()

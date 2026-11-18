@@ -1,3 +1,4 @@
+#include "democontent.h"
 #include "scrollviewport.h"
 #include "sdlbackend.h"
 #include "terminalmemory.h"
@@ -15,16 +16,6 @@
 #include <vector>
 
 namespace {
-void appendDemoRow(TerminalMemory &memory, std::uint64_t number) {
-    const auto label = std::to_string(number);
-    std::u32string text = U"Row ";
-    text.append(label.begin(), label.end());
-    text += U" | block-ring scrollback | Agjpqy ÅÄÖ åäö";
-    const Rgb8 foreground =
-        number % 2 ? Rgb8{120, 220, 170} : Rgb8{220, 225, 245};
-    memory.append(text, foreground, {14, 17, 22});
-}
-
 void verifyGlyphPixels(SDL_Window &window, const SdlBackend &backend) {
     int width, height;
     SDL_Renderer *renderer = SDL_GetRenderer(&window);
@@ -54,7 +45,7 @@ void verifyGlyphPixels(SDL_Window &window, const SdlBackend &backend) {
 
 int run(const char *fontPath, bool smokeTest) {
     std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(
-        SDL_CreateWindow("Terminal cell grid",
+        SDL_CreateWindow("matterm",
                          SDL_WINDOWPOS_CENTERED,
                          SDL_WINDOWPOS_CENTERED,
                          960,
@@ -69,14 +60,14 @@ int run(const char *fontPath, bool smokeTest) {
     std::cout << "SDL renderer: " << backend.rendererName() << '\n';
     TerminalMemory memory(std::size_t(backend.columns(true)), 256, 16);
     std::uint64_t nextRow = 1;
-    // Start beyond capacity so wraparound and eviction are exercised
-    // immediately.
-    for (int i = 0; i < 300; ++i) {
-        appendDemoRow(memory, nextRow++);
-    }
+    demo::welcome(memory, std::size_t(backend.rows()));
     ScrollViewport viewport;
     viewport.setGeometry(memory.size(), std::size_t(backend.rows()));
-    bool paused = false;
+    viewport.oldest();
+    viewport.advance(
+        10); // Show the banner immediately, including in small windows.
+    bool streaming = false;
+    bool welcomeScreen = true;
     CursorState cursor;
     cursor.color = {120, 220, 170};
     Uint64 lastAppend = SDL_GetTicks64();
@@ -85,7 +76,16 @@ int run(const char *fontPath, bool smokeTest) {
     while (running) {
         const auto columns = std::size_t(backend.columns(true));
         const auto rows = std::size_t(backend.rows());
-        memory.resizeColumns(columns);
+        if (welcomeScreen &&
+            (memory.columns() != columns ||
+             memory.size() != std::min(memory.capacity(),
+                                       std::max<std::size_t>(20, rows)))) {
+            memory.resizeColumns(columns);
+            demo::welcome(memory, rows);
+        }
+        else {
+            memory.resizeColumns(columns);
+        }
         viewport.setGeometry(memory.size(), rows);
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -123,8 +123,36 @@ int run(const char *fontPath, bool smokeTest) {
                 case SDLK_END:
                     viewport.followTail();
                     break;
+                case SDLK_s:
                 case SDLK_SPACE:
-                    paused = !paused;
+                    if (!event.key.repeat) {
+                        streaming = !streaming;
+                        welcomeScreen = false;
+                        lastAppend = SDL_GetTicks64();
+                        if (streaming) {
+                            viewport.followTail();
+                        }
+                    }
+                    break;
+                case SDLK_b:
+                    if (!event.key.repeat) {
+                        welcomeScreen = false;
+                        for (int i = 0; i < 300; ++i) {
+                            demo::appendNumberedRow(memory, nextRow++);
+                        }
+                        viewport.rowsAppended(300, memory.size());
+                    }
+                    break;
+                case SDLK_r:
+                    if (!event.key.repeat) {
+                        streaming = false;
+                        welcomeScreen = true;
+                        nextRow = 1;
+                        demo::welcome(memory, rows);
+                        viewport.setGeometry(memory.size(), rows);
+                        viewport.oldest();
+                        viewport.advance(10);
+                    }
                     break;
                 case SDLK_TAB:
                     cursor.shape = cursor.shape == CursorState::Shape::Underline
@@ -142,8 +170,8 @@ int run(const char *fontPath, bool smokeTest) {
             break;
         }
         const Uint64 now = SDL_GetTicks64();
-        if (!paused && !smokeTest && now - lastAppend >= 100) {
-            appendDemoRow(memory, nextRow++);
+        if (streaming && !smokeTest && now - lastAppend >= 100) {
+            demo::appendNumberedRow(memory, nextRow++);
             viewport.rowsAppended(1, memory.size());
             lastAppend = now;
         }
@@ -153,12 +181,12 @@ int run(const char *fontPath, bool smokeTest) {
         cursor.row = std::max(0, int(viewport.rowCount()) - 1);
         cursor.visible = viewport.atTail() && viewport.rowCount() != 0 &&
                          rows != 0 && (now / 500) % 2 == 0;
-        const auto title = std::string("Scrollback demo | wheel/PgUp/PgDn | "
-                                       "Home/End | Space: pause | ") +
-                           (paused ? "paused" : "streaming") + " | offset " +
-                           std::to_string(viewport.offset()) + " | retained " +
-                           std::to_string(memory.size()) + "/" +
-                           std::to_string(memory.capacity());
+        const auto title =
+            std::string("matterm | S: stream | B: burst | R: welcome | ") +
+            (streaming ? "streaming" : "idle") + " | offset " +
+            std::to_string(viewport.offset()) + " | retained " +
+            std::to_string(memory.size()) + "/" +
+            std::to_string(memory.capacity());
         SDL_SetWindowTitle(window.get(), title.c_str());
         RenderFrame frame{memory.view(viewport.firstRow(), viewport.rowCount()),
                           cursor};
@@ -177,6 +205,7 @@ int run(const char *fontPath, bool smokeTest) {
 } // namespace
 
 int main(int argc, char **argv) {
+    demo::printBanner(std::cout);
     if (argc < 2 || argc > 3 ||
         (argc == 3 && std::string_view(argv[2]) != "--smoke-test")) {
         std::cerr << "Usage: " << argv[0]
