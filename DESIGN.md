@@ -1,13 +1,12 @@
 # Terminal Architecture and Roadmap
 
 This document records the agreed direction, not a completed implementation.
-The application currently renders a static glyph-atlas demo using SDL2's renderer
-and SDL2_ttf, with colored geometry and a simple underline cursor. The old
-MatrixRenderer pseudocode has been removed. Cell/frame/backend interfaces will
-be adapted incrementally to this plan. A CPU-only CellBuffer now supports clipped
-text placement, clearing, checked access, and resize. CellGridView borrows rows
-rather than requiring contiguous storage across the screen. The demo is not yet
-connected to this buffer.
+The application currently renders an interactive cell-grid demo using CellBuffer,
+RenderFrame, and SdlBackend. It draws colored backgrounds and atlas glyphs in
+separate batches and overlays a movable, blinking cursor. A CPU-only CellBuffer
+supports clipped text placement, clearing, checked access, and resize.
+CellGridView borrows rows rather than requiring contiguous storage across the
+screen. The old MatrixRenderer pseudocode has been removed.
 
 ## Responsibilities and Ownership
 
@@ -19,8 +18,8 @@ connected to this buffer.
 - RenderBackend reads a frame description, draws it, and can present the image.
   Each concrete backend owns its atlases and other graphics resources.
 
-A separate MatrixRenderer may initially provide draw(x, y, text) and a cell
-matrix. It must not require a permanent copy of terminal memory. Eventually,
+CellBuffer currently provides draw(x, y, text) and a cell matrix. It must not
+require a permanent copy of terminal memory. Eventually,
 text placement can write directly to the terminal model, and rendering can read
 its visible rows without an additional complete CPU copy.
 
@@ -103,13 +102,15 @@ borrowed only during the render call and must not be retained by the backend.
 When text clusters are introduced, the frame must also provide access to the
 appropriate cluster lookup.
 
-The backend handles cell pixel dimensions, drawable size, and HiDPI. The
-application needs a way to determine how many cells fit. The exact API is a later
+The backend handles cell pixel dimensions, drawable size, and HiDPI. SdlBackend
+currently exposes cellWidth/cellHeight in drawable pixels and columns/rows for
+the number of whole cells that fit. The shared metrics API remains a later
 decision. Sub-cell scrolling could eventually use a pixel offset; it is not
 needed initially.
 
-- OpenGlBackend uses direct OpenGL calls and SDL_GL_SwapWindow for presentation.
-- A future SdlBackend uses SDL_Renderer and SDL_RenderPresent.
+- A future OpenGlBackend will use direct OpenGL calls and SDL_GL_SwapWindow.
+- SdlBackend uses SDL_Renderer and SDL_RenderPresent, owning its renderer and atlas.
+  The window is borrowed from the GUI loop.
 - These are alternative rendering paths, not mixed renderers in the same window.
   Construction and switching must respect each backend's graphics resource lifetime.
 
@@ -161,16 +162,18 @@ measurements justify them; no performance target has been verified yet.
 
 ## Next Steps
 
-1. Adapt the header boundaries: CellText/FChar, a row-based cell view, RenderFrame
-   with cursor state, and RenderBackend. No cluster allocation or GC yet.
+1. The row-based cell view, RenderFrame with cursor state, and RenderBackend are
+   implemented. CellText tagging and cell attributes remain future work; no
+   cluster allocation or GC yet.
 2. The initial CellBuffer and its tests are implemented using test/mls-unit-test.
    It currently owns contiguous storage but exposes a row-based view compatible
    with future row blocks. Copy/move are disabled to keep borrowed-view ownership
    explicit. UTF-32 placement still assumes one code point per cell.
-3. Connect the working SDL2_ttf atlas and static geometry demo to the frame and
-   backend interfaces. Move drawing and presentation from the demo loop into
-   the SDL backend; the GUI loop owns it. Preserve the atlas and headless rendering
-   tests. The initial atlas, colored glyph rendering, and cursor demo are complete.
+3. The SDL2_ttf atlas and cell buffer are connected through RenderFrame to
+   SdlBackend. Drawing and presentation live in the backend, owned by the GUI
+   loop. Font-dependent tests cover atlas behavior, cell colors, cursor shapes,
+   cell updates, and empty frames. The interactive demo is temporary, not a
+   terminal input or parsing implementation.
 4. Implement terminal memory's row blocks/ring buffer and test wraparound,
    eviction of old rows, and visible views crossing block boundaries. Connect
    it to rendering.

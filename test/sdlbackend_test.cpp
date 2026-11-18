@@ -1,0 +1,146 @@
+#include "cellbuffer.h"
+#include "mls-unit-test/unittest.h"
+#include "sdlbackend.h"
+
+#include <SDL.h>
+#include <SDL_ttf.h>
+
+#include <cstdlib>
+#include <memory>
+#include <stdexcept>
+
+namespace {
+struct Libraries {
+    Libraries() {
+        if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        if (TTF_Init() < 0) {
+            SDL_Quit();
+            throw std::runtime_error(TTF_GetError());
+        }
+    }
+    ~Libraries() {
+        TTF_Quit();
+        SDL_Quit();
+    }
+};
+
+struct Fixture {
+    Libraries libraries;
+    std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window{
+        SDL_CreateWindow("Backend test", 0, 0, 320, 160, SDL_WINDOW_HIDDEN),
+        SDL_DestroyWindow};
+    std::unique_ptr<SdlBackend> backend;
+
+    Fixture() {
+        if (!window) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        const char *font = std::getenv("GLYPH_TEST_FONT");
+        if (!font) {
+            throw std::runtime_error("Set GLYPH_TEST_FONT");
+        }
+        backend = std::make_unique<SdlBackend>(*window, font, 24, true);
+    }
+
+    Uint32 pixel(int x, int y) {
+        const SDL_Rect rect{x, y, 1, 1};
+        Uint32 result;
+        if (SDL_RenderReadPixels(SDL_GetRenderer(window.get()),
+                                 &rect,
+                                 SDL_PIXELFORMAT_ARGB8888,
+                                 &result,
+                                 sizeof(result)) < 0) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        return result & 0xffffff;
+    }
+};
+} // namespace
+
+TEST_SUIT_BEGIN(SdlBackend)
+
+TEST_CASE("Backend renders independent rows and per-cell backgrounds") {
+    Fixture fixture;
+    const FString first{FChar{U' ', {}, {200, 30, 40}},
+                        FChar{U' ', {}, {20, 180, 50}}};
+    const FString second{FChar{U' ', {}, {10, 20, 210}},
+                         FChar{U' ', {}, {90, 80, 70}}};
+    const FStringView rows[]{FStringView(first), FStringView(second)};
+    RenderBackend &backend = *fixture.backend;
+    backend.render({CellGridView(rows, 2, 2), {}});
+    const int w = fixture.backend->cellWidth();
+    const int h = fixture.backend->cellHeight();
+    EXPECT_EQ(fixture.pixel(1, 1), Uint32(0xc81e28));
+    EXPECT_EQ(fixture.pixel(w + 1, 1), Uint32(0x14b432));
+    EXPECT_EQ(fixture.pixel(1, h + 1), Uint32(0x0a14d2));
+    EXPECT_EQ(fixture.pixel(w + 1, h + 1), Uint32(0x5a5046));
+    EXPECT_EQ(fixture.pixel(w * 3, 1), Uint32(0x0e1116));
+    backend.present();
+}
+
+TEST_CASE("Glyph geometry uses the cell foreground color") {
+    Fixture fixture;
+    CellBuffer cells(1, 1);
+    cells.draw(0, 0, U"M", {0, 255, 0}, {50, 0, 0});
+    fixture.backend->render({cells.view(), {}});
+    bool greenGlyph = false;
+    for (int y = 0; y < fixture.backend->cellHeight(); ++y) {
+        for (int x = 0; x < fixture.backend->cellWidth(); ++x) {
+            const auto pixel = fixture.pixel(x, y);
+            greenGlyph |= ((pixel >> 8) & 255) > ((pixel >> 16) & 255);
+        }
+    }
+    EXPECT(greenGlyph);
+}
+
+TEST_CASE(
+    "Cursor shapes overlay cells without modifying them or leaving trails") {
+    Fixture fixture;
+    CellBuffer cells(2, 1);
+    CursorState cursor;
+    cursor.visible = true;
+    cursor.color = {255, 0, 0};
+    const int w = fixture.backend->cellWidth();
+    const int h = fixture.backend->cellHeight();
+    fixture.backend->render({cells.view(), cursor});
+    EXPECT_EQ(fixture.pixel(0, h - 1), Uint32(0xff0000));
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0));
+    cursor.column = 1;
+    cursor.shape = CursorState::Shape::Bar;
+    fixture.backend->render({cells.view(), cursor});
+    EXPECT_EQ(fixture.pixel(0, h - 1), Uint32(0));
+    EXPECT_EQ(fixture.pixel(w, 0), Uint32(0xff0000));
+    cursor.shape = CursorState::Shape::Block;
+    fixture.backend->render({cells.view(), cursor});
+    EXPECT_NE(fixture.pixel(w + w / 2, h / 2), Uint32(0));
+    EXPECT(cells.at(1, 0).codePoint == U' ');
+    EXPECT_EQ(cells.at(1, 0).background.r, 0);
+    cursor.visible = false;
+    fixture.backend->render({cells.view(), cursor});
+    EXPECT_EQ(fixture.pixel(w, 0), Uint32(0));
+    cursor.visible = true;
+    cursor.column = -1;
+    fixture.backend->render({cells.view(), cursor});
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0));
+}
+
+TEST_CASE(
+    "Edited cells appear on the next frame and empty frames clear the output") {
+    Fixture fixture;
+    {
+        CellBuffer cells(1, 1);
+        fixture.backend->render({cells.view(), {}});
+        cells.at(0, 0).background = {10, 20, 30};
+        fixture.backend->render({cells.view(), {}});
+        EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x0a141e));
+    }
+    fixture.backend->present(); // No borrowed cell storage is needed here.
+    fixture.backend->render({});
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x0e1116));
+    EXPECT_GT(fixture.backend->columns(), 0);
+    EXPECT_GT(fixture.backend->rows(), 0);
+}
+
+TEST_SUIT_END
