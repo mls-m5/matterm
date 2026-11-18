@@ -27,9 +27,11 @@ struct Libraries {
 struct Fixture {
     Libraries libraries;
     std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> surface{
-        SDL_CreateRGBSurfaceWithFormat(0, 128, 128, 32, SDL_PIXELFORMAT_RGBA32), SDL_FreeSurface};
+        SDL_CreateRGBSurfaceWithFormat(0, 128, 128, 32, SDL_PIXELFORMAT_RGBA32),
+        SDL_FreeSurface};
     std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)> renderer{
-        surface ? SDL_CreateSoftwareRenderer(surface.get()) : nullptr, SDL_DestroyRenderer};
+        surface ? SDL_CreateSoftwareRenderer(surface.get()) : nullptr,
+        SDL_DestroyRenderer};
 
     Fixture() {
         if (!renderer) {
@@ -40,7 +42,8 @@ struct Fixture {
     const char *font() const {
         const char *path = std::getenv("GLYPH_TEST_FONT");
         if (!path || !*path) {
-            throw std::runtime_error("Set GLYPH_TEST_FONT to a TrueType font file");
+            throw std::runtime_error(
+                "Set GLYPH_TEST_FONT to a TrueType font file");
         }
         return path;
     }
@@ -100,7 +103,8 @@ TEST_CASE("A full atlas fails without invalidating existing glyphs") {
     for (char32_t ch = U'B'; ch <= U'~'; ++ch) {
         try {
             atlas.getOrInsert(ch);
-        } catch (const std::runtime_error &) {
+        }
+        catch (const std::runtime_error &) {
             full = true;
             break;
         }
@@ -113,9 +117,13 @@ TEST_CASE("A full atlas fails without invalidating existing glyphs") {
 
 TEST_CASE("Invalid dimensions and missing fonts fail cleanly") {
     Fixture fixture;
-    EXPECT_THROW((GlyphAtlas(*fixture.renderer, fixture.font(), 0)), std::invalid_argument);
-    EXPECT_THROW((GlyphAtlas(*fixture.renderer, fixture.font(), 24, 0, 64)), std::invalid_argument);
-    EXPECT_THROW((GlyphAtlas(*fixture.renderer, "/nonexistent/terminal-font.ttf", 24)), std::runtime_error);
+    EXPECT_THROW((GlyphAtlas(*fixture.renderer, fixture.font(), 0)),
+                 std::invalid_argument);
+    EXPECT_THROW((GlyphAtlas(*fixture.renderer, fixture.font(), 24, 0, 64)),
+                 std::invalid_argument);
+    EXPECT_THROW(
+        (GlyphAtlas(*fixture.renderer, "/nonexistent/terminal-font.ttf", 24)),
+        std::runtime_error);
 }
 
 TEST_SUIT_END

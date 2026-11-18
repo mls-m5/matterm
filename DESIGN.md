@@ -4,7 +4,10 @@ This document records the agreed direction, not a completed implementation.
 The application currently renders a static glyph-atlas demo using SDL2's renderer
 and SDL2_ttf, with colored geometry and a simple underline cursor. The old
 MatrixRenderer pseudocode has been removed. Cell/frame/backend interfaces will
-be adapted incrementally to this plan.
+be adapted incrementally to this plan. A CPU-only CellBuffer now supports clipped
+text placement, clearing, checked access, and resize. CellGridView borrows rows
+rather than requiring contiguous storage across the screen. The demo is not yet
+connected to this buffer.
 
 ## Responsibilities and Ownership
 
@@ -160,8 +163,10 @@ measurements justify them; no performance target has been verified yet.
 
 1. Adapt the header boundaries: CellText/FChar, a row-based cell view, RenderFrame
    with cursor state, and RenderBackend. No cluster allocation or GC yet.
-2. Implement a small cell buffer with text placement and tests using
-   test/mls-unit-test. Keep the storage boundary compatible with row blocks.
+2. The initial CellBuffer and its tests are implemented using test/mls-unit-test.
+   It currently owns contiguous storage but exposes a row-based view compatible
+   with future row blocks. Copy/move are disabled to keep borrowed-view ownership
+   explicit. UTF-32 placement still assumes one code point per cell.
 3. Connect the working SDL2_ttf atlas and static geometry demo to the frame and
    backend interfaces. Move drawing and presentation from the demo loop into
    the SDL backend; the GUI loop owns it. Preserve the atlas and headless rendering
