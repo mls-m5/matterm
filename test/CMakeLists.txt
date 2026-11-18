@@ -1,0 +1,6 @@
+if(BUILD_TESTING)
+    add_executable(matrixrenderer_test matrixrenderer_test.cpp)
+    target_compile_features(matrixrenderer_test PRIVATE cxx_std_17)
+    target_include_directories(matrixrenderer_test PRIVATE ../src)
+    add_test(NAME matrixrenderer_cell_grid COMMAND matrixrenderer_test)
+endif()
