@@ -2,7 +2,7 @@
 
 Status: **agreed design, nothing implemented.** It refines the "Future
 Direction: Emscripten and Browser Clients" section of ROADMAP.md. The decisions
-made while reviewing it are collected in section 10; open items are marked
+made while reviewing it are collected in section 11; open items are marked
 *Open*.
 
 ## 1. Goals and Non-Goals
@@ -225,13 +225,16 @@ clipboard and OSC 8 hyperlinks stay disabled in the parser (VT.md).
 - Default bind: `127.0.0.1` (and `::1`). Phase 1 supports nothing else.
 - The server refuses to bind a non-loopback address unless TLS is configured,
   or it is explicitly told it sits behind a trusted reverse proxy that
-  terminates TLS (`trusted_proxy = true`, loopback/unix socket only).
+  terminates TLS (`trusted_proxy`, below).
 - Recommended public deployment: Caddy or nginx terminates TLS (HTTP/2,
   automatic certificates, HSTS) and forwards to the server on a unix socket or
   loopback. This keeps certificate handling out of this code base. Native TLS
   in the server is optional later.
-- Only when `trusted_proxy` is set may the client address come from
-  `X-Forwarded-For`, and only the last hop appended by that proxy.
+- `trusted_proxy` takes the proxy's address (default: loopback only). The
+  server accepts connections only from that peer address, and only then may the
+  client address come from `X-Forwarded-For`, and only the last hop appended by
+  that proxy. This also lets the server listen on a private container network
+  address without being reachable by anything but the proxy.
 - `localhost` is a secure context in browsers, so the `Secure` cookie flag and
   WASM work on the laptop without TLS.
 
@@ -357,10 +360,20 @@ configuration directory, so they can be saved and reused:
   files, session and idle timeouts, the program and arguments to run, all rate
   limiting values in 5.3, protocol limits (4.2, 4.4), and scrollback/ring buffer
   sizes.
-- *Open:* file format. Suggested: TOML (a header-only parser such as toml++
-  keeps the dependency list short). The same directory is meant to hold the
+- *File format:* TOML, parsed with the header-only toml++ library. The same directory is meant to hold the
   desktop terminal's future settings (see SETTINGS_AND_PERFORMANCE.md), which
   would live in a separate `terminal.conf`.
+
+### 5.7 Build dependencies
+
+Kept deliberately small: Boost (Beast/Asio are header-only; only
+`boost_system` may be needed at link time), libsodium, and toml++ (header-only).
+On Debian/Ubuntu these are `libboost-dev libsodium-dev libtomlplusplus-dev`.
+The server build must not require SDL2, SDL2_ttf, fonts, or Fontconfig: the root
+`CMakeLists.txt` currently runs `find_package(SDL2 REQUIRED)` unconditionally,
+so phase 2 must make graphics dependencies conditional (`MATTERM_BUILD_APP`,
+`MATTERM_BUILD_SERVER`). Missing dependencies produce a clear CMake error naming
+the package to install.
 
 ## 6. Browser Client
 
@@ -442,7 +455,20 @@ Each phase is independently useful and ends with tests and documentation.
    library (for example libdatachannel). Terminal data needs reliable ordered
    delivery anyway, so it gains little over WebSocket on a normal server.
 
-## 10. Decisions
+## 10. Container Deployment
+
+The first deployments run in Podman, with the same compose files on the laptop
+and on the public server (`deploy/podman/`, provisional until the server
+exists). Two containers: the server with its shell on an `internal` network with
+no outbound access, and a reverse proxy as the only published port (loopback
+only on the laptop, TLS on the server). Root filesystems are read-only, all
+capabilities are dropped, and resources are limited. Inside the container the
+shell can only see what is mounted, which also answers most of the account
+question in 5.4: the container, not the host account, is the isolation boundary.
+The host's config and state directories are mounted in, so native and container
+runs share one layout for now.
+
+## 11. Decisions
 
 Made:
 
@@ -465,9 +491,19 @@ Made:
 8. **Configuration:** everything configurable, stored under
    `~/.config/matterm/` (state under `~/.local/state/matterm/`).
 
+9. **Configuration format:** TOML via toml++ (header-only). Exact key names are
+   chosen during phase 2, when the settings exist.
+10. **Containers:** Podman first, with a no-egress server network and a reverse
+    proxy (section 10). The container starts out using the host's config and
+    state directories.
+
 Open:
 
-- Configuration file format (TOML suggested) and the exact key names.
+- Whether the container should keep sharing the host's config directory.
+  Sharing is convenient, but the shell can then read the credentials file (the
+  Argon2id hash) and the state directory. A separate, container-owned config and
+  state volume, or mounting only the settings read-only and keeping credentials
+  elsewhere, would be safer. Revisit before the public deployment.
 - Whether the desktop terminal's settings share the config directory/loader.
 - Which second factor to build first when it is wanted.
 - Canvas/WebGL backends: only if SDL2 under Emscripten proves too large or slow.

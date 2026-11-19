@@ -1,0 +1,20 @@
+# Overrides for the public server. Use together with compose.yaml:
+#
+#   export MATTERM_DOMAIN=term.example.org MATTERM_CADDYFILE=Caddyfile.server
+#   podman compose -f deploy/podman/compose.yaml \
+#                  -f deploy/podman/compose.server.yaml up -d
+#
+# Caddy obtains the certificate for MATTERM_DOMAIN. Do this only after the
+# hardening phases in docs/WEB_TERMINAL.md, and review the rate limiting
+# configuration first. Lists are merged, so 8080 stays bound to loopback.
+
+services:
+  matterm:
+    command:
+      - --listen=0.0.0.0:8080
+      - --trusted-proxy=10.89.77.2
+      - --allowed-origin=https://${MATTERM_DOMAIN:?set MATTERM_DOMAIN}
+  proxy:
+    ports:
+      - "80:80"
+      - "443:443"

@@ -1,0 +1,113 @@
+# Locked-down local test setup for matterm-server. PROVISIONAL until the
+# server exists (docs/WEB_TERMINAL.md, phase 2).
+#
+#   podman compose -f deploy/podman/compose.yaml run --rm setup   # once
+#   podman compose -f deploy/podman/compose.yaml up --build
+#   -> http://127.0.0.1:8080
+#
+# Layout:  browser -> proxy (published on 127.0.0.1) -> matterm (no internet)
+#
+# * `matterm` runs the server and the shell. It is attached only to an
+#   `internal` network, so it has no route to the internet or the LAN.
+# * `proxy` is attached to both networks and is the only published port,
+#   bound to loopback on the host.
+# Host config/state directories are mounted into the container so laptop and
+# server share the same layout (see docs/WEB_TERMINAL.md, section 5.6).
+
+name: matterm
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 256
+  mem_limit: 512m
+  cpus: 1.0
+  restart: unless-stopped
+
+services:
+  matterm:
+    <<: *hardening
+    build:
+      context: ../..
+      dockerfile: deploy/podman/Containerfile
+    image: localhost/matterm-server:dev
+    # Same uid inside as the host user, so the bind-mounted directories are
+    # writable; the container still has no capabilities and a read-only root.
+    userns_mode: keep-id
+    user: "${MATTERM_UID:-1000}:${MATTERM_GID:-1000}"
+    command:
+      - --listen=0.0.0.0:8080
+      - --trusted-proxy=10.89.77.2
+      - --allowed-origin=http://127.0.0.1:8080
+    networks:
+      backend:
+        ipv4_address: 10.89.77.3
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+      # The shell's home: scratch space that disappears with the container.
+      - /home/matterm:size=64m,mode=0700,noexec,nosuid,nodev
+    volumes:
+      # Read-only at run time: the shell cannot rewrite its own settings.
+      - ${XDG_CONFIG_HOME:-${HOME}/.config}/matterm:/home/matterm/.config/matterm:ro,Z
+      # Lockout counters and session state must persist and be writable.
+      - ${XDG_STATE_HOME:-${HOME}/.local/state}/matterm:/home/matterm/.local/state/matterm:rw,Z
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/matterm-server", "--health-check"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  proxy:
+    <<: *hardening
+    image: docker.io/library/caddy:2.8-alpine
+    depends_on: [matterm]
+    # Only loopback on the host. Never publish 0.0.0.0 without TLS.
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      backend:
+        ipv4_address: 10.89.77.2
+      frontend: {}
+    environment:
+      MATTERM_DOMAIN: ${MATTERM_DOMAIN:-}
+    volumes:
+      - ./${MATTERM_CADDYFILE:-Caddyfile}:/etc/caddy/Caddyfile:ro,Z
+      - caddy-data:/data
+    tmpfs:
+      - /config:size=16m
+
+  # One-off: create the config directory and set the passphrase.
+  #   podman compose run --rm setup
+  setup:
+    profiles: ["setup"]
+    image: localhost/matterm-server:dev
+    userns_mode: keep-id
+    user: "${MATTERM_UID:-1000}:${MATTERM_GID:-1000}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+    stdin_open: true
+    tty: true
+    command: ["--set-password"]
+    tmpfs:
+      - /tmp:size=8m
+      - /home/matterm:size=8m,mode=0700
+    volumes:
+      - ${XDG_CONFIG_HOME:-${HOME}/.config}/matterm:/home/matterm/.config/matterm:rw,Z
+
+volumes:
+  caddy-data: {}
+
+networks:
+  # No gateway and no outbound traffic: the shell cannot reach the internet.
+  backend:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.89.77.0/24
+  # Reachable from the host (for the published loopback port) only.
+  frontend: {}
