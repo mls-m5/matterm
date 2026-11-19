@@ -65,8 +65,10 @@ integrated: server skeleton, hardening, server configuration, ScriptedLink.
 - `docs/tasks/fast-json-fixes.md`: parser bugs in the `lib/fast-json` submodule,
   then drop the config loader's workaround. Worktree `.tmp/agent2`, branch
   `agent2-fastjson`.
-- `docs/tasks/resize-duplicates.md`: rows duplicate on resize under a TUI.
-  Worktree `.tmp/agent3`, branch `agent3-resize`.
+
+The resize fix (`docs/tasks/resize-duplicates.md`) and the follow-up CLI help
+changes are integrated. The `.tmp/agent3` worktree on `agent3-resize` is
+available for a new task based on `main`.
 
 The integrator (main session) owns the browser client in `web/` and integration.
 Integrate by cherry-picking in dependency order and running the full suite.

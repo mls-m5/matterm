@@ -82,6 +82,13 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [ ] Broader full-screen/editor transcripts and interactive compatibility testing.
 - [x] Keep dangerous OSC actions disabled; any future opt-in requires a security policy.
 
+## Future Direction: Session Multiplexing (Do Not Implement Yet)
+
+- [ ] Decouple terminal session ownership (PTY, model, and scrollback) from SDL windows and views so a live session can be moved without restarting its process.
+- [ ] Support multiple independent terminal sessions in one window. Prototype tabs first; evaluate split panes and focus/keyboard navigation separately.
+- [ ] Move a session to an existing or new window, preserving its process, screen, and scrollback. Define which view owns input and PTY sizing during a move.
+- [ ] Decide what closing the last view means before implementing detach/reattach or persistence across application restarts. Start with moves between windows in one matterm process, not a full tmux replacement.
+
 ## Reported Scrolling Issues and Palette Design
 
 - [ ] Reproduce and eliminate the reported blank area above the first row in
