@@ -1,6 +1,7 @@
 #include "world.h"
 
 #include "commands.h"
+#include "hardware.h"
 #include "programs.h"
 
 namespace fakeos {
@@ -9,22 +10,22 @@ namespace {
 const char *kReadme =
     "Welcome to Mattrix OS.\n"
     "\n"
-    "This is a pretend Unix system. It lives entirely in your browser and\n"
+    "This is a simulated Unix system. It lives entirely in your terminal and\n"
     "nothing you do here can touch your real computer, so poke around:\n"
     "\n"
     "  ls, cd, cat      look at things          grep, find   search for them\n"
     "  echo hi > file   make things             rm, cp, mv   break things\n"
     "  help             list the commands       reset        start over\n"
     "\n"
-    "Tab completes, the arrow keys remember. Some programs do not live in "
-    "your\n"
-    "PATH. A good explorer looks everywhere.\n";
+    "Tab completes, the arrow keys remember. There are games in /usr/games\n"
+    "(try fire and gradient), and a good explorer looks everywhere, hidden\n"
+    "files included (ls -a).\n";
 
 const char *kMotd =
-    "Welcome to Mattrix OS 6.0 Professional Edition (pretend GNU/Linux "
-    "6.8.0-mattrix x86_64)\n"
+    "Welcome to Mattrix OS 6.0 Professional Edition\n"
     "\n"
-    " * Everything here is make-believe. Type 'help', or read README.\n"
+    " * No real file systems were harmed. Type 'help', or read README.\n"
+    " * Try: fire, gradient, neofetch, about\n"
     "\n";
 
 const char *kPlan =
@@ -41,7 +42,7 @@ const char *kWords =
 const char *kSyslog =
     "Jan  1 00:00:01 matterm kernel: Mattrix OS 6.0 booting\n"
     "Jan  1 00:00:02 matterm init: starting system\n"
-    "Jan  1 00:00:03 matterm sshd: not running (this is a pretend system)\n"
+    "Jan  1 00:00:03 matterm sshd: not running (this is a simulated system)\n"
     "Jan  1 00:00:04 matterm cron: nothing scheduled\n"
     "Jan  1 00:00:05 matterm login: guest logged in on pts/0\n";
 
@@ -132,17 +133,43 @@ void seedWorld(World &world) {
     }
     fs.put(
         "/usr/games/fire", "#!builtin fire\n", "root", 0755, base - 30 * day);
+    fs.put("/usr/games/gradient",
+           "#!builtin gradient\n",
+           "root",
+           0755,
+           base - 30 * day);
     // A shy one, hidden by its dot.
     fs.put("/usr/games/.crumble",
            "#!builtin crumble\n",
            "root",
            0755,
            base - 30 * day);
+    // /proc tells the same story as neofetch, free, df and top.
+    fs.put("/proc/cpuinfo",
+           std::string("processor\t: 0\nmodel name\t: ") + hardware::kCpuModel +
+               "\ncpu MHz\t\t: " + std::to_string(hardware::kCpuMegahertz) +
+               ".000\ncpu cores\t: " + std::to_string(hardware::kCpuCores) +
+               "\nsiblings\t: " + std::to_string(hardware::kCpuCores) + "\n",
+           "root",
+           0444,
+           base);
+    fs.put(
+        "/proc/meminfo",
+        "MemTotal:       " + std::to_string(hardware::kRamTotalKiB) +
+            " kB\nMemFree:        " + std::to_string(hardware::kRamFreeKiB) +
+            " kB\nMemAvailable:   " +
+            std::to_string(hardware::kRamAvailableKiB) +
+            " kB\nCached:         " + std::to_string(hardware::kRamCacheKiB) +
+            " kB\nShmem:          " + std::to_string(hardware::kRamSharedKiB) +
+            " kB\nSwapTotal:      0 kB\n",
+        "root",
+        0444,
+        base);
     world.env = {{"HOME", "/home/" + user},
                  {"USER", user},
                  {"LOGNAME", user},
                  {"HOSTNAME", world.hostname},
-                 {"PATH", "/usr/local/bin:/usr/bin:/bin"},
+                 {"PATH", "/usr/local/bin:/usr/bin:/bin:/usr/games"},
                  {"SHELL", "/bin/mattrix-sh"},
                  {"TERM", "xterm-256color"},
                  {"LANG", "en_US.UTF-8"},

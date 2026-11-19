@@ -1,3 +1,4 @@
+#include "hardware.h"
 #include "programs.h"
 
 #include <algorithm>
@@ -82,8 +83,19 @@ public:
                     back);
         canvas.text(0,
                     2,
-                    "MiB Mem : 1024.0 total,  588.0 free,  209.0 used,  227.0 "
-                    "buff/cache",
+                    "MiB Mem : " + hardware::mebibytes(hardware::kRamTotalKiB) +
+                        " total, " +
+                        hardware::mebibytes(hardware::kRamFreeKiB) + " free, " +
+                        hardware::mebibytes(hardware::kRamUsedKiB) + " used, " +
+                        hardware::mebibytes(hardware::kRamCacheKiB) +
+                        " buff/cache",
+                    text,
+                    back);
+        canvas.text(0,
+                    3,
+                    "%Cpu(s):  1.4 us,  0.6 sy,  0.0 ni, 98.0 id   (" +
+                        std::to_string(hardware::kCpuCores) + " cores, " +
+                        hardware::kCpuClock + ")",
                     text,
                     back);
         canvas.text(0,

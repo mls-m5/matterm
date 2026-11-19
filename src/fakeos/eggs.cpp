@@ -79,7 +79,7 @@ const std::vector<Egg> &eggs() {
                    "try.\n"),
         egg("no-preserve-root", T::Prefix, "rm -rf --no-preserve-root")
             .print(
-                "Nice try. The pretend system folds its arms and says no.\n"),
+                "Nice try. The simulated system folds its arms and says no.\n"),
         egg("forkbomb", T::Line, ":(){ :|:& };:")
             .print("matterm: fork: Resource temporarily unavailable. (This "
                    "system has more sense.)\n"),

@@ -7,6 +7,7 @@
 #include "types.h"
 #include "world.h"
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -29,6 +30,10 @@ struct Config {
     // characters per second, a new line costing a few more; any key shows the
     // rest at once. Typing and prompts are never delayed. 0: all at once.
     int revealCharsPerSecond = 0;
+    // Pips while text is revealed or typed (see Beep). The core produces events
+    // only when `sound` is true and someone listens; the host plays them.
+    bool sound = false;
+    std::function<void(const Beep &)> onBeep;
     // Typed and run at the first prompt, as if the visitor had entered it (for
     // embedding a demo that starts with something to look at). Empty: none.
     std::string startCommand;
@@ -87,6 +92,7 @@ private:
     void queueOutput(std::size_t mark);
     void drainReveal(Time now);
     void flushReveal();
+    void forwardBeeps();
     std::string lineText() const;
     Reaction take();
 
@@ -114,6 +120,7 @@ private:
     double revealCredit_ = 0; // Units that may still be shown.
     double revealRate_ = 0;   // Units per second for the current text.
     Time revealAt_{0};
+    Time lastBeepAt_{-1000};
     std::optional<int> deferredExit_; // `exit` after the text has been shown.
     bool startCommandRan_ = false;
 };

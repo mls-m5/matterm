@@ -231,7 +231,7 @@ TEST_CASE("neofetch signs the picture") {
     }
     EXPECT(signedBy);
     EXPECT(umlaut);
-    EXPECT(pc.shows("| |    MATTRIX    | |")); // The TV is still there.
+    EXPECT(pc.shows("| |   MATTRIX    | |")); // The monitor is still there.
     EXPECT(pc.shows("Kernel: 6.8.0-mattrix"));
 }
 

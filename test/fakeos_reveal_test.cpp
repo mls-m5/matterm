@@ -41,14 +41,52 @@ TEST_CASE("Without a rate everything appears at once") {
     EXPECT(pc.last() == kPrompt);
 }
 
-TEST_CASE("Short output and the prompt are not delayed") {
-    Pc pc(slow());
+TEST_CASE("Even a short output is revealed gradually, in a short time") {
+    Pc pc(slow(1250));
     pc.run("echo hi");
+    EXPECT(pc.sys.revealing());
+    EXPECT(
+        !pc.shows("\nhi\n")); // Nothing yet: it appears character by character.
+    long long elapsed = 0;
+    while (pc.sys.revealing() && elapsed < 3000) {
+        pc.advance(20);
+        elapsed += 20;
+    }
     EXPECT(!pc.sys.revealing());
+    EXPECT(elapsed >= 240 && elapsed <= 700); // Quick, never sluggish.
     EXPECT(pc.shows("\nhi\n"));
     EXPECT(pc.last() == kPrompt);
     pc.run("ls");
+    EXPECT(pc.sys.revealing());
+    for (int i = 0; i < 100 && pc.sys.revealing(); ++i) {
+        pc.advance(20);
+    }
     EXPECT(pc.shows("README"));
+}
+
+TEST_CASE("A command with no output only brings the prompt back at once") {
+    Pc pc(slow(1250));
+    pc.run("true");
+    EXPECT(!pc.sys.revealing() || pc.last() == kPrompt);
+    pc.run("");
+    EXPECT(pc.last() == kPrompt);
+}
+
+TEST_CASE("The first welcome is revealed, quickly") {
+    Pc pc(slow(1250));
+    EXPECT(pc.sys.revealing());
+    EXPECT(!pc.shows("No real file systems were harmed."));
+    pc.advance(60);
+    EXPECT(!pc.shows("No real file systems were harmed."));
+    long long elapsed = 60;
+    while (pc.sys.revealing() && elapsed < 3000) {
+        pc.advance(20);
+        elapsed += 20;
+    }
+    EXPECT(elapsed >= 240 && elapsed <= 900);
+    EXPECT(pc.shows("Welcome to Mattrix OS 6.0 Professional Edition"));
+    EXPECT(pc.shows("No real file systems were harmed."));
+    EXPECT(pc.last() == kPrompt);
 }
 
 TEST_CASE("Long output is revealed over time, then the prompt returns") {

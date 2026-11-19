@@ -26,6 +26,16 @@ struct Capabilities {
     bool unicode = true;
 };
 
+// A short electronic pip, as a film computer makes while it types. The core
+// only reports them (Config::onBeep); the host decides whether and how to play
+// them. `at` is the host's time when it was reported.
+struct Beep {
+    double frequency = 1000; // Hertz.
+    int durationMs = 20;
+    double volume = 0.3; // 0..1, before the host's own master volume.
+    Time at{0};
+};
+
 struct Rgb {
     std::uint8_t r = 0, g = 0, b = 0;
     friend bool operator==(Rgb a, Rgb b) {

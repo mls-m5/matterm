@@ -36,7 +36,8 @@ using MouseEvent = InputEncoder::MouseEvent;
 namespace {
 void usage(std::ostream &out, const char *program) {
     out << "Usage: " << program << " [font.ttf] [OPTIONS]\n\n"
-        << "A small pretend Unix with an intro, a shell and programs to find.\n"
+        << "A small simulated Unix with an intro, a shell and programs to "
+           "find.\n"
            "Nothing in it touches your real computer.\n\n"
            "  --help, -h           Show this help.\n"
            "  --font-size PIXELS   Font size, 1..128 renderer pixels (default: "

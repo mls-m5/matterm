@@ -55,13 +55,13 @@ public:
             }
             break;
         case Phase::Hello:
-            drawTyped(canvas, kHello, t, kHelloPause, w, h);
+            drawTyped(world, canvas, kHello, t, kHelloPause, w, h);
             if (t >= typedTime(kHello) + kHelloPause) {
                 next(now);
             }
             break;
         case Phase::Rabbit:
-            drawTyped(canvas, kRabbit, t, kRabbitPause, w, h);
+            drawTyped(world, canvas, kRabbit, t, kRabbitPause, w, h);
             if (t >= typedTime(kRabbit) + kRabbitPause) {
                 next(now);
             }
@@ -95,6 +95,7 @@ private:
                                            : Phase::Done;
         phaseStart_ = now;
         stepped_ = now;
+        typedBefore_ = 0;
         if (phase_ == Phase::Rain) {
             drops_.clear();
         }
@@ -104,17 +105,22 @@ private:
         return Time(int(text.size()) * kTypeMs);
     }
 
-    void drawTyped(AsciiCanvas &canvas,
+    void drawTyped(World &world,
+                   AsciiCanvas &canvas,
                    const std::string &text,
                    Time t,
                    Time pause,
                    int w,
-                   int h) const {
+                   int h) {
         const Rgb green{60, 255, 110};
         const int shown = int(std::clamp<long long>(
             t.count() / kTypeMs, 0, (long long)text.size()));
         const int x = std::max(0, (w - int(text.size())) / 2), y = h / 2;
         canvas.text(x, y, text.substr(0, std::size_t(shown)), green);
+        if (shown > typedBefore_) { // A pip for each character typed.
+            world.beep(1100 + double((shown * 53) % 300), 22, 0.3);
+        }
+        typedBefore_ = shown;
         // The cursor blinks while waiting and holds still while typing.
         const bool typing = shown < int(text.size());
         const bool lit = typing || (t.count() / kBlinkMs) % 2 == 0;
@@ -218,6 +224,7 @@ private:
 
     Phase phase_ = Phase::Black;
     Time phaseStart_{0}, stepped_{0}, lastNow_{0};
+    int typedBefore_ = 0; // Characters already typed (and pipped) in this part.
     std::vector<Drop> drops_;
     std::vector<char> glyphs_;
 };

@@ -1,5 +1,6 @@
 #include "commands.h"
 
+#include "hardware.h"
 #include "programs.h"
 
 #if defined(__has_include)
@@ -1217,7 +1218,7 @@ int cmdWhich(World &w, const Args &args, CommandIo &io) {
 }
 
 int cmdHelp(World &, const Args &, CommandIo &io) {
-    io.out += "Mattrix OS 6.0 Professional Edition, a pretend system.\n"
+    io.out += "Mattrix OS 6.0 Professional Edition, a simulated system.\n"
               "A small Unix that lives in a terminal.\n"
               "Nothing here touches your real computer.\n\n"
               "Commands:\n";
@@ -1231,10 +1232,11 @@ int cmdHelp(World &, const Args &, CommandIo &io) {
         line += entry + " ";
     }
     io.out += "  " + line + "\n\n";
-    io.out += "Try: ls, cd, cat README, echo hi | wc, grep -n the "
-              "/usr/share/dict/words\n"
-              "Use Tab to complete, Up for history. There is more than what is "
-              "in your PATH.\n";
+    io.out +=
+        "Try: fire, gradient, neofetch, about, cal, cowsay hello, cat README,\n"
+        "     echo hi | wc, grep -n the /usr/share/dict/words\n"
+        "Use Tab to complete, Up for history. There is more to find than "
+        "what is in your PATH.\n";
     return 0;
 }
 
@@ -1669,28 +1671,51 @@ int cmdDirname(World &, const Args &args, CommandIo &io) {
 }
 
 int cmdSleep(World &, const Args &, CommandIo &) {
-    return 0; // Nothing waits in a pretend system.
+    return 0; // Nothing waits in a simulated system.
+}
+
+std::string pad(const std::string &text, std::size_t width) {
+    return std::string(width > text.size() ? width - text.size() : 0, ' ') +
+           text;
+}
+
+// Used space on the root disk: what the system itself takes, and the visitor's
+// own files.
+long diskUsedKiB(const World &w) {
+    return hardware::kDiskBaseUsedKiB + long(w.fs.totalBytes() / 1024);
 }
 
 int cmdDf(World &w, const Args &, CommandIo &io) {
-    const auto used = w.fs.totalBytes() / 1024;
-    io.out += "Filesystem     1K-blocks   Used Available Use% Mounted on\n";
-    io.out +=
-        "pretendfs        1048576 " +
-        std::string(6 - std::min<std::size_t>(5, std::to_string(used).size()),
-                    ' ') +
-        std::to_string(used) + "   " + std::to_string(1048576 - used) + "   " +
-        std::to_string(used * 100 / 1048576) + "% /\n";
-    io.out += "tmpfs             262144      0    262144   0% /tmp\n";
+    const long total = hardware::kDiskTotalKiB, used = diskUsedKiB(w);
+    const long tmp = hardware::kTmpTotalKiB;
+    io.out += "Filesystem         1K-blocks        Used   Available Use% "
+              "Mounted on\n";
+    io.out += "/dev/nvme0n1p2 " + pad(std::to_string(total), 13) + " " +
+              pad(std::to_string(used), 11) + " " +
+              pad(std::to_string(total - used), 11) + " " +
+              pad(std::to_string(used * 100 / total), 3) + "% /\n";
+    io.out += "tmpfs          " + pad(std::to_string(tmp), 13) + " " +
+              pad("0", 11) + " " + pad(std::to_string(tmp), 11) +
+              "   0% /tmp\n";
     return 0;
 }
 
 int cmdFree(World &, const Args &, CommandIo &io) {
+    using namespace hardware;
     io.out += "               total        used        free      shared  "
-              "buff/cache   available\n"
-              "Mem:         1048576      214040      602112        1024      "
-              "232424      760832\n"
-              "Swap:              0           0           0\n";
+              "buff/cache   available\n";
+    io.out += "Mem:    " + pad(std::to_string(kRamTotalKiB), 12) +
+              pad(std::to_string(kRamUsedKiB), 12) +
+              pad(std::to_string(kRamFreeKiB), 12) +
+              pad(std::to_string(kRamSharedKiB), 12) +
+              pad(std::to_string(kRamCacheKiB), 12) +
+              pad(std::to_string(kRamAvailableKiB), 12) + "\n";
+    io.out += "Swap:   " + pad("0", 12) + pad("0", 12) + pad("0", 12) + "\n";
+    return 0;
+}
+
+int cmdNproc(World &, const Args &, CommandIo &io) {
+    io.out += std::to_string(hardware::kCpuCores) + "\n";
     return 0;
 }
 
@@ -1778,95 +1803,39 @@ int cmdSed(World &w, const Args &args, CommandIo &io) {
     return ok ? 0 : 1;
 }
 
-// A fat old CRT television, drawn with markers: \x01 body, \x02 screen,
-// \x03 the name on the screen, \x04 knobs, \x05 back to plain.
+// An old CRT monitor on its computer, a keyboard in front, drawn with markers:
+// \x01 body, \x02 screen, \x03 the name on the screen, \x04 knobs, \x05 back to
+// plain.
 const char *const kTv[] = {
-    "       "
-    "\x01"
-    "\\"
-    "\x05"
-    "       "
-    "\x01"
-    "/"
-    "\x05"
-    "        "
-    "\x05"
-    "",
-    "        "
-    "\x01"
-    "\\"
-    "\x05"
-    "     "
-    "\x01"
-    "/"
-    "\x05"
-    "         "
-    "\x05"
-    "",
-    "         "
-    "\x01"
-    "\\"
-    "\x05"
-    "   "
-    "\x01"
-    "/"
-    "\x05"
-    "          "
-    "\x05"
-    "",
-    "          "
-    "\x01"
-    "\\"
-    "\x05"
-    " "
-    "\x01"
-    "/"
-    "\x05"
-    "           "
-    "\x05"
-    "",
-    "   "
-    "\x01"
-    ".-------V-------."
-    "\x05"
-    "    "
-    "\x05"
-    "",
-    "  "
-    "\x01"
-    "/"
+    ""
     "\x05"
     "  "
     "\x01"
-    ".-----------."
+    ".------------------."
     "\x05"
     "  "
-    "\x01"
-    "\\"
-    "\x05"
-    "   "
     "\x05"
     "",
-    " "
+    ""
+    "\x05"
+    "  "
     "\x01"
     "|"
     "\x05"
-    "  "
+    " "
     "\x01"
-    "/"
-    "\x02"
-    "             "
-    "\x01"
-    "\\"
+    ".--------------."
     "\x05"
-    "  "
+    " "
     "\x01"
     "|"
     "\x05"
     "  "
     "\x05"
     "",
-    " "
+    ""
+    "\x05"
+    "  "
     "\x01"
     "|"
     "\x05"
@@ -1874,7 +1843,28 @@ const char *const kTv[] = {
     "\x01"
     "|"
     "\x02"
-    "    "
+    "              "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    "  "
+    "\x05"
+    "",
+    ""
+    "\x05"
+    "  "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x01"
+    "|"
+    "\x02"
+    "   "
     "\x03"
     "MATTRIX"
     "\x02"
@@ -1889,7 +1879,9 @@ const char *const kTv[] = {
     "  "
     "\x05"
     "",
-    " "
+    ""
+    "\x05"
+    "  "
     "\x01"
     "|"
     "\x05"
@@ -1897,7 +1889,7 @@ const char *const kTv[] = {
     "\x01"
     "|"
     "\x02"
-    "      "
+    "     "
     "\x03"
     "O S"
     "\x02"
@@ -1912,7 +1904,9 @@ const char *const kTv[] = {
     "  "
     "\x05"
     "",
-    " "
+    ""
+    "\x05"
+    "  "
     "\x01"
     "|"
     "\x05"
@@ -1920,7 +1914,7 @@ const char *const kTv[] = {
     "\x01"
     "|"
     "\x02"
-    "               "
+    "              "
     "\x01"
     "|"
     "\x05"
@@ -1931,58 +1925,122 @@ const char *const kTv[] = {
     "  "
     "\x05"
     "",
+    ""
+    "\x05"
+    "  "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x01"
+    "'--------------'"
+    "\x05"
     " "
     "\x01"
     "|"
     "\x05"
     "  "
-    "\x01"
-    "\\"
-    "\x02"
-    "_____________"
-    "\x01"
-    "/"
+    "\x05"
+    "",
+    ""
     "\x05"
     "  "
     "\x01"
-    "|"
+    "'------------------'"
     "\x05"
     "  "
     "\x05"
     "",
-    "  "
-    "\x01"
-    "\\"
-    "\x05"
-    "  "
-    "\x04"
-    "o  o      "
-    "\x01"
-    "::::"
-    "\x05"
-    "  "
-    "\x01"
-    "/"
-    "\x05"
-    "  "
-    "\x05"
-    "",
-    "   "
-    "\x01"
-    "'---------------'"
-    "\x05"
-    "    "
-    "\x05"
-    "",
-    "     "
-    "\x01"
-    "|__|"
+    ""
     "\x05"
     "      "
     "\x01"
-    "|__|"
+    "/__________\\"
+    "\x05"
+    "      "
+    "\x05"
+    "",
+    ""
+    "\x05"
+    " "
+    "\x01"
+    ".--------------------."
+    "\x05"
+    " "
+    "\x05"
+    "",
+    ""
+    "\x05"
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x01"
+    "[======]"
     "\x05"
     "     "
+    "\x04"
+    "o  o"
+    "\x05"
+    "  "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x05"
+    "",
+    ""
+    "\x05"
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    "  "
+    "\x01"
+    "::::::::::::::::"
+    "\x05"
+    "  "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x05"
+    "",
+    ""
+    "\x05"
+    " "
+    "\x01"
+    "'--------------------'"
+    "\x05"
+    " "
+    "\x05"
+    "",
+    ""
+    "\x05"
+    "  "
+    "\x01"
+    ".-----------------."
+    "\x05"
+    "   "
+    "\x05"
+    "",
+    ""
+    "\x05"
+    "  "
+    "\x01"
+    "|_|_|_|_|_|_|_|_|_|"
+    "\x05"
+    "   "
+    "\x05"
+    "",
+    ""
+    "\x05"
+    "  "
+    "\x01"
+    "'-----------------'"
+    "\x05"
+    "   "
     "\x05"
     "",
     "\x02"
@@ -2001,7 +2059,7 @@ int cmdNeofetch(World &w, const Args &, CommandIo &io) {
     };
     const std::vector<Line> info = {
         {"OS", "Mattrix OS 6.0 Professional Edition x86_64"},
-        {"Host", w.hostname + " (a pretend machine)"},
+        {"Host", w.hostname + " (a simulated machine)"},
         {"Kernel", "6.8.0-mattrix"},
         {"Uptime",
          std::to_string(up / 86400) + " days, " +
@@ -2009,10 +2067,22 @@ int cmdNeofetch(World &w, const Args &, CommandIo &io) {
              std::to_string(up % 3600 / 60) + " mins"},
         {"Packages", "42 (mattrix)"},
         {"Shell", "mattrix-sh 1.0"},
+        {"Display", hardware::kDisplay},
         {"Terminal",
          std::to_string(w.columns) + "x" + std::to_string(w.rows) + " cells"},
-        {"CPU", "Imaginary i0-9000 (1) @ 3.00GHz"},
-        {"Memory", "214MiB / 1024MiB"},
+        {"CPU",
+         std::string(hardware::kCpuModel) + " (" +
+             std::to_string(hardware::kCpuCores) + ") @ " +
+             hardware::kCpuClock},
+        {"GPU", hardware::kGpu},
+        {"Memory",
+         hardware::size(hardware::kRamUsedKiB) + " / " +
+             hardware::size(hardware::kRamTotalKiB)},
+        {"Disk (/)",
+         hardware::size(diskUsedKiB(w)) + " / " +
+             hardware::size(hardware::kDiskTotalKiB) + " (" +
+             std::to_string(diskUsedKiB(w) * 100 / hardware::kDiskTotalKiB) +
+             "%)"},
     };
     std::vector<std::string> right;
     right.push_back(io.tty ? "\x1b[1;32m" + w.user + "\x1b[0m@\x1b[1;32m" +
@@ -2318,7 +2388,7 @@ const std::vector<CommandInfo> &commands() {
         {"reset",
          cmdReset,
          true,
-         "restore the pretend system to its first state"},
+         "restore the simulated system to its first state"},
         {"exit", cmdExit, true, "end the session"},
         {"help", cmdHelp, true, "list commands"},
         {"true", cmdTrue, true, "succeed"},
@@ -2366,6 +2436,7 @@ const std::vector<CommandInfo> &commands() {
         {"sleep", cmdSleep, false, "wait (instantly, here)"},
         {"df", cmdDf, false, "show disk space"},
         {"free", cmdFree, false, "show memory"},
+        {"nproc", cmdNproc, false, "print the number of processors"},
         {"less", cmdLess, false, "page through a file"},
         {"neofetch", cmdNeofetch, false, "show the system with a picture"},
         {"about", cmdAbout, false, "what this is made of, and by whom"},

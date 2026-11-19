@@ -84,11 +84,12 @@ TEST_CASE("Paths and system information commands") {
     EXPECT(pc.shows("\n/a/b\n"));
     pc.run("clear");
     pc.run("df");
-    EXPECT(pc.shows("pretendfs"));
+    EXPECT(pc.shows("/dev/nvme0n1p2"));
+    EXPECT(pc.shows("68719476736"));
     pc.run("free");
     EXPECT(pc.shows("Mem:"));
     pc.run("sleep 100; echo awake");
-    EXPECT(pc.shows("awake")); // Nothing waits in a pretend system.
+    EXPECT(pc.shows("awake")); // Nothing waits in a simulated system.
 }
 
 TEST_CASE("less pages a file on the alternate screen") {
@@ -161,7 +162,8 @@ TEST_CASE("The system is called Mattrix OS everywhere its name shows") {
     EXPECT(pc.shows("Mattrix OS 6.0 Professional Edition\n"));
     pc.run("clear");
     pc.run("help");
-    EXPECT(pc.shows("Mattrix OS 6.0 Professional Edition, a pretend system."));
+    EXPECT(
+        pc.shows("Mattrix OS 6.0 Professional Edition, a simulated system."));
     pc.run("clear");
     pc.run("cat README | head -n 1; cat /etc/issue; ps");
     EXPECT(pc.shows("Welcome to Mattrix OS."));
@@ -174,7 +176,8 @@ TEST_CASE("The system is called Mattrix OS everywhere its name shows") {
     EXPECT(pc.last() == kPrompt);
 }
 
-TEST_CASE("neofetch draws a fat old TV next to the system information") {
+TEST_CASE(
+    "neofetch draws an old CRT monitor on its computer, with a keyboard") {
     Pc pc;
     pc.run("neofetch");
     EXPECT(pc.shows("guest@matterm"));
@@ -182,9 +185,11 @@ TEST_CASE("neofetch draws a fat old TV next to the system information") {
     EXPECT(pc.shows("Kernel: 6.8.0-mattrix"));
     EXPECT(pc.shows("Shell: mattrix-sh 1.0"));
     EXPECT(pc.shows("Memory: "));
-    EXPECT(pc.shows("| |    MATTRIX    | |")); // On the TV's screen.
-    EXPECT(pc.shows(".-------V-------."));     // The antenna joins the case.
-    EXPECT(pc.shows("|__|      |__|"));        // Its feet.
+    EXPECT(pc.shows("| |   MATTRIX    | |")); // On the monitor's screen.
+    EXPECT(pc.shows("/__________\\"));        // The monitor's stand.
+    EXPECT(pc.shows("[======]"));             // The computer's drive.
+    EXPECT(pc.shows("::::::::::::::::"));     // Its vent.
+    EXPECT(pc.shows("|_|_|_|_|_|_|_|_|_|"));  // The keyboard in front.
     // The picture is on the left, the information on the right of it.
     for (std::size_t y = 0; y < pc.model.rows(); ++y) {
         const auto row = pc.row(y);
@@ -198,10 +203,48 @@ TEST_CASE("neofetch draws a fat old TV next to the system information") {
     EXPECT(pc.shows("OS: Mattrix OS 6.0 Professional Edition x86_64"));
 }
 
+TEST_CASE(
+    "The machine is the same in neofetch, free, df, top, nproc and /proc") {
+    Pc pc(false, 100, 60);
+    pc.run("neofetch");
+    EXPECT(pc.shows("CPU: Mattrix Quantum Threadripper 9999X (128) @ 6.20GHz"));
+    EXPECT(pc.shows("GPU: Mattrix Photon-X 9090 Ti Mega Hyper, 96 GB HBM9"));
+    EXPECT(pc.shows("Memory: 38.0GiB / 512.0GiB"));
+    EXPECT(pc.shows("Disk (/): 8.0TiB / 64.0TiB (12%)"));
+    EXPECT(pc.shows("Display: 2048x1536 @ 85Hz, 21-inch CRT"));
+    pc.run("clear");
+    pc.run("free");
+    EXPECT(pc.shows("536870912")); // 512 GiB in KiB.
+    EXPECT(pc.shows("39845888"));  // 38 GiB used.
+    pc.run("df");
+    EXPECT(pc.shows("68719476736")); // 64 TiB.
+    pc.run("nproc");
+    EXPECT(pc.shows("\n128\n"));
+    pc.run("clear");
+    pc.run("cat /proc/cpuinfo");
+    EXPECT(pc.shows("model name\t: Mattrix Quantum Threadripper 9999X") ||
+           pc.shows("Mattrix Quantum Threadripper 9999X"));
+    EXPECT(pc.shows("cpu cores"));
+    pc.run("grep MemTotal /proc/meminfo");
+    EXPECT(pc.shows("536870912 kB"));
+    pc.run("clear");
+    pc.run("top");
+    pc.advance(100);
+    EXPECT(pc.shows("524288.0 total"));
+    EXPECT(pc.shows("38912.0 used"));
+    EXPECT(pc.shows("128 cores"));
+    pc.type("q");
+    // And the visitor's own files count on the disk.
+    pc.run("clear");
+    pc.run("seq 1 20000 > big");
+    pc.run("df");
+    EXPECT(pc.shows("8589934"));
+}
+
 TEST_CASE("neofetch in a pipe has no colors and is a clean block") {
     Pc pc;
     pc.run("neofetch | wc -l");
-    EXPECT(pc.shows("     15")); // The picture, signed, is 15 rows.
+    EXPECT(pc.shows("     17")); // The picture, signed, is 17 rows.
     pc.run("neofetch | grep -c ' '");
     pc.run("clear");
     pc.run("neofetch | head -n 5");

@@ -19,6 +19,17 @@ TEST_CASE("Without the intro the system opens with the motd and a prompt") {
     EXPECT(!pc.sys.nextDeadline()); // Idle: nothing wakes the host.
 }
 
+TEST_CASE("The welcome is short, friendly and points the way") {
+    Pc pc;
+    EXPECT(pc.shows("Welcome to Mattrix OS 6.0 Professional Edition"));
+    EXPECT(!pc.shows("pretend"));
+    EXPECT(!pc.shows("GNU/Linux"));
+    EXPECT(!pc.shows("x86_64"));
+    EXPECT(pc.shows(
+        "No real file systems were harmed. Type 'help', or read README."));
+    EXPECT(pc.shows("Try: fire, gradient, neofetch, about"));
+}
+
 TEST_CASE("echo, quoting, variables and tilde") {
     Pc pc;
     pc.run("echo \"a   b\" 'c d' $HOME ~ \\$X");
