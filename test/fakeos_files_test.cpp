@@ -53,8 +53,7 @@ TEST_CASE("The files say what they should") {
     EXPECT(secret.size() > end.size());
     EXPECT(secret.compare(secret.size() - end.size(), end.size(), end) == 0);
     const auto passwords = fileText(pc, home + "passwords_final_v3.txt");
-    EXPECT(passwords.find("love") == 0);
-    EXPECT(passwords.find("bad idea") != std::string::npos);
+    EXPECT(passwords == "password123\n");
     const auto pictures = fileText(pc, home + "vacation_pics_(1).txt");
     EXPECT(pictures.find("<3") != std::string::npos);
     EXPECT(pictures.find("Trash") != std::string::npos); // The way on.
