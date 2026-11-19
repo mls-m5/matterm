@@ -56,7 +56,9 @@ printf '\033[31mHello from VT\033[0m\r\n' > /tmp/matterm.vt
 Wheel/Page Up/Down and Home/End navigate history; Space pauses file playback;
 Escape exits. Without `--input`, it displays a parsed startup showcase. Supported
 commands, bounds, callbacks, and limitations are documented in [docs/VT.md](docs/VT.md).
-PTY/ioctl/session work remains unchecked in [ROADMAP.md](ROADMAP.md).
+Native PTY/session libraries are now implemented and tested separately; GUI
+attachment is the next application step. See [docs/PTY.md](docs/PTY.md) and
+[ROADMAP.md](ROADMAP.md).
 
 ## Build and Run
 

@@ -46,6 +46,10 @@ if(BUILD_TESTING)
     target_link_libraries(vtparser_test PRIVATE matterm::vt)
     add_test(NAME vt_parser COMMAND vtparser_test)
 
+    add_executable(inputencoder_test inputencoder_test.cpp mls-unit-test/test_main.cpp)
+    target_link_libraries(inputencoder_test PRIVATE matterm::vt)
+    add_test(NAME input_encoder COMMAND inputencoder_test)
+
     add_executable(scrollviewport_test
         scrollviewport_test.cpp
         mls-unit-test/test_main.cpp
@@ -71,6 +75,27 @@ if(BUILD_TESTING)
         mls-unit-test/test_main.cpp
     )
     target_link_libraries(sdlbackend_test PRIVATE cellbuffer terminalmemory sdlbackend)
+
+    if(TARGET ptyprocess)
+        add_executable(pty_test_child pty_test_child.cpp)
+        target_compile_features(pty_test_child PRIVATE cxx_std_17)
+        add_executable(ptyprocess_test ptyprocess_test.cpp mls-unit-test/test_main.cpp)
+        target_link_libraries(ptyprocess_test PRIVATE matterm::pty)
+        target_compile_definitions(ptyprocess_test PRIVATE PTY_TEST_CHILD="$<TARGET_FILE:pty_test_child>")
+        add_dependencies(ptyprocess_test pty_test_child)
+        add_test(NAME pty_process COMMAND ptyprocess_test)
+        set_tests_properties(pty_process PROPERTIES TIMEOUT 20)
+        add_executable(ptysession_test ptysession_test.cpp mls-unit-test/test_main.cpp)
+        target_link_libraries(ptysession_test PRIVATE matterm::session)
+        target_compile_definitions(ptysession_test PRIVATE PTY_TEST_CHILD="$<TARGET_FILE:pty_test_child>")
+        add_dependencies(ptysession_test pty_test_child)
+        find_program(MATTERM_TEST_BASH bash)
+        if(MATTERM_TEST_BASH)
+            target_compile_definitions(ptysession_test PRIVATE MATTERM_TEST_BASH="${MATTERM_TEST_BASH}")
+        endif()
+        add_test(NAME pty_session COMMAND ptysession_test)
+        set_tests_properties(pty_session PROPERTIES TIMEOUT 20)
+    endif()
 
     set(TEST_FONT_FILE "" CACHE FILEPATH "TrueType font for atlas and rendering tests")
     if(TEST_FONT_FILE)
