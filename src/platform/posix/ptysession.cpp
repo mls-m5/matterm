@@ -1,5 +1,7 @@
 #include "ptysession.h"
 
+#include "ptylink.h"
+
 #include "terminalmodel.h"
 #include "vtparser.h"
 
@@ -9,7 +11,6 @@
 #include <utility>
 
 namespace {
-constexpr std::size_t maxPending = 1024 * 1024;
 std::size_t validated(int value) {
     if (value <= 0 || value > 65535) {
         throw std::invalid_argument("Invalid PTY session size");
@@ -20,14 +21,10 @@ std::size_t validated(int value) {
 
 struct PtySession::Impl {
     TerminalModel model;
-    PtyProcess process;
+    PtyLink link;
     VtEvents events;
     std::function<void(std::string_view)> outputObserver;
-    std::string pending;
-    std::size_t offset = 0;
-    bool eof = false;
     bool replyOverflow = false;
-    std::optional<PtyProcess::ExitStatus> status;
     VtParser parser;
 
     Impl(const std::vector<std::string> &arguments,
@@ -37,11 +34,11 @@ struct PtySession::Impl {
          const std::string &term,
          PtyProcess::ColorCapability color)
         : model(validated(columns), validated(rows), 1000)
-        , process(arguments, columns, rows, term, color)
+        , link(arguments, columns, rows, term, color)
         , events(std::move(events))
         , parser(model,
                  {[this](std::string_view bytes) {
-                      if (!send(bytes)) {
+                      if (!link.sendInput(bytes)) {
                           replyOverflow = true;
                       }
                       if (this->events.reply) {
@@ -64,55 +61,19 @@ struct PtySession::Impl {
                           this->events.resetPaletteColor(index);
                       }
                   }}) {
+        link.setEvents({[this](std::string_view bytes) {
+                            if (outputObserver) {
+                                outputObserver(bytes);
+                            }
+                            parser.feed(bytes);
+                        },
+                        {},
+                        {}});
+        link.setEndOfOutputHandler([this] { parser.finish(); });
         model.eraseDisplay(TerminalModel::EraseMode::All);
     }
-    bool send(std::string_view bytes) {
-        if (process.closed() ||
-            bytes.size() > maxPending - (pending.size() - offset)) {
-            return false;
-        }
-        if (offset && offset >= pending.size() / 2) {
-            pending.erase(0, offset);
-            offset = 0;
-        }
-        pending.append(bytes);
-        return true;
-    }
     void pump(std::size_t readBudget, std::size_t writeBudget) {
-        std::array<char, 4096> buffer{};
-        while (readBudget && !eof) {
-            const auto result = process.read(
-                buffer.data(), std::min(buffer.size(), readBudget));
-            if (result.state == PtyProcess::ReadState::Data) {
-                const std::string_view bytes(buffer.data(), result.count);
-                if (outputObserver) {
-                    outputObserver(bytes);
-                }
-                parser.feed(bytes);
-                readBudget -= result.count;
-            }
-            else {
-                if (result.state == PtyProcess::ReadState::Closed) {
-                    parser.finish();
-                    eof = true;
-                }
-                break;
-            }
-        }
-        while (writeBudget && offset < pending.size() && !process.closed()) {
-            const auto count = process.write(std::string_view(pending).substr(
-                offset, std::min(writeBudget, pending.size() - offset)));
-            if (!count) {
-                break;
-            }
-            offset += count;
-            writeBudget -= count;
-        }
-        if (offset == pending.size() || process.closed()) {
-            pending.clear();
-            offset = 0;
-        }
-        status = process.pollExit();
+        link.pump(readBudget, writeBudget);
         if (replyOverflow) {
             throw std::length_error("PTY reply queue limit exceeded");
         }
@@ -139,7 +100,7 @@ const TerminalModes &PtySession::modes() const noexcept {
     return impl_->parser.modes();
 }
 bool PtySession::send(std::string_view bytes) {
-    return impl_->send(bytes);
+    return impl_->link.sendInput(bytes);
 }
 void PtySession::pump(std::size_t readBudget, std::size_t writeBudget) {
     impl_->pump(readBudget, writeBudget);
@@ -150,11 +111,11 @@ void PtySession::resize(int columns, int rows) {
             "PTY session dimensions must be in 1..65535");
     }
     impl_->model.resize(std::size_t(columns), std::size_t(rows));
-    impl_->process.resize(columns, rows);
+    impl_->link.resize(columns, rows);
 }
 bool PtySession::finished() const noexcept {
-    return impl_->eof && impl_->status.has_value();
+    return impl_->link.finished();
 }
 std::optional<PtyProcess::ExitStatus> PtySession::exitStatus() const noexcept {
-    return impl_->status;
+    return impl_->link.exitStatus();
 }

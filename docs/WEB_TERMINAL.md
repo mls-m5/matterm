@@ -428,8 +428,9 @@ Each phase is independently useful and ends with tests and documentation.
 1. **Protocol and link interfaces** (done: `src/protocol/` codec and
    `ServerSession`; `src/transport/` `MessageChannel`, `TerminalLink`, and
    `ClientSession`, all with tests including a client-to-server end-to-end
-   loopback). Remaining: `PtyLink`, so the native application uses the same
-   interface as the web client.
+   loopback), and `PtyLink` (`src/platform/posix/`), the native `TerminalLink`
+   over a local PTY; `PtySession` is now built on it, so the native application
+   uses the same interface as the web client.
 2. **Local server, no browser.** `matterm-server` on loopback: configuration
    files, static files, `/login` with Argon2id, configurable rate limiter,
    WebSocket, sessions, flow control; a native test client in the test suite.

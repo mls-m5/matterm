@@ -1,6 +1,8 @@
 # Linux PTY and Session Layer
 
-`matterm::pty` provides `PtyProcess`; `matterm::session` adds a `TerminalModel`,
+`matterm::pty` provides `PtyProcess`; `matterm::ptylink` provides `PtyLink`, a
+`TerminalLink` (see docs/WEB_TERMINAL.md) with a bounded input queue and a
+nonblocking `pump()`; `matterm::session` builds on it and adds a `TerminalModel`,
 `VtParser`, bounded outbound queue, and a nonblocking pump. Neither requires SDL.
 Build with MATTERM_ENABLE_PTY on Linux; disable it for portable/browser clients.
 This is a native adapter, not a remote-shell server or a process sandbox.
