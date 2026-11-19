@@ -14,4 +14,10 @@ struct CursorState {
     // rectangle. Blinking is the caller's job and normally stops too.
     bool focused = true;
     Rgb8 color{255, 255, 255};
+    // Gliding cursor: the cursor is drawn at (column + columnOffset, row +
+    // rowOffset), in cells (negative: still left of or above its cell). Zero
+    // (the default) is the exact cell, drawn as above; nonzero draws a
+    // translucent block that moves, and the cell is not inverted.
+    float columnOffset = 0;
+    float rowOffset = 0;
 };

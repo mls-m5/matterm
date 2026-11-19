@@ -9,4 +9,5 @@ int runPtyFrontend(const char *font,
                    const std::vector<std::string> &arguments,
                    const std::string &term,
                    bool smokeTest,
-                   const char *recordPath);
+                   const char *recordPath,
+                   bool smoothCursor = false);
