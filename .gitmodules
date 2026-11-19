@@ -4,3 +4,6 @@
 [submodule "matperf"]
 	path = matperf
 	url = git@github.com:mls-m5/matperf.git
+[submodule "lib/fast-json"]
+	path = lib/fast-json
+	url = git@github.com:mls-m5/fast-json.git
