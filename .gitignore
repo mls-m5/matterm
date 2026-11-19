@@ -14,3 +14,4 @@ bin/
 .qtc_clangd/
 *.creator.user.*
 .tmp/
+build-web/
