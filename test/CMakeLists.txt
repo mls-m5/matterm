@@ -39,6 +39,13 @@ if(BUILD_TESTING)
     target_link_libraries(utf8decoder_test PRIVATE matterm::utf8)
     add_test(NAME utf8_decoder COMMAND utf8decoder_test)
 
+    add_executable(vtparser_test
+        vtparser_test.cpp
+        mls-unit-test/test_main.cpp
+    )
+    target_link_libraries(vtparser_test PRIVATE matterm::vt)
+    add_test(NAME vt_parser COMMAND vtparser_test)
+
     add_executable(scrollviewport_test
         scrollviewport_test.cpp
         mls-unit-test/test_main.cpp
@@ -84,6 +91,12 @@ if(BUILD_TESTING)
             add_test(NAME terminal_model_render_smoke
                 COMMAND matterm-terminal-demo "${TEST_FONT_FILE}" --smoke-test)
             set_tests_properties(terminal_model_render_smoke PROPERTIES
+                ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+        endif()
+        if(TARGET matterm)
+            add_test(NAME vt_frontend_render_smoke
+                COMMAND matterm "${TEST_FONT_FILE}" --smoke-test)
+            set_tests_properties(vt_frontend_render_smoke PROPERTIES
                 ENVIRONMENT "SDL_VIDEODRIVER=dummy")
         endif()
     else()

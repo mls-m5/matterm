@@ -16,20 +16,20 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 
 ## 2. First VT Stream Parser (Current Implementation Slice)
 
-- [ ] Incremental feed(bytes), preserving partial UTF-8 and escape sequences.
-- [ ] Explicit ground, escape, CSI, string, and discard states; no regex/line parsing.
-- [ ] Bounded parameters and control-string storage, with safe recovery.
-- [ ] CR/LF/BS/tab and ordinary Unicode text through the existing model.
-- [ ] CSI cursor positioning/movement and line/display erasure.
-- [ ] SGR reset, 16-color, indexed 256-color, and RGB foreground/background.
-- [ ] Cursor visibility and saved cursor handling.
-- [ ] Narrow, documented alternate-screen mode support, without claiming full DEC compatibility.
-- [ ] Bounded OSC title events; ignore clipboard and unsupported control strings safely.
-- [ ] Explicit reply channel for supported status queries, without a PTY dependency.
-- [ ] Tests comparing whole input with every split point and byte-at-a-time input.
-- [ ] Tests for malformed, unknown, oversized, cancelled, and truncated sequences.
-- [ ] Start a separate matterm application for VT/file input; keep both existing demos unchanged.
-- [ ] Document the exact supported subset and unsupported behavior.
+- [x] Incremental feed(bytes), preserving partial UTF-8 and escape sequences.
+- [x] Explicit ground, escape, CSI, string, and discard states; no regex/line parsing.
+- [x] Bounded parameters and control-string storage, with safe recovery.
+- [x] CR/LF/BS/tab and ordinary Unicode text through the existing model.
+- [x] CSI cursor positioning/movement and line/display erasure.
+- [x] SGR reset, 16-color, indexed 256-color, and RGB foreground/background.
+- [x] Cursor visibility and saved cursor handling.
+- [x] Narrow, documented alternate-screen mode support, without claiming full DEC compatibility.
+- [x] Bounded OSC title events; ignore clipboard and unsupported control strings safely.
+- [x] Explicit reply channel for supported status queries, without a PTY dependency.
+- [x] Tests comparing whole input with every split point and byte-at-a-time input.
+- [x] Tests for malformed, unknown, oversized, cancelled, and truncated sequences.
+- [x] Start a separate matterm application for VT/file input; keep both existing demos unchanged.
+- [x] Document the exact supported subset and unsupported behavior in docs/VT.md.
 
 ## 3. Broader Terminal Semantics
 
@@ -53,12 +53,12 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 
 ## 5. Terminal Application
 
-- [ ] Separate matterm executable using the same model/parser libraries.
+- [x] Separate matterm executable using the same model/parser libraries (VT frontend only so far).
 - [ ] TerminalSession joins PTY output -> parser -> model -> renderer.
 - [ ] Keyboard/text/paste -> input encoder -> PTY; parser replies use the same queued output path.
 - [ ] Capability-appropriate TERM/terminfo; do not advertise xterm-256color prematurely.
 - [ ] Shell, job-control, resize, alternate-screen, and exit integration tests.
-- [ ] Keep dangerous OSC actions disabled unless explicitly opted in with a security policy.
+- [x] Keep dangerous OSC actions disabled; any future opt-in requires a security policy.
 
 ## Future Direction: Output to an Existing Terminal (Do Not Implement Yet)
 
@@ -73,6 +73,36 @@ ncurses alternative. This is a separate output backend/encoder, not the input pa
 
 Record this direction now, but defer implementation and API commitments until the
 input/emulation path is established. Shared-memory/IPC adapters are also future work.
+
+## Future Direction: Emscripten and Browser Clients (Do Not Implement Yet)
+
+All application entry points should eventually support a callback-driven update
+loop rather than relying on a blocking native while loop and stack-owned session.
+
+- [ ] Separate initialization, input/update, rendering, and shutdown from main().
+- [ ] Give session state an explicit lifetime across browser frame callbacks.
+- [ ] Schedule redraws when cells, cursor, viewport, size, or atlas resources change.
+- [ ] Request animation frames while scrolling; use timers for cursor blink.
+- [ ] Avoid continuously redrawing idle frames; a sleeping native VSync loop is
+  not the browser architecture. Pause/resume and cleanup must be explicit.
+- [ ] Keep native PTY/ioctl code isolated from portable model/parser/renderer code.
+- [ ] Validate SDL/font assets and chosen rendering APIs under Emscripten; do not
+  claim the current programs already compile or run in a browser.
+
+Two browser use cases should reuse the same libraries:
+
+- [ ] Remote terminal: a server owns a PTY/process, while a browser owns the parser,
+  model, and renderer. Define binary terminal-data, resize, input, status/exit,
+  and reconnection messages behind a transport interface (for example WebSocket).
+- [ ] Plan authentication, authorization, TLS, origin checks, process isolation,
+  backpressure, message bounds, and session cleanup before exposing remote shells.
+- [ ] Local simulation: generate scripted/timed VT output entirely in the browser,
+  without a server or shell, for company presentations, advertisements, and effects.
+- [ ] Preserve direct-cell and terminal-model demos as examples for those clients.
+
+Native PTY, remote transport, and simulated streams are alternative adapters;
+none should become a dependency of direct cell rendering. These are recorded
+future goals, not implementation in the current parser slice.
 
 ## References
 

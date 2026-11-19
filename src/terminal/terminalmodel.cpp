@@ -24,6 +24,10 @@ struct TerminalModel::Impl {
         CursorState cursor;
         FChar style;
         bool wrapPending = false;
+        CursorState savedCursor;
+        FChar savedStyle;
+        bool savedWrap = false;
+        bool hasSavedCursor = false;
 
         Screen(std::size_t columns,
                std::size_t rows,
@@ -91,6 +95,10 @@ struct TerminalModel::Impl {
             result->memory.append(FStringView{}, blank(old));
         }
         result->style = old.style;
+        result->savedCursor = old.savedCursor;
+        result->savedStyle = old.savedStyle;
+        result->savedWrap = old.savedWrap;
+        result->hasSavedCursor = old.hasSavedCursor;
         result->cursor = old.cursor;
         result->cursor.column = std::min(old.cursor.column, int(width) - 1);
         const auto removed = rows > height ? rows - height : 0;
@@ -153,6 +161,29 @@ void TerminalModel::setColors(Rgb8 foreground, Rgb8 background) {
     auto &screen = impl_->active();
     screen.style.foreground = foreground;
     screen.style.background = background;
+}
+void TerminalModel::setCursorVisible(bool visible) {
+    impl_->active().cursor.visible = visible;
+}
+void TerminalModel::saveCursor() {
+    auto &screen = impl_->active();
+    screen.savedCursor = screen.cursor;
+    screen.savedStyle = screen.style;
+    screen.savedWrap = screen.wrapPending;
+    screen.hasSavedCursor = true;
+}
+void TerminalModel::restoreCursor() {
+    auto &screen = impl_->active();
+    if (!screen.hasSavedCursor) {
+        return;
+    }
+    screen.cursor = screen.savedCursor;
+    screen.cursor.column =
+        std::clamp(screen.cursor.column, 0, int(columns()) - 1);
+    screen.cursor.row = std::clamp(screen.cursor.row, 0, int(rows()) - 1);
+    screen.style = screen.savedStyle;
+    screen.wrapPending =
+        screen.savedWrap && screen.cursor.column == int(columns()) - 1;
 }
 void TerminalModel::carriageReturn() {
     auto &screen = impl_->active();
