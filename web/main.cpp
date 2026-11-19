@@ -37,6 +37,9 @@ struct App {
     Palette palette;
     Uint64 last = 0;
     bool skipText = false;
+    // The session is over (exit, error or lost connection): Enter reloads the
+    // page, which shows the login form again (each login allows one upgrade).
+    bool ended = false;
     // Mouse: application reporting, or local selection.
     bool mouseCaptured = false;
     MouseEvent::Button heldButton = MouseEvent::Button::None;
@@ -188,6 +191,14 @@ void handleWheel(App &app, const SDL_MouseWheelEvent &wheel) {
 
 void handleEvent(App &app, const SDL_Event &event) {
     auto &model = *app.model;
+    if (app.ended) {
+        if (event.type == SDL_KEYDOWN &&
+            (event.key.keysym.sym == SDLK_RETURN ||
+             event.key.keysym.sym == SDLK_KP_ENTER)) {
+            EM_ASM({ location.reload(); });
+        }
+        return;
+    }
     if (event.type == SDL_TEXTINPUT) {
         const auto mod = modifiers(SDL_GetModState());
         if (app.skipText) {
@@ -410,13 +421,17 @@ int main() {
             events.output = [](std::string_view bytes) {
                 gApp->parser->feed(bytes);
             };
-            events.exited = [](int code, int) {
-                gApp->parser->feed(
-                    "\r\n[process exited: " + std::to_string(code) + "]\r\n");
+            events.exited = [](int code, int signal) {
+                gApp->ended = true;
+                gApp->parser->feed("\r\n[process exited: " +
+                                   (signal ? "signal " + std::to_string(signal)
+                                           : std::to_string(code)) +
+                                   "]\r\n[Press Enter to log in again]\r\n");
             };
             events.closed = [](std::string_view reason) {
+                gApp->ended = true;
                 gApp->parser->feed("\r\n[disconnected: " + std::string(reason) +
-                                   "]\r\n");
+                                   "]\r\n[Press Enter to log in again]\r\n");
             };
             app.session->setEvents(std::move(events));
         }
