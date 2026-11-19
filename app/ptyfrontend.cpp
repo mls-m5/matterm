@@ -14,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <tuple>
 
 namespace {
 struct SdlRuntime {
@@ -100,6 +101,87 @@ InputEncoder::Modifiers modifiers(SDL_Keymod mod) {
             bool(mod & KMOD_CTRL) && !altGr};
 }
 
+struct Selection {
+    TerminalModel::TextCell anchor, end;
+    std::size_t epoch;
+
+    bool valid(const TerminalModel &model) const {
+        return epoch == model.selectionEpoch() &&
+               std::min(anchor.row, end.row) >= model.firstRetainedRow();
+    }
+
+    bool copy(const TerminalModel &model) const {
+        const auto text = model.copyText(anchor, end, 1024 * 1024);
+        return text && SDL_SetClipboardText(text->c_str()) == 0;
+    }
+
+    void apply(const TerminalModel &model, RenderFrame &frame) const {
+        if (!valid(model)) {
+            return;
+        }
+        auto first = anchor;
+        auto last = end;
+        if (std::tie(last.row, last.column) <
+            std::tie(first.row, first.column)) {
+            std::swap(first, last);
+        }
+        const auto viewFirst =
+            model.firstRetainedRow() + model.viewport().firstRow();
+        const auto viewEnd = viewFirst + frame.cells.rows();
+        if (last.row < viewFirst || first.row >= viewEnd) {
+            return;
+        }
+        const auto columns = frame.cells.columns();
+        frame.selectionBegin =
+            first.row < viewFirst
+                ? 0
+                : (first.row - viewFirst) * columns + first.column;
+        frame.selectionEnd =
+            last.row >= viewEnd
+                ? frame.cells.rows() * columns
+                : (last.row - viewFirst) * columns + last.column + 1;
+    }
+};
+
+std::optional<TerminalModel::TextCell> mouseCell(SDL_Window &window,
+                                                 const SdlBackend &backend,
+                                                 const TerminalModel &model,
+                                                 int mouseX,
+                                                 int mouseY,
+                                                 bool clampToText) {
+    int windowWidth = 0, windowHeight = 0;
+    int drawableWidth = 0, drawableHeight = 0;
+    SDL_GetWindowSize(&window, &windowWidth, &windowHeight);
+    if (windowWidth <= 0 || windowHeight <= 0 ||
+        SDL_GetRendererOutputSize(
+            SDL_GetRenderer(&window), &drawableWidth, &drawableHeight) < 0) {
+        return std::nullopt;
+    }
+    const auto &viewport = model.viewport();
+    const int cellWidth = backend.cellWidth();
+    const int cellHeight = backend.cellHeight();
+    const double x = double(mouseX) * drawableWidth / windowWidth;
+    const double y = double(mouseY) * drawableHeight / windowHeight;
+    const double textWidth =
+        std::min(double(drawableWidth), double(model.columns()) * cellWidth);
+    const double textHeight =
+        std::min(double(drawableHeight), double(model.rows()) * cellHeight);
+    if (textWidth < 1 || textHeight < 1 || !viewport.rowCount() ||
+        (!clampToText &&
+         (x < 0 || x >= textWidth || y < 0 || y >= textHeight))) {
+        return std::nullopt;
+    }
+    const auto column =
+        std::size_t(std::clamp(x, 0.0, textWidth - 1) / cellWidth);
+    const auto row = std::size_t((std::clamp(y, 0.0, textHeight - 1) -
+                                  viewport.pixelOffset(cellHeight)) /
+                                 cellHeight);
+    return TerminalModel::TextCell{model.firstRetainedRow() +
+                                       viewport.firstRow() +
+                                       std::min(row, viewport.rowCount() - 1),
+                                   column};
+}
+
 void smoke(SDL_Window &window, SdlBackend &backend, PtySession &session) {
     const auto deadline = SDL_GetTicks64() + 5000;
     while (!session.finished() && SDL_GetTicks64() < deadline) {
@@ -134,6 +216,43 @@ void smoke(SDL_Window &window, SdlBackend &backend, PtySession &session) {
         throw std::runtime_error("PTY GUI smoke: no green glyphs rendered");
     }
     backend.present();
+
+    const auto start = mouseCell(window, backend, model, 0, 0, false);
+    const auto end =
+        mouseCell(window, backend, model, backend.cellWidth() * 3, 0, false);
+    if (!start || !end) {
+        throw std::runtime_error(
+            "PTY GUI smoke: could not locate selection cells");
+    }
+    const Selection selection{*start, *end, model.selectionEpoch()};
+    selection.apply(model, frame);
+    if (frame.selectionBegin != 0 || frame.selectionEnd != 4) {
+        throw std::runtime_error("PTY GUI smoke: wrong selection range");
+    }
+    // Only exercise SDL's in-process test clipboard; don't overwrite a user's
+    // desktop clipboard when running this smoke test on a real display.
+    if (std::string_view(SDL_GetCurrentVideoDriver()) == "dummy") {
+        if (!selection.copy(model)) {
+            throw std::runtime_error("PTY GUI smoke: copy failed");
+        }
+        const std::unique_ptr<char, decltype(&SDL_free)> clipboard(
+            SDL_GetClipboardText(), SDL_free);
+        if (!clipboard || std::string_view(clipboard.get()) != "matt") {
+            throw std::runtime_error("PTY GUI smoke: wrong clipboard text");
+        }
+    }
+    backend.render(frame);
+    if (SDL_RenderReadPixels(SDL_GetRenderer(&window),
+                             &rect,
+                             SDL_PIXELFORMAT_ARGB8888,
+                             pixels.data(),
+                             rect.w * int(sizeof(Uint32))) < 0 ||
+        std::none_of(pixels.begin(), pixels.end(), [](Uint32 pixel) {
+            return (pixel & 0xffffff) == 0x315691;
+        })) {
+        throw std::runtime_error(
+            "PTY GUI smoke: no selection highlight rendered");
+    }
     std::cout << "PTY -> VT -> model -> SDL smoke test passed\n";
 }
 } // namespace
@@ -184,6 +303,10 @@ int runPtyFrontend(const char *font,
     SDL_StartTextInput();
     bool running = true;
     bool rejectedInput = false;
+    bool clipboardError = false;
+    bool dragging = false;
+    std::optional<Selection> selection;
+    auto &model = session.model();
     const auto send = [&](const std::string &bytes) {
         if (bytes.empty() || session.finished()) {
             return;
@@ -206,6 +329,45 @@ int runPtyFrontend(const char *font,
                 if (!mod.control) {
                     send(InputEncoder::text(event.text.text, mod.alt));
                 }
+            }
+            else if (event.type == SDL_MOUSEBUTTONDOWN &&
+                     event.button.button == SDL_BUTTON_LEFT) {
+                selection.reset();
+                clipboardError = false;
+                const auto cell = mouseCell(*window,
+                                            backend,
+                                            model,
+                                            event.button.x,
+                                            event.button.y,
+                                            false);
+                dragging = cell.has_value();
+                if (cell) {
+                    selection = Selection{*cell, *cell, model.selectionEpoch()};
+                }
+            }
+            else if ((event.type == SDL_MOUSEMOTION && dragging) ||
+                     (event.type == SDL_MOUSEBUTTONUP &&
+                      event.button.button == SDL_BUTTON_LEFT)) {
+                if (dragging && selection && selection->valid(model)) {
+                    const bool release = event.type == SDL_MOUSEBUTTONUP;
+                    const auto cell =
+                        mouseCell(*window,
+                                  backend,
+                                  model,
+                                  release ? event.button.x : event.motion.x,
+                                  release ? event.button.y : event.motion.y,
+                                  true);
+                    if (cell) {
+                        selection->end = *cell;
+                    }
+                }
+                if (event.type == SDL_MOUSEBUTTONUP) {
+                    dragging = false;
+                }
+            }
+            else if (event.type == SDL_WINDOWEVENT &&
+                     event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+                dragging = false;
             }
             else if (event.type == SDL_MOUSEWHEEL) {
                 double amount = event.wheel.preciseY != 0 ? event.wheel.preciseY
@@ -248,8 +410,10 @@ int runPtyFrontend(const char *font,
                     }
                 }
                 else if (mod.control && mod.shift && key == SDLK_c) {
-                    // Selection/copy is not implemented. Do not turn the usual
-                    // copy shortcut into an unexpected SIGINT.
+                    if (!event.key.repeat && selection &&
+                        selection->valid(model)) {
+                        clipboardError = !selection->copy(model);
+                    }
                 }
                 else if (mod.shift &&
                          (key == SDLK_PAGEUP || key == SDLK_PAGEDOWN)) {
@@ -277,7 +441,16 @@ int runPtyFrontend(const char *font,
         const auto now = SDL_GetTicks64();
         session.model().advanceViewport(double(now - lastFrame) / 1000);
         lastFrame = now;
-        auto frame = session.model().frame(backend.cellHeight());
+        auto frame = model.frame(backend.cellHeight());
+        if (selection) {
+            if (selection->valid(model)) {
+                selection->apply(model, frame);
+            }
+            else {
+                selection.reset();
+                dragging = false;
+            }
+        }
         frame.textBlinkVisible = (now / 500) % 2 == 0;
         frame.cursor.visible = frame.cursor.visible && !session.finished() &&
                                (!frame.cursor.blink || (now / 500) % 2 == 0);
@@ -291,6 +464,9 @@ int runPtyFrontend(const char *font,
         }
         if (rejectedInput) {
             currentTitle += " | input queue full/closed";
+        }
+        if (clipboardError) {
+            currentTitle += " | clipboard copy failed";
         }
         SDL_SetWindowTitle(window.get(), currentTitle.c_str());
         backend.render(frame);

@@ -4,6 +4,8 @@
 #include "scrollviewport.h"
 
 #include <memory>
+#include <optional>
+#include <string>
 #include <string_view>
 
 // CPU-only terminal behavior, available to library clients without a PTY or VT
@@ -85,6 +87,19 @@ public:
     // blanks. Preserves both buffers; resets margins/origin to full screen.
     // Allocation failure leaves both unchanged.
     void resize(std::size_t columns, std::size_t rows);
+
+    struct TextCell {
+        std::size_t row, column;
+    };
+    // Row IDs survive full-screen scrolling until evicted. Resize, reset,
+    // screen switches and regional row movement invalidate the selection epoch.
+    std::size_t firstRetainedRow() const noexcept;
+    std::size_t selectionEpoch() const noexcept;
+    // Inclusive endpoints, either order. UTF-8, no newline across soft wraps.
+    // Invalid or over-limit ranges return nullopt.
+    std::optional<std::string> copyText(TextCell first,
+                                        TextCell last,
+                                        std::size_t byteLimit) const;
 
     void scrollBy(double rows);
     void scrollToOldest();
