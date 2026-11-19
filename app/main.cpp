@@ -255,7 +255,7 @@ int main(int argc, char **argv) {
     std::string term = "vt100";
     std::vector<std::string> command;
     const char *fontOverride = nullptr;
-    int fontSize = 24;
+    int fontSize = 18;
     int firstOption = 1;
     if (argc > 1 && std::string_view(argv[1]).substr(0, 2) != "--") {
         fontOverride = argv[1];
@@ -277,7 +277,8 @@ int main(int argc, char **argv) {
             const auto parsed = std::from_chars(value.data(), end, fontSize);
             if (parsed.ec != std::errc{} || parsed.ptr != end || fontSize < 1 ||
                 fontSize > 128) {
-                std::cerr << "--font-size requires an integer from 1 to 128\n";
+                std::cerr
+                    << "--font-size requires an integer from 1 to 128 pixels\n";
                 return 1;
             }
         }
@@ -306,10 +307,10 @@ int main(int argc, char **argv) {
         (ptySmokeTest && command.empty())) {
         std::cerr
             << "Usage: " << argv[0]
-            << " [font.ttf] [--font-size POINTS] [--term TERM] [-- COMMAND "
+            << " [font.ttf] [--font-size PIXELS] [--term TERM] [-- COMMAND "
                "ARG...]\n"
             << "       " << argv[0]
-            << " [font.ttf] [--font-size POINTS] [--input FILE | --showcase | "
+            << " [font.ttf] [--font-size PIXELS] [--input FILE | --showcase | "
                "--smoke-test]\n";
         return 1;
     }

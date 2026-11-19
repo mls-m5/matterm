@@ -48,6 +48,20 @@ configure with -DMATTERM_BUNDLE_FONT=OFF and pass a font path at runtime. Librar
 builds (both application/demo options OFF) do not download font assets. Tests use
 the pinned downloaded font when TEST_FONT_FILE is empty and applications bundle it.
 
+## Font Size and Desktop Scaling
+
+`matterm --font-size 18` sets the nominal font size in renderer pixels (18 is
+also the default). SDL_ttf opens the font at a fixed 72 DPI, so the numeric
+argument maps directly to pixels in the render target. The actual height of
+letters and rows depends on font metrics. The app does not currently adjust font
+size for desktop text scaling or the window's HiDPI backing scale.
+
+GNOME Terminal specifies font sizes in points through GTK/Pango. At a typical
+96 DPI, 12 points corresponds to 16 logical pixels before any additional
+scaling. The desktop scale and font choice can affect how big the text looks;
+there is no universal 2:1 conversion. For benchmark comparisons, match the
+terminal grid dimensions and record font sizes and display scaling separately.
+
 Current bundled assets contain only Regular. Bold/italic are SDL_ttf synthetic
 variants, not separately bundled face files. Browser asset preloading, native
 platform app bundles, fallback fonts, and distro-specific shared-data installation
