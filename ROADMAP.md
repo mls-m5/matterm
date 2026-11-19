@@ -122,7 +122,7 @@ loop rather than relying on a blocking native while loop and stack-owned session
 
 Two browser use cases should reuse the same libraries:
 
-- [ ] Remote terminal: a server owns a PTY/process, while a browser owns the parser,
+- [ ] Remote terminal (design: [Web Terminal](docs/WEB_TERMINAL.md)): a server owns a PTY/process, while a browser owns the parser,
   model, and renderer. Define binary terminal-data, resize, input, status/exit,
   and reconnection messages behind a transport interface (for example WebSocket).
 - [ ] Plan authentication, authorization, TLS, origin checks, process isolation,
