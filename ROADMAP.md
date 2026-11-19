@@ -55,6 +55,7 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [ ] Golden transcripts from real programs, fuzz/property tests, and compatibility fixtures.
 - [x] Use optional Fontconfig system font fallback on Linux for missing glyphs, including Braille.
 - [x] Verify the Fontconfig-enabled build and Braille fallback with installed system fonts.
+- [ ] Unexpected exit during a native `./build/matterm` session: the diagnostic was `Text has zero width`. Trigger unknown; no reproduction yet. Check the SDL_ttf glyph rasterization path, including fallback fonts and zero-width glyphs. If it recurs, collect a short raw PTY capture (`--record-output`) and record the font and size, then reduce it to a regression test.
 - [ ] Wide cells, combining clusters, shaping, and system font fallback on other platforms.
 
 ## 4. POSIX PTY Adapter (Implemented on Linux)
