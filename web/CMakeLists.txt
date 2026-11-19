@@ -67,7 +67,7 @@ add_custom_command(TARGET matterm-web POST_BUILD
 target_link_options(matterm-web PRIVATE
     -sALLOW_MEMORY_GROWTH=1
     -sEXIT_RUNTIME=0
-    -sEXPORTED_FUNCTIONS=_main,_matterm_paste
+    -sEXPORTED_FUNCTIONS=_main,_matterm_paste,_matterm_text,_matterm_key
     -sEXPORTED_RUNTIME_METHODS=ccall
     -lwebsocket.js
     "--preload-file=${MATTERM_FONT}@/assets/font.ttf")

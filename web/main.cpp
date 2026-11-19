@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <string>
@@ -373,6 +374,57 @@ void frame(void *data) {
 extern "C" EMSCRIPTEN_KEEPALIVE void matterm_paste(const char *text) {
     if (gApp && text) {
         send(*gApp, InputEncoder::paste(text, gApp->parser->modes()));
+    }
+}
+
+// Soft keyboard and the extra-keys bar (login.js): text from the on-screen
+// keyboard, and named keys that phones do not have (Esc, Tab, arrows, ...).
+// `mods`: 1 control, 2 alt, 4 shift.
+extern "C" EMSCRIPTEN_KEEPALIVE void matterm_text(const char *utf8, int mods) {
+    if (!gApp || !utf8 || !*utf8) {
+        return;
+    }
+    const bool control = (mods & 1) != 0, alt = (mods & 2) != 0;
+    if (control && std::strlen(utf8) == 1) {
+        const auto bytes = InputEncoder::control(utf8[0], alt);
+        if (!bytes.empty()) {
+            send(*gApp, bytes);
+            return;
+        }
+    }
+    send(*gApp, InputEncoder::text(utf8, alt));
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void matterm_key(const char *name, int mods) {
+    using Key = InputEncoder::Key;
+    static const std::pair<const char *, Key> keys[] = {
+        {"Enter", Key::Enter},
+        {"Backspace", Key::Backspace},
+        {"Tab", Key::Tab},
+        {"Escape", Key::Escape},
+        {"ArrowUp", Key::Up},
+        {"ArrowDown", Key::Down},
+        {"ArrowLeft", Key::Left},
+        {"ArrowRight", Key::Right},
+        {"Home", Key::Home},
+        {"End", Key::End},
+        {"Insert", Key::Insert},
+        {"Delete", Key::Delete},
+        {"PageUp", Key::PageUp},
+        {"PageDown", Key::PageDown}};
+    if (!gApp || !name) {
+        return;
+    }
+    for (const auto &[keyName, key] : keys) {
+        if (std::strcmp(keyName, name) == 0) {
+            InputEncoder::Modifiers modifiers;
+            modifiers.control = (mods & 1) != 0;
+            modifiers.alt = (mods & 2) != 0;
+            modifiers.shift = (mods & 4) != 0;
+            send(*gApp,
+                 InputEncoder::key(key, modifiers, gApp->parser->modes()));
+            return;
+        }
     }
 }
 

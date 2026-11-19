@@ -75,6 +75,17 @@ Checked with `tools/e2e-input.js` and `tools/e2e-copy.js`. Headless Chromium
 cannot produce a real Ctrl+Shift+V paste, so that test dispatches the `paste`
 event instead.
 
+## Phones and tablets
+
+On touch devices (`pointer: coarse`, or `?touch` to force it) tapping the
+terminal focuses a hidden field, which opens the on-screen keyboard; its text
+goes to the terminal. A bar adds the keys phone keyboards lack: Esc, Tab, Ctrl and
+Alt (tap to latch for the next key), arrows and `| / - ~`. The page resizes when
+the keyboard opens (`interactive-widget=resizes-content`). Hardware keyboards
+work as on the desktop. Checked with touch emulation in `tools/e2e-touch.js`
+(a real Android keyboard has not been tried: its composition and backspace
+behavior varies by keyboard app).
+
 ## HiDPI
 
 The canvas backing store is sized in device pixels (`devicePixelRatio`) and the
@@ -85,5 +96,5 @@ the browser zoom after load needs a reload for the font size to follow.
 ## Known gaps
 
 Copied text keeps trailing spaces of the selected line (the same model code as
-the native terminal). Touch input, the `open URL` roadmap item,
+the native terminal). Touch gestures other than tap (scrolling by dragging, pinch), the `open URL` roadmap item,
 and a font choice other than the bundled one are not done.

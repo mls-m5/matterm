@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
 <title>matterm</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -14,6 +14,24 @@
   <p id="message" role="alert"></p>
 </form>
 <canvas id="canvas" hidden tabindex="-1"></canvas>
+<!-- Touch devices: a focusable field brings up the on-screen keyboard, and the
+     bar adds the keys a phone keyboard lacks. Shown only for coarse pointers. -->
+<textarea id="softkeys" hidden autocapitalize="off" autocomplete="off"
+  autocorrect="off" spellcheck="false" aria-label="Terminal input"></textarea>
+<div id="keybar" hidden>
+  <button type="button" data-key="Escape">Esc</button>
+  <button type="button" data-key="Tab">Tab</button>
+  <button type="button" data-mod="ctrl" aria-pressed="false">Ctrl</button>
+  <button type="button" data-mod="alt" aria-pressed="false">Alt</button>
+  <button type="button" data-key="ArrowUp">&uarr;</button>
+  <button type="button" data-key="ArrowDown">&darr;</button>
+  <button type="button" data-key="ArrowLeft">&larr;</button>
+  <button type="button" data-key="ArrowRight">&rarr;</button>
+  <button type="button" data-text="|">|</button>
+  <button type="button" data-text="/">/</button>
+  <button type="button" data-text="-">-</button>
+  <button type="button" data-text="~">~</button>
+</div>
 <script src="login.js"></script>
 </body>
 </html>
