@@ -59,13 +59,14 @@ changes should not run in parallel with changes to the same model/parser API.
 
 ## Active Tasks
 
-Agents work in separate worktrees with non-overlapping owned paths.
+Agents work in separate worktrees with non-overlapping owned paths. Finished and
+integrated: server skeleton, hardening, server configuration, ScriptedLink.
 
-- `docs/tasks/server-config.md`: JSON configuration for `matterm-server`.
-  The hardening task is finished and integrated. Whoever takes this task
-  rebases onto `main` first. Worktree `.tmp/agent2` (or `.tmp/agent3` if idle).
-- `docs/tasks/scripted-link.md`: done and integrated (worktree `.tmp/agent3`
-  is free).
+- `docs/tasks/fast-json-fixes.md`: parser bugs in the `lib/fast-json` submodule,
+  then drop the config loader's workaround. Worktree `.tmp/agent2`, branch
+  `agent2-fastjson`.
+- `docs/tasks/resize-duplicates.md`: rows duplicate on resize under a TUI.
+  Worktree `.tmp/agent3`, branch `agent3-resize`.
 
 The integrator (main session) owns the browser client in `web/` and integration.
 Integrate by cherry-picking in dependency order and running the full suite.
