@@ -10,17 +10,18 @@ None of this has been built or run; Podman was not available when it was written
 ## Layout
 
 ```
-browser --> proxy (Caddy, 127.0.0.1:8080) --> matterm (server + shell)
-                 |                                 |
-            frontend + backend networks       backend only (internal, no egress)
+browser --> edge (nginx, 127.0.0.1:8080) --> matterm (server + shell)
+                |                                 |
+           frontend + backend networks       backend only (internal, no egress)
 ```
 
 - `matterm` holds the server and the shell the browser user gets. It sits on an
   `internal` network: no gateway, no route to the internet or the LAN. The shell
   can therefore not download tools or reach other machines.
-- `proxy` is the only container with a published port (loopback only on the
-  laptop) and the only one attached to a routable network. It terminates TLS on
-  the public server.
+- `edge` (nginx) is the only container with a published port, bound to
+  loopback, and the only one attached to a routable network. It does not
+  terminate TLS. On the public server your existing host nginx does that and
+  forwards to `127.0.0.1:8081`, so nothing here competes for ports 80/443.
 - Both containers run with a read-only root filesystem, all capabilities
   dropped, `no-new-privileges`, and pid/memory/CPU limits. The shell's home is a
   64 MiB tmpfs that disappears with the container.
@@ -42,10 +43,14 @@ podman compose -f deploy/podman/compose.yaml up
 
 ## Public server
 
+The host's nginx terminates TLS; copy `nginx-host.conf.example` into its
+configuration and adjust names and certificates. Then:
+
 ```sh
-export MATTERM_DOMAIN=term.example.org MATTERM_CADDYFILE=Caddyfile.server
+export MATTERM_DOMAIN=term.example.org MATTERM_PORT=8081
 podman compose -f deploy/podman/compose.yaml -f deploy/podman/compose.server.yaml up -d
 ```
 
 Only do this after the hardening phases and with the rate limiting settings
-reviewed. The server container still has no outbound network access.
+reviewed. The server container still has no outbound network access. The server
+sits behind two proxies (host nginx, then `edge`), hence `--trusted-proxy-hops=2`.

@@ -5,11 +5,11 @@
 #   podman compose -f deploy/podman/compose.yaml up --build
 #   -> http://127.0.0.1:8080
 #
-# Layout:  browser -> proxy (published on 127.0.0.1) -> matterm (no internet)
+# Layout:  browser -> edge/nginx (published on 127.0.0.1) -> matterm (no internet)
 #
 # * `matterm` runs the server and the shell. It is attached only to an
 #   `internal` network, so it has no route to the internet or the LAN.
-# * `proxy` is attached to both networks and is the only published port,
+# * `edge` (nginx) is attached to both networks and is the only published port,
 #   bound to loopback on the host.
 # Host config/state directories are mounted into the container so laptop and
 # server share the same layout (see docs/WEB_TERMINAL.md, section 5.6).
@@ -59,24 +59,21 @@ services:
       timeout: 3s
       retries: 3
 
-  proxy:
+  edge:
     <<: *hardening
-    image: docker.io/library/caddy:2.8-alpine
+    image: docker.io/nginxinc/nginx-unprivileged:1.27-alpine
     depends_on: [matterm]
     # Only loopback on the host. Never publish 0.0.0.0 without TLS.
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${MATTERM_PORT:-8080}:8080"
     networks:
       backend:
         ipv4_address: 10.89.77.2
       frontend: {}
-    environment:
-      MATTERM_DOMAIN: ${MATTERM_DOMAIN:-}
     volumes:
-      - ./${MATTERM_CADDYFILE:-Caddyfile}:/etc/caddy/Caddyfile:ro,Z
-      - caddy-data:/data
+      - ./edge.conf:/etc/nginx/conf.d/default.conf:ro,Z
     tmpfs:
-      - /config:size=16m
+      - /tmp:size=16m
 
   # One-off: create the config directory and set the passphrase.
   #   podman compose run --rm setup
@@ -98,9 +95,6 @@ services:
       - /home/matterm:size=8m,mode=0700
     volumes:
       - ${XDG_CONFIG_HOME:-${HOME}/.config}/matterm:/home/matterm/.config/matterm:rw,Z
-
-volumes:
-  caddy-data: {}
 
 networks:
   # No gateway and no outbound traffic: the shell cannot reach the internet.
