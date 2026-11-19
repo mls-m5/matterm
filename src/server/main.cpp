@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <iostream>
 #include <sodium.h>
+#include <string_view>
 #include <termios.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -18,7 +19,7 @@ void usage() {
            "[--allow-plain-http]\n"
            "  [-- PROGRAM ARG...]\n"
            "matterm-server --setup-credentials (alias --set-password) [--config PATH]\n"
-           "  [--credentials PATH]   prompts twice on a terminal, else reads "
+           "  [--credentials PATH]   prompts twice on a terminal (empty = generate one), else reads "
            "stdin\n"
            "Settings come from built-in defaults, then the config file "
            "(default\n"
@@ -48,11 +49,30 @@ std::string readLine(const char *prompt, bool hide) {
         std::cerr << '\n';
     return line;
 }
+// 32 symbols from a 31-letter alphabet without look-alikes (about 158 bits),
+// in four dash-separated groups so it is easy to copy by eye.
+std::string generatePassword() {
+    constexpr std::string_view alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
+    std::string password;
+    for (int i = 0; i < 32; ++i) {
+        if (i != 0 && i % 8 == 0)
+            password += '-';
+        password += alphabet[randombytes_uniform(alphabet.size())];
+    }
+    return password;
+}
 // Interactive: ask twice without echo. Piped: one line from stdin.
 std::string readPassword() {
     if (::isatty(0)) {
         auto first = readLine(
-            "Password (24-256 characters, a long passphrase is best): ", true);
+            "Password (24-256 characters; leave empty to generate one): ", true);
+        if (first.empty()) {
+            auto generated = generatePassword();
+            std::cerr << "Generated password (shown once, store it in a "
+                         "password manager):\n";
+            std::cout << generated << std::endl;
+            return generated;
+        }
         auto second = readLine("Again: ", true);
         const bool same = first == second;
         sodium_memzero(second.data(), second.size());

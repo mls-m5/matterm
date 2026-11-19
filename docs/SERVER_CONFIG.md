@@ -126,7 +126,7 @@ TLS files and scrollback sizes.
 | `--credentials PATH` | `credentials` |
 | `--allow-plain-http` | sets `allow_plain_http` to true (it cannot unset it) |
 | `-- PROGRAM ARG...` | `process.arguments` |
-| `--setup-credentials` (alias `--set-password`) | on a terminal asks for the password twice without echo, otherwise reads one line from stdin; writes the credentials file; honors `--config` and `--credentials` |
+| `--setup-credentials` (alias `--set-password`) | on a terminal asks for the password twice without echo (an empty answer generates and prints a random one), otherwise reads one line from stdin; writes the credentials file; honors `--config` and `--credentials` |
 
 ## Examples
 
