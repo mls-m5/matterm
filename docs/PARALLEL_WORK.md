@@ -56,3 +56,27 @@ After the color contract lands:
 A first trial should use one bounded task (for example benchmark fixtures) and
 review its integration cost before expanding the fanout. Large terminal semantic
 changes should not run in parallel with changes to the same model/parser API.
+
+## Environment Notes for Agents
+
+Facts learned while working in the agent sandbox; check them rather than
+rediscovering them.
+
+- The sandbox cannot run containers (Podman installs but cannot mount `/proc`
+  in a nested PID namespace), and there is no `ssh` binary, so submodules with
+  `git@github.com` URLs cannot be fetched or pushed from here. Pushes go through
+  the host tool, one approved push at a time; agents on a task branch do not push.
+- Installed for the web work: Boost headers (including Beast/Asio) and libsodium.
+  Missing tools must be requested from the operator. There is no Emscripten.
+- A new worktree has uninitialized submodules. For a local setup, point them at
+  the main checkout instead of the network, for example:
+  `git config submodule.test/mls-unit-test.url <main-checkout>/test/mls-unit-test`
+  followed by `git -c protocol.file.allow=always submodule update --init
+  test/mls-unit-test`. Only the unit-test framework is needed for tests.
+- `.matterm.files` is untracked on purpose (`*.files` is ignored); update it
+  locally. Run clang-format on project C++ before committing.
+- mls-unit-test: `EXPECT` returns `void`, so it cannot be used in helper
+  functions that return a value; return a sentinel and compare in the test.
+- podman-compose 1.0.3 ignores `name:` (use `-p`) and rejects nested `${A:-${B}}`.
+- Never advance submodule pointers or touch a user's staged submodule changes as
+  part of an unrelated task.
