@@ -38,6 +38,47 @@ const char kRedraw[] = "\x1b[3A\x1b[Jalpha\r\nbeta\r\ngamma\r\n";
 
 TEST_SUIT_BEGIN(TerminalOperations)
 
+TEST_CASE("Empty allocated screens never offer history scrolling") {
+    for (bool alternate : {false, true}) {
+        TerminalModel model(8, 4, 20);
+        VtParser parser(model);
+        for (unsigned stage = 0; stage < 5; ++stage) {
+            model.setAlternateScreen(alternate);
+            if (stage == 1)
+                parser.feed("text\x1b[2J");
+            if (stage == 2)
+                model.reset();
+            if (stage == 3)
+                model.resize(10, 7);
+            if (stage == 4)
+                model.resize(5, 2);
+            model.setAlternateScreen(alternate);
+            model.scrollBy(1000);
+            model.scrollToOldest();
+            model.advanceViewport(10);
+            EXPECT_EQ(model.historySize(), std::size_t(0));
+            EXPECT_EQ(model.viewport().offset(), 0.0);
+            EXPECT_EQ(model.viewport().targetOffset(), 0.0);
+            EXPECT_FALSE(model.frame(16).scrollbar.visible);
+            EXPECT_EQ(model.frame(16).verticalOffsetPixels, 0.0f);
+        }
+    }
+}
+
+TEST_CASE(
+    "Intentional empty output rows remain history after display erasure") {
+    TerminalModel model(8, 3, 20);
+    VtParser parser(model);
+    parser.feed("\r\n\r\n\r\n\r\n\r\n");
+    EXPECT_EQ(model.historySize(), std::size_t(3));
+    parser.feed("\x1b[2J"); // ED2 clears the display, not saved lines.
+    model.scrollToOldest();
+    model.advanceViewport(10);
+    EXPECT_EQ(model.historySize(), std::size_t(3));
+    EXPECT_EQ(model.viewport().offset(), 3.0);
+    EXPECT(model.frame(16).scrollbar.visible);
+}
+
 TEST_CASE(
     "Shrinking the height keeps a short TUI frame out of the scrollback") {
     TerminalModel model(20, 10, 100);

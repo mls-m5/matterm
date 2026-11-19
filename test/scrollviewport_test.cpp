@@ -8,6 +8,29 @@
 
 TEST_SUIT_BEGIN(ScrollViewport)
 
+TEST_CASE("No history means no wheel travel and no scrollbar") {
+    ScrollViewport viewport;
+    EXPECT_FALSE(viewport.scrollbar().visible);
+    for (const auto retained :
+         {std::size_t(0), std::size_t(2), std::size_t(4)}) {
+        viewport.setGeometry(retained, 4);
+        viewport.scrollBy(1000);
+        viewport.oldest();
+        viewport.advance(10);
+        EXPECT_EQ(viewport.maxOffset(), 0.0);
+        EXPECT_EQ(viewport.offset(), 0.0);
+        EXPECT_EQ(viewport.targetOffset(), 0.0);
+        EXPECT_FALSE(viewport.scrollbar().visible);
+    }
+    viewport.setGeometry(8, 4);
+    EXPECT(viewport.scrollbar().visible);
+    viewport.oldest();
+    viewport.advance(10);
+    viewport.setGeometry(4, 4);
+    EXPECT(viewport.atTail());
+    EXPECT_FALSE(viewport.scrollbar().visible);
+}
+
 TEST_CASE("Tail position and scrollbar proportions reflect history geometry") {
     ScrollViewport viewport;
     EXPECT_EQ(viewport.rowCount(), std::size_t(0));
