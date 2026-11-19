@@ -10,9 +10,11 @@ This is a native adapter, not a remote-shell server or a process sandbox.
 - forkpty establishes the child session, controlling terminal, and stdio.
 - Arguments, executable PATH resolution, and environment storage are prepared
   before fork. The child uses execve and reports exec errors through a CLOEXEC pipe.
-- TERM defaults conservatively to vt100; COLORTERM/COLUMNS/LINES are removed so
-  inherited environment values do not falsely override the chosen capabilities/size.
-  This is still a limited implementation, not a VT100 conformance claim.
+- TERM defaults conservatively to vt100. Inherited COLORTERM/COLUMNS/LINES
+  are removed so they cannot falsely override the chosen capabilities or size.
+  The native application explicitly advertises `COLORTERM=truecolor`; generic
+  PTY library clients can opt in. This does not imply VT100 conformance or
+  change the terminfo entry selected by TERM.
 - The master is nonblocking and close-on-exec. Callers queue partial writes.
 - Initial winsize is supplied to forkpty. TIOCSWINSZ handles resize, including the
   tty driver's SIGWINCH delivery to the foreground process group.

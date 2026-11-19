@@ -17,7 +17,9 @@ public:
                int columns,
                int rows,
                VtEvents events = {},
-               const std::string &term = "vt100");
+               const std::string &term = "vt100",
+               PtyProcess::ColorCapability color =
+                   PtyProcess::ColorCapability::Unspecified);
     ~PtySession();
     PtySession(const PtySession &) = delete;
     PtySession &operator=(const PtySession &) = delete;

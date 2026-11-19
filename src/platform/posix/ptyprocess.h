@@ -23,10 +23,13 @@ public:
         int signal = 0;
     };
 
+    enum class ColorCapability { Unspecified, TrueColor };
+
     PtyProcess(const std::vector<std::string> &arguments,
                int columns,
                int rows,
-               const std::string &term = "vt100");
+               const std::string &term = "vt100",
+               ColorCapability color = ColorCapability::Unspecified);
     ~PtyProcess();
     PtyProcess(const PtyProcess &) = delete;
     PtyProcess &operator=(const PtyProcess &) = delete;

@@ -65,8 +65,10 @@ selected row clear the selection.
 The window closes once the child exits and its PTY output is drained. In
 an interactive shell, Ctrl+D at an empty prompt normally exits that shell.
 
-TERM defaults conservatively to `vt100`; `--term NAME` overrides it. Compatibility
-is still incomplete: do not assume full xterm/Vim support or advertise richer
+TERM defaults conservatively to `vt100`; `--term NAME` overrides it. The native
+application sets `COLORTERM=truecolor` for its child. If a container does not
+inherit it, pass `--env COLORTERM` to Podman when starting the interactive process.
+Compatibility is still incomplete: do not assume full xterm/Vim support or advertise richer
 capabilities blindly. Use `--showcase` for the built-in VT stream, or `--input FILE`
 for regular-file playback:
 

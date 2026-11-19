@@ -18,10 +18,11 @@
   fullscreen have shown the symptom inside Podman. Whether the same container
   works in GNOME Terminal is not yet confirmed. Both existing captures include
   `CSI ? 1049 h`; replay of the GNOME capture preserved the green RGB
-  background in matterm. Next, use the same interactive container in both
-  terminals: compare `TERM`, `COLORTERM`, `tput colors`, and Pi version, then
-  send literal RGB/indexed colors from inside the container. If those work but
-  Pi's panel does not, capture a failing panel from inside the container.
+  background in matterm. Literal RGB and `PI_TRUE_COLOR=1 pi` worked inside the
+  affected container. The native application now advertises `COLORTERM=truecolor`
+  without changing TERM. If Podman does not pass it through, use `--env COLORTERM`.
+  Verify the same Pi tool panel without `PI_TRUE_COLOR`; if it still fails with
+  `COLORTERM=truecolor` inside the container, capture that failing panel.
 - **Braille spinner becomes a replacement glyph.** JetBrains Mono lacks these
   code points; they are three-byte UTF-8, not clusters. Verify Linux Fontconfig
   fallback with the default font and an installed face that covers Braille

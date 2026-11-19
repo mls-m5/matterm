@@ -272,7 +272,8 @@ int runPtyFrontend(const char *font,
                         [&](std::string_view value) {
                             title = "matterm | " + std::string(value);
                         }},
-                       term);
+                       term,
+                       PtyProcess::ColorCapability::TrueColor);
     SdlRuntime runtime;
     std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(
         SDL_CreateWindow("matterm",
