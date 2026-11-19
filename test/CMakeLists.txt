@@ -58,6 +58,10 @@ if(BUILD_TESTING)
     target_link_libraries(inputencoder_test PRIVATE matterm::vt)
     add_test(NAME input_encoder COMMAND inputencoder_test)
 
+    add_executable(protocol_test protocol_test.cpp mls-unit-test/test_main.cpp)
+    target_link_libraries(protocol_test PRIVATE matterm::protocol)
+    add_test(NAME protocol COMMAND protocol_test)
+
     add_executable(scrollviewport_test
         scrollviewport_test.cpp
         mls-unit-test/test_main.cpp
