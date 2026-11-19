@@ -190,6 +190,16 @@ Decided by the owner:
     and the web build; the raw-tty variant (formerly `matterm-fakeos`, runs inside
     any terminal) is kept as a mode of the same program if it stays cheap
     (`matterm-demo --tty`; confirm in milestone 2, otherwise drop it and say so).
+- **One shared experience, not modes**: animations and the pretend OS are the same
+  world. The visitor explores a small operating system (files, programs, hidden
+  places) and the animations are part of it: they are programs, files and
+  discoveries inside that world (the intro boots into it, `fire` can be a program
+  found on disk, an easter egg can trigger a gradient or a crumble, finishing an
+  animation returns to the shell with a changed world). There is no "animation
+  mode" switch and no separate menu of demos; whatever is reachable is reachable
+  by exploring, so the exploration itself must be rewarding and a little
+  mysterious. Design the core around that: animations are `Program`s started by
+  the shell or by triggers, and they can read and change the virtual world.
 - **Easter eggs** are a first-class feature of the core: hidden content that is found
   by exploring: typing certain words or commands, finding the right files or
   programs in the virtual file system (hidden files, odd directories, a program
