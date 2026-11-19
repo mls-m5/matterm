@@ -162,6 +162,10 @@ private:
                    "'none'");
         response_->set("Referrer-Policy", "no-referrer");
         response_->set("X-Content-Type-Options", "nosniff");
+        // No window reference to or from a hostile page, no cross-origin
+        // embedding of any response.
+        response_->set("Cross-Origin-Opener-Policy", "same-origin");
+        response_->set("Cross-Origin-Resource-Policy", "same-origin");
         if (!cookie.empty())
             response_->set(http::field::set_cookie, cookie);
         if (retry)

@@ -11,11 +11,17 @@
 
 services:
   matterm:
+    # A command list replaces the base file's, so it is complete here.
     command:
-      - --listen=0.0.0.0:8080
+      - --listen
+      - 0.0.0.0
+      - --port
+      - "8080"
       - --allow-plain-http
-      # Only the host's nginx can reach the loopback-published port, so its
-      # X-Forwarded-For is trusted regardless of the peer address Podman shows.
-      - --trusted-proxy=any
-      - --trusted-proxy-hops=1
-      - --allowed-origin=https://${MATTERM_DOMAIN:?set MATTERM_DOMAIN}
+      - --origin
+      - https://${MATTERM_DOMAIN:?set MATTERM_DOMAIN}
+      - --static-dir
+      - /usr/share/matterm/web
+      # There is no trusted-proxy support yet: the server sees the proxy's
+      # address for every client. Rate limit /login in nginx (see the example)
+      # and read docs/SECURITY_REVIEW.md, finding 2.
