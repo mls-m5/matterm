@@ -57,8 +57,8 @@ connection (`PtySessionHost`). The change:
   per-connection limits. A shell that exits ends its session; the client is told.
 - A session may have at most one attached connection at a time in v1. Attaching
   a second one either takes over (the old one is closed with a reason) or is
-  refused; **Open:** which of the two (take-over is more convenient for "move
-  my terminal to another window").
+  refused. **Decided:** take over; the old connection is closed with a reason, so
+  moving a terminal to another window just works.
 
 ## 4. Replay buffer (resume without a server-side parser)
 
@@ -94,9 +94,10 @@ connection (`PtySessionHost`). The change:
   frame signature and idle throttling (web/main.cpp `frame()`) become per view,
   and a view that is not visible costs no rendering.
 - Tab bar: HTML/CSS above the canvas (accessible, themable) rather than drawn in
-  the canvas; keys: new, close, next/previous, rename. **Open:** key bindings that
-  do not collide with terminal programs (a prefix chord, or only mouse/touch
-  controls plus a modifier chord).
+  the canvas; actions: new, close, next/previous, rename. **Decided:** key
+  bindings wait. Which keys the page captures and which the browser keeps (for
+  example Ctrl+L, Ctrl+R, Ctrl+W, Ctrl+T) is an unsolved general problem, see
+  section 11; tabs start with mouse/touch controls only.
 - Panes: a layout tree (split H/V with ratios) over views, focus movement and
   per-pane resize. **Decided:** tabs first, panes only after tabs work.
 - Moving a terminal between windows: attach the same `sessionId` from another
@@ -111,7 +112,10 @@ connection (`PtySessionHost`). The change:
   and a sequence of events `(delta ms, kind, bytes)` with kinds `output`,
   `resize`, and optionally `input`. Text-based and easy to inspect, in the
   spirit of asciinema's `.cast` (newline-delimited JSON), so existing players and
-  tools stay usable. **Open:** adopt asciicast v2 exactly, or a close variant.
+  tools stay usable. **Open:** adopt asciicast v2 exactly, or a close variant (a variant would only be
+  for things v2 cannot express, such as a recorded `focus` event or a per-chunk
+  checkpoint for fast seeking; keep the header compatible so existing players
+  still open the file).
 - Input is **not** recorded by default (passwords typed with echo off never appear
   in output, but input would contain them). Recording is off by default, files are
   created with mode 0600, and the owner chooses where they go.
@@ -172,10 +176,23 @@ with other work in that file.
 
 ## 10. Open questions to settle before phase 1
 
-1. Take over or refuse when a second client attaches to an attached session?
-2. Exact resume fields and the `features` bit in docs/PROTOCOL.md.
-3. Whether non-persistent mode (`replay_buffer_bytes = 0`) can still allow several
+1. Exact resume fields and the `features` bit in docs/PROTOCOL.md.
+2. Whether non-persistent mode (`replay_buffer_bytes = 0`) can still allow several
    simultaneous terminals (yes in this plan: they just end with their
    connection).
-4. Tab key bindings.
-5. asciicast v2 or a variant for recordings.
+3. asciicast v2 or a variant for recordings (see section 6).
+
+Settled: a second attach takes over (section 3); tab key bindings wait (section 11).
+
+## 11. Keyboard capture (unsolved, parked)
+
+A terminal wants every key; the browser reserves some for itself. Ctrl+L, Ctrl+R,
+Ctrl+K and similar can be taken with `preventDefault()` on keydown, so the
+terminal gets them but the browser shortcut stops working while it has focus.
+Ctrl+W, Ctrl+T, Ctrl+N and Ctrl+Tab cannot be intercepted by a page at all in most
+browsers. In full screen, Chromium's Keyboard Lock API
+(`navigator.keyboard.lock()`) can capture most of them, including Esc. A good
+policy needs a decision on which keys the terminal gives back (for example a
+prefix chord or a "release keyboard" toggle) and per-browser testing. Parked until
+there is a concrete proposal; no change to the current behavior (the page captures
+what it can, see `web/main.cpp`).
