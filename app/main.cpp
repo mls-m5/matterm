@@ -240,10 +240,9 @@ int run(const char *font, int fontSize, const char *inputPath, bool smokeTest) {
         frame.textBlinkVisible = (now / 500) % 2 == 0;
         frame.cursor.focused =
             (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_INPUT_FOCUS) != 0;
-        frame.cursor.visible =
-            frame.cursor.visible &&
-            (!frame.cursor.focused || !frame.cursor.blink ||
-             (now / 500) % 2 == 0);
+        frame.cursor.visible = frame.cursor.visible &&
+                               (!frame.cursor.focused || !frame.cursor.blink ||
+                                (now / 500) % 2 == 0);
         backend.render(frame);
         backend.present();
     }
@@ -256,6 +255,7 @@ int main(int argc, char **argv) {
     const char *recordPath = nullptr;
     bool smokeTest = false;
     bool ptySmokeTest = false;
+    bool smoothCursor = false;
     bool showcase = false;
     std::string term = "xterm-256color";
     std::vector<std::string> command;
@@ -286,6 +286,9 @@ int main(int argc, char **argv) {
                     << "--font-size requires an integer from 1 to 128 pixels\n";
                 return 1;
             }
+        }
+        else if (arg == "--smooth-cursor") {
+            smoothCursor = true;
         }
         else if (arg == "--showcase") {
             showcase = true;
@@ -318,7 +321,7 @@ int main(int argc, char **argv) {
         std::cerr
             << "Usage: " << argv[0]
             << " [font.ttf] [--font-size PIXELS] [--term TERM] "
-               "[--record-output FILE] [-- COMMAND "
+               "[--record-output FILE] [--smooth-cursor] [-- COMMAND "
                "ARG...]\n"
             << "       " << argv[0]
             << " [font.ttf] [--font-size PIXELS] [--input FILE | --showcase | "
@@ -338,7 +341,8 @@ int main(int argc, char **argv) {
                                   command,
                                   term,
                                   ptySmokeTest,
-                                  recordPath);
+                                  recordPath,
+                                  smoothCursor);
         }
         catch (const std::exception &error) {
             std::cerr << error.what() << '\n';

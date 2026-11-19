@@ -154,10 +154,12 @@ void SdlBackend::render(const RenderFrame &frame) {
                                 row.data()[x].attributes);
         }
     }
-    const bool filledBlock =
-        frame.cursor.visible && frame.cursor.focused &&
-        frame.cursor.shape == CursorState::Shape::Block &&
-        frame.cursor.column >= 0 && frame.cursor.row >= 0;
+    const bool gliding =
+        frame.cursor.columnOffset != 0 || frame.cursor.rowOffset != 0;
+    const bool filledBlock = frame.cursor.visible && frame.cursor.focused &&
+                             !gliding &&
+                             frame.cursor.shape == CursorState::Shape::Block &&
+                             frame.cursor.column >= 0 && frame.cursor.row >= 0;
     for (std::size_t y = 0; y < rows; ++y) {
         const auto row = frame.cells.row(y);
         for (std::size_t x = 0; x < columns; ++x) {
@@ -245,16 +247,34 @@ void SdlBackend::render(const RenderFrame &frame) {
     if (cursor.visible && cursor.column >= 0 && cursor.row >= 0 &&
         std::size_t(cursor.column) < columns &&
         std::size_t(cursor.row) < rows) {
-        SDL_FRect rect{float(cursor.column) * s.cellWidth,
-                       float(cursor.row) * s.cellHeight +
+        SDL_FRect rect{(float(cursor.column) + cursor.columnOffset) *
+                           s.cellWidth,
+                       (float(cursor.row) + cursor.rowOffset) * s.cellHeight +
                            frame.verticalOffsetPixels,
                        float(s.cellWidth),
                        float(s.cellHeight)};
-        check(SDL_SetRenderDrawColor(
-            s.renderer.get(), cursor.color.r, cursor.color.g, cursor.color.b, 255));
+        check(SDL_SetRenderDrawColor(s.renderer.get(),
+                                     cursor.color.r,
+                                     cursor.color.g,
+                                     cursor.color.b,
+                                     255));
         if (!cursor.focused) {
             // Inactive window: hollow outline, whatever the shape.
             check(SDL_RenderDrawRectF(s.renderer.get(), &rect));
+        }
+        else if (gliding && cursor.shape == CursorState::Shape::Block) {
+            // Moving block: translucent so the text stays readable; the exact
+            // inverted block returns when the glide settles.
+            check(SDL_SetRenderDrawBlendMode(s.renderer.get(),
+                                             SDL_BLENDMODE_BLEND));
+            check(SDL_SetRenderDrawColor(s.renderer.get(),
+                                         cursor.color.r,
+                                         cursor.color.g,
+                                         cursor.color.b,
+                                         150));
+            check(SDL_RenderFillRectF(s.renderer.get(), &rect));
+            check(SDL_SetRenderDrawBlendMode(s.renderer.get(),
+                                             SDL_BLENDMODE_NONE));
         }
         else if (cursor.shape != CursorState::Shape::Block) {
             if (cursor.shape == CursorState::Shape::Underline) {

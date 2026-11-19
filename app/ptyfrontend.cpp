@@ -1,5 +1,6 @@
 #include "ptyfrontend.h"
 
+#include "cursorglide.h"
 #include "inputencoder.h"
 #include "ptysession.h"
 #include "sdlbackend.h"
@@ -183,7 +184,8 @@ int runPtyFrontend(const char *font,
                    const std::vector<std::string> &arguments,
                    const std::string &term,
                    bool smokeTest,
-                   const char *recordPath) {
+                   const char *recordPath,
+                   bool smoothCursor) {
     OutputRecording recording(recordPath);
     std::string title = "matterm";
     const Palette defaultPalette;
@@ -295,6 +297,9 @@ int runPtyFrontend(const char *font,
         return session.modes().mouseTracking !=
                TerminalModes::MouseTracking::Off;
     };
+    CursorGlide::Config glideConfig;
+    glideConfig.enabled = smoothCursor;
+    CursorGlide cursorGlide(glideConfig);
     bool skipText = false;
     Uint64 lastFrame = SDL_GetTicks64();
     while (running) {
@@ -518,6 +523,12 @@ int runPtyFrontend(const char *font,
             }
         }
         frame.textBlinkVisible = (now / 500) % 2 == 0;
+        // Before blink masking: the glide follows the true cell, not the blink.
+        cursorGlide.update(frame.cursor.column,
+                           frame.cursor.row,
+                           frame.cursor.visible,
+                           double(now) / 1000);
+        cursorGlide.apply(frame.cursor);
         frame.cursor.focused =
             (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_INPUT_FOCUS) != 0;
         // An inactive window shows a steady hollow cursor.

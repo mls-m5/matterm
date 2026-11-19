@@ -2,6 +2,7 @@
 // canvas, connected to matterm-server through ClientSession (WebSocket). With
 // no server URL it runs an interactive terminal simulator (ScriptedLink).
 #include "clientsession.h"
+#include "cursorglide.h"
 #include "inputencoder.h"
 #include "palette.h"
 #include "scriptedlink.h"
@@ -39,6 +40,7 @@ struct App {
     const Palette defaultPalette;
     Palette palette;
     Uint64 last = 0;
+    CursorGlide cursorGlide;
     bool skipText = false;
     // The session is over (exit, error or lost connection): Enter reloads the
     // page, which shows the login form again (each login allows one upgrade).
@@ -342,6 +344,12 @@ void frame(void *data) {
         }
     }
     rendered.textBlinkVisible = (now / 500) % 2 == 0;
+    // Before blink masking: the glide follows the true cell, not the blink.
+    app.cursorGlide.update(rendered.cursor.column,
+                           rendered.cursor.row,
+                           rendered.cursor.visible,
+                           double(now) / 1000);
+    app.cursorGlide.apply(rendered.cursor);
     rendered.cursor.focused =
         (SDL_GetWindowFlags(app.window) & SDL_WINDOW_INPUT_FOCUS) != 0;
     // An inactive window shows a steady hollow cursor.
@@ -411,6 +419,20 @@ int main() {
         }
     };
     app.parser = std::make_unique<VtParser>(*app.model, std::move(vtEvents));
+    // ?smooth glides the cursor between positions (off by default);
+    // ?smooth=300 sets the glide time in milliseconds (default 80).
+    CursorGlide::Config glide;
+    const int smoothMs = EM_ASM_INT({
+        const p = new URLSearchParams(location.search);
+        if (!p.has("smooth")) {
+            return 0;
+        }
+        const v = parseInt(p.get("smooth"), 10);
+        return v > 0 ? v : 80;
+    });
+    glide.enabled = smoothMs > 0;
+    glide.durationSeconds = smoothMs / 1000.0;
+    app.cursorGlide = CursorGlide(glide);
     const auto url = wsUrl();
     if (!url.empty()) {
         try {

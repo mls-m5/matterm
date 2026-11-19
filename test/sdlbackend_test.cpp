@@ -181,6 +181,27 @@ TEST_CASE("A focused block cursor is opaque and inverts the glyph under it") {
     EXPECT_EQ(cells.at(0, 0).background.r, 50);
 }
 
+TEST_CASE("A gliding block cursor is translucent at a fractional position") {
+    Fixture fixture;
+    CellBuffer cells(3, 1);
+    cells.draw(0, 0, U"M", {0, 255, 0}, {0, 0, 0});
+    CursorState cursor;
+    cursor.visible = true;
+    cursor.shape = CursorState::Shape::Block;
+    cursor.color = {255, 255, 255};
+    cursor.column = 1;
+    cursor.columnOffset = -0.5f; // Shown half a cell left of column 1.
+    const int w = fixture.backend->cellWidth();
+    const int h = fixture.backend->cellHeight();
+    fixture.backend->render({cells.view(), cursor});
+    // Inside the moving block (half over cell 0, half over cell 1), not the
+    // opaque white of a settled block, and the settled cell is not inverted.
+    const auto inside = fixture.pixel(w, h - 1);
+    EXPECT(inside != Uint32(0xffffff));
+    EXPECT(inside != Uint32(0x000000));
+    EXPECT_EQ(fixture.pixel(w * 2 + w / 2, h - 1), Uint32(0));
+}
+
 TEST_CASE("An unfocused cursor is a hollow outline in every shape") {
     Fixture fixture;
     CellBuffer cells(1, 1);

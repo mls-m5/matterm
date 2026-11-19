@@ -50,6 +50,10 @@ if(BUILD_TESTING)
     target_link_libraries(terminaloperations_test PRIVATE matterm::vt)
     add_test(NAME terminal_operations COMMAND terminaloperations_test)
 
+    add_executable(cursorglide_test cursorglide_test.cpp mls-unit-test/test_main.cpp)
+    target_link_libraries(cursorglide_test PRIVATE cellbuffer)
+    add_test(NAME cursor_glide COMMAND cursorglide_test)
+
     add_executable(palette_test palette_test.cpp mls-unit-test/test_main.cpp)
     target_link_libraries(palette_test PRIVATE matterm::vt)
     add_test(NAME palette COMMAND palette_test)
