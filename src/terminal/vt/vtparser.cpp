@@ -1,10 +1,12 @@
 #include "vtparser.h"
 
+#include "palette.h"
 #include "terminalmodel.h"
 #include "utf8decoder.h"
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -186,13 +188,62 @@ struct VtParser::Impl {
         discardString = !isOsc;
         controlString.clear();
     }
+    void reportColor(std::string_view request) {
+        if (!events.palette || !events.reply) {
+            return;
+        }
+        Rgb8 color;
+        if (request == "10;?") {
+            color = events.palette->resolve(defaults.foreground, true);
+        }
+        else if (request == "11;?") {
+            color = events.palette->resolve(defaults.background, false);
+        }
+        else if (request.substr(0, 2) == "4;" && request.size() >= 5 &&
+                 request.substr(request.size() - 2) == ";?") {
+            const auto indexText = request.substr(2, request.size() - 4);
+            unsigned index = 0;
+            const auto end = indexText.data() + indexText.size();
+            const auto parsed = std::from_chars(indexText.data(), end, index);
+            if (parsed.ec != std::errc{} || parsed.ptr != end ||
+                index >= events.palette->colors.size()) {
+                return;
+            }
+            color = events.palette->colors[index];
+        }
+        else {
+            return;
+        }
+        std::string reply = "\x1b]";
+        reply.append(request.substr(0, request.size() - 1));
+        reply += "rgb:";
+        const auto append = [&](std::uint8_t channel) {
+            constexpr char hex[] = "0123456789abcdef";
+            // Duplicate the byte to scale 0..255 to 0..65535 exactly.
+            for (int i = 0; i < 2; ++i) {
+                reply += hex[channel >> 4];
+                reply += hex[channel & 15];
+            }
+        };
+        append(color.r);
+        reply += '/';
+        append(color.g);
+        reply += '/';
+        append(color.b);
+        reply += "\x1b\\";
+        events.reply(reply);
+    }
     void endString() {
-        // OSC 0/2 only: no clipboard, links, shell commands, or file
-        // operations.
-        if (osc && !discardString && controlString.size() >= 2 &&
-            (controlString[0] == '0' || controlString[0] == '2') &&
-            controlString[1] == ';' && events.title) {
-            events.title(std::string_view(controlString).substr(2));
+        if (osc && !discardString) {
+            const std::string_view data = controlString;
+            if (data.substr(0, 2) == "0;" || data.substr(0, 2) == "2;") {
+                if (events.title) {
+                    events.title(data.substr(2));
+                }
+            }
+            else {
+                reportColor(data);
+            }
         }
         controlString.clear();
         state = State::Ground;

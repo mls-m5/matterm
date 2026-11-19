@@ -56,6 +56,7 @@ margins/origin to the full screen; applications can re-establish them on SIGWINC
 | `CSI 5 n`, `CSI 6 n` | Status/cursor reply; cursor row is origin-relative when enabled |
 | `CSI c`, `ESC Z` | Conservative primary DA reply `CSI ? 1;0 c` (VT100 class, no advanced options) |
 | `OSC 0;title`, `OSC 2;title` | Optional title event, terminated by BEL or `ESC \` |
+| `OSC 4;index;?`, `OSC 10;?`, `OSC 11;?` | Single indexed/default foreground/default background query. Replies use the active palette and `rgb:rrrr/gggg/bbbb` with `ESC \`; color-setting requests are ignored. |
 
 ### Color SGR
 
