@@ -4,7 +4,7 @@
 
 namespace {
 constexpr int kSampleRate = 44100;
-constexpr double kMasterVolume = 0.5; // Pips are small blips; keep them gentle.
+constexpr double kMasterVolume = 0.15; // Pips are small blips; keep them gentle.
 } // namespace
 
 Beeper::Beeper()

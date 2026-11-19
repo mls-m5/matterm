@@ -67,7 +67,7 @@
       filter.type = "lowpass";
       filter.frequency.setValueAtTime(3200, t);
       gain.gain.setValueAtTime(0, t);
-      gain.gain.linearRampToValueAtTime(Math.min(1, volume) * 0.12, t + 0.003);
+      gain.gain.linearRampToValueAtTime(Math.min(1, volume) * 0.036, t + 0.003);
       gain.gain.linearRampToValueAtTime(0, t + seconds);
       osc.connect(filter);
       filter.connect(gain);
