@@ -13,10 +13,20 @@ packaging follow in later milestones.
 
 ## What a visitor sees
 
-1. **Intro** (about 3 s): "matterm" resolves out of noise in block letters; any
-   key or click skips it (`?nointro` turns it off).
-2. **A prompt** in a small Unix: `guest@matterm:~$`, the motd, a home directory
-   with `README`, `notes.txt`, `projects/` and hidden files.
+1. **Intro** (about 7 s): "MATTERM" resolves out of noise in block letters, the line
+   "Futuristic system agnostic terminal emulator" is typed, scrambles into noise and
+   vanishes letter by letter, and "Real terminal, fake operating system" takes its
+   place. A red "DEMO MODE" blinks in the top right corner for a few seconds and
+   goes away. The background moves gradually from the intro's own dark color to the
+   terminal's default one, so the prompt appears without a jump. Any key or click
+   makes the text go quickly (0.3 s) but the background still glides (1.2 s): the
+   intro never cuts. `?nointro` / `--no-intro` turn it off. The timings are named
+   constants at the top of `src/fakeos/intro.cpp`.
+2. **A prompt** in a small Unix, **Mattrix OS 6.0 Professional Edition** (`uname -o`,
+   `/etc/os-release`, the motd, `neofetch`): `guest@matterm:~$` (the machine is
+   called matterm), a home directory with `README`, `notes.txt`, `projects/` and
+   hidden files. `neofetch` (alias `sysinfo`) draws an old fat CRT television beside
+   the system information.
 3. **The shell**: quotes, `$VARS`, `~`, wildcards (`*` `?` `[a-z]`), pipes `|`,
    `;` `&&` `||`, redirects `>` `>>` `<`, history (Up/Down), cursor editing,
    Ctrl-A/E/U/K/W/L/C/D, Tab completion (a second Tab lists the choices). The line
@@ -25,7 +35,7 @@ packaging follow in later milestones.
    false` (builtins) and, as files in `/bin`, `ls cat mkdir touch rm cp mv head
    tail wc grep sort uniq seq yes find tree uname whoami id hostname date env ps
    uptime colors which man cal fortune cowsay rev tac nl tr cut sed printf basename
-   dirname sleep df free less top`. Errors and exit codes follow the real tools;
+   dirname sleep df free less top neofetch sysinfo`. Errors and exit codes follow the real tools;
    permissions apply (`/etc` belongs to root, `rm /etc/passwd` is refused). `less`
    and `top` are full-screen programs: `less FILE` (or a pipe) pages with
    j/k/Space/b/g/G and the mouse wheel; `top` shows drifting numbers.
@@ -72,6 +82,18 @@ process or platform header or calls such an API.
 host that cannot do something says so and the programs degrade (256 or 16 colors,
 screen clear instead of the alternate screen). Only standard ECMA-48/xterm
 sequences are emitted.
+
+### Pace of the output
+
+`Config::revealCharsPerSecond` (the demos use 2500, about 25 lines a second; the
+default 0 prints at once, which is what the tests use) makes the output of
+commands, `help` and the welcome text appear at a pace: a character costs one
+unit, a new line twelve, escape sequences nothing, so colors never split. Short
+texts (a line or two and the prompt) are not held back, a long text is shown within
+four seconds whatever the rate, and programs wait until the text is out. Space,
+Enter, Escape or Ctrl-C show the rest at once; any other key does too and is then
+typed, like type-ahead. Mouse reports are ignored meanwhile. Typing, echo and
+prompts are never delayed. `--no-reveal` and `?noreveal` turn it off.
 
 ### Hosts
 

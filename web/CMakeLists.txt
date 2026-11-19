@@ -63,6 +63,7 @@ set_target_properties(matterm-web PROPERTIES
 add_custom_command(TARGET matterm-web POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_CURRENT_SOURCE_DIR}/login.js ${CMAKE_CURRENT_SOURCE_DIR}/style.css
+        ${CMAKE_CURRENT_SOURCE_DIR}/embed.js
         $<TARGET_FILE_DIR:matterm-web>
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_CURRENT_SOURCE_DIR}/shell.html
@@ -81,6 +82,7 @@ target_link_options(matterm-web PRIVATE
 add_custom_target(matterm-web-site ALL
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_CURRENT_SOURCE_DIR}/login.js ${CMAKE_CURRENT_SOURCE_DIR}/style.css
+        ${CMAKE_CURRENT_SOURCE_DIR}/embed.js
         $<TARGET_FILE_DIR:matterm-web>
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_CURRENT_SOURCE_DIR}/shell.html
