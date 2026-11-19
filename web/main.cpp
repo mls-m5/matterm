@@ -3,13 +3,14 @@
 // no server URL it runs an interactive terminal simulator (ScriptedLink).
 #include "clientsession.h"
 #include "cursorglide.h"
+#include "framesignature.h"
 #include "inputencoder.h"
 #include "palette.h"
 #include "scriptedlink.h"
 #include "sdlbackend.h"
-#include "framesignature.h"
 #include "sdlinput.h"
 #include "terminalmodel.h"
+#include "touchgesture.h"
 #include "vtparser.h"
 #include "websocketchannel.h"
 
@@ -61,6 +62,12 @@ struct App {
     // change (blink excluded), otherwise one full pass every idleMs.
     Uint64 activeUntil = 0;
     Uint64 lastFull = 0;
+    // Touch: gesture state, scroll remainder in rows, and the font size in CSS
+    // pixels (changed by pinch or Ctrl+wheel, applied between frames).
+    TouchGesture touch;
+    double touchRows = 0;
+    int fontCss = 18;
+    int pendingFontCss = 18;
     std::string shownTitle;
 };
 
@@ -84,10 +91,36 @@ std::string wsUrl() {
 
 // The font is sized in device pixels, so scale it by the page's pixel ratio:
 // text keeps its CSS size and is sharp on HiDPI screens.
-int fontPixels() {
-    const double ratio =
-        EM_ASM_DOUBLE({ return window.devicePixelRatio || 1; });
-    return std::clamp(int(std::lround(18 * ratio)), 8, 96);
+double pixelRatio() {
+    return EM_ASM_DOUBLE({ return window.devicePixelRatio || 1; });
+}
+int fontPixels(int cssPixels) {
+    return fontDevicePixels(cssPixels, pixelRatio());
+}
+
+// The font size in CSS pixels is remembered per browser (localStorage can be
+// unavailable or throw, then the default is used).
+int loadFontSize() {
+    const int value = EM_ASM_INT({
+        try {
+            return parseInt(localStorage.getItem("matterm.fontSize"), 10) || 0;
+        }
+        catch (e) {
+            return 0;
+        }
+    });
+    return value > 0 ? steppedFontSize(value, 0) : 18;
+}
+void saveFontSize(int cssPixels) {
+    EM_ASM(
+        {
+            try {
+                localStorage.setItem("matterm.fontSize", String($0));
+            }
+            catch (e) {
+            }
+        },
+        cssPixels);
 }
 
 void setTitle(const std::string &title) {
@@ -201,6 +234,13 @@ void handleWheel(App &app, const SDL_MouseWheelEvent &wheel) {
         amount = -amount;
     }
     const auto &modes = app.parser->modes();
+    if (modifiers(SDL_GetModState()).control) {
+        // Ctrl+wheel: font size, one step per notch (applied before the next
+        // frame; the application never sees it).
+        app.pendingFontCss =
+            steppedFontSize(app.pendingFontCss, amount > 0 ? 1 : -1);
+        return;
+    }
     if (mouseTracking(app) && !modifiers(SDL_GetModState()).shift) {
         int x = 0, y = 0;
         SDL_GetMouseState(&x, &y);
@@ -224,6 +264,125 @@ void handleWheel(App &app, const SDL_MouseWheelEvent &wheel) {
     }
 }
 
+// One-finger drag. `rows` is the distance in text rows (positive: the finger
+// moved down, so older text comes into view, like wheel up). Application mouse
+// reporting gets wheel presses at the finger, the alternate screen gets arrow
+// keys, as the wheel does; the primary screen scrolls smoothly.
+void touchScroll(App &app, double rows, int x, int y) {
+    const auto &modes = app.parser->modes();
+    if (!mouseTracking(app) && !app.model->alternateScreen()) {
+        app.model->scrollBy(rows);
+        return;
+    }
+    app.touchRows += rows;
+    const int steps = int(std::trunc(app.touchRows));
+    app.touchRows -= steps;
+    for (int i = 0; i < std::min(std::abs(steps), 20); ++i) {
+        if (mouseTracking(app)) {
+            sendMouse(app,
+                      MouseEvent::Type::Press,
+                      steps > 0 ? MouseEvent::Button::WheelUp
+                                : MouseEvent::Button::WheelDown,
+                      x,
+                      y,
+                      true,
+                      false);
+        }
+        else {
+            send(app,
+                 InputEncoder::key(steps > 0 ? InputEncoder::Key::Up
+                                             : InputEncoder::Key::Down,
+                                   {},
+                                   modes));
+        }
+    }
+}
+
+void handleEvent(App &app, const SDL_Event &event);
+
+// A tap is a click: replay it as left button press and release, which takes
+// the same path as a mouse (application reporting, or local selection).
+void touchTap(App &app, int x, int y) {
+    SDL_Event press{};
+    press.type = SDL_MOUSEBUTTONDOWN;
+    press.button.button = SDL_BUTTON_LEFT;
+    press.button.state = SDL_PRESSED;
+    press.button.clicks = 1;
+    press.button.x = x;
+    press.button.y = y;
+    handleEvent(app, press);
+    SDL_Event release = press;
+    release.type = SDL_MOUSEBUTTONUP;
+    release.button.state = SDL_RELEASED;
+    handleEvent(app, release);
+}
+
+void applyTouch(App &app, const std::vector<TouchGesture::Action> &actions) {
+    using Kind = TouchGesture::Kind;
+    int windowWidth = 0, windowHeight = 0;
+    SDL_GetWindowSize(app.window, &windowWidth, &windowHeight);
+    int drawableHeight = 0;
+    SDL_GetRendererOutputSize(
+        SDL_GetRenderer(app.window), nullptr, &drawableHeight);
+    // Window units to text rows.
+    const double rowsPerUnit =
+        windowHeight > 0 && app.backend->cellHeight() > 0
+            ? double(drawableHeight) / windowHeight / app.backend->cellHeight()
+            : 0;
+    for (const auto &action : actions) {
+        const int x = int(action.x), y = int(action.y);
+        switch (action.kind) {
+        case Kind::Scroll:
+            touchScroll(app, action.amount * rowsPerUnit, x, y);
+            break;
+        case Kind::Tap:
+            touchTap(app, x, y);
+            break;
+        case Kind::LongPress:
+            // Select the word under the finger; dragging extends it. An
+            // application that has the mouse keeps it (no local selection).
+            if (!mouseTracking(app)) {
+                if (const auto cell = mouseCell(
+                        *app.window, *app.backend, *app.model, x, y, false)) {
+                    selectAt(app.selection, *app.model, *cell, false, 2);
+                    app.dragging = true;
+                    EM_ASM({
+                        try {
+                            navigator.vibrate(15);
+                        }
+                        catch (e) {
+                        }
+                    });
+                }
+            }
+            break;
+        case Kind::SelectExtend:
+            if (app.dragging && app.selection &&
+                app.selection->valid(*app.model)) {
+                if (const auto cell = mouseCell(
+                        *app.window, *app.backend, *app.model, x, y, true)) {
+                    app.selection->extend(*app.model, *cell);
+                }
+            }
+            break;
+        case Kind::SelectEnd:
+            if (app.dragging && app.selection &&
+                app.selection->valid(*app.model)) {
+                // No Ctrl+Shift+C on a phone: finishing a selection copies it.
+                if (const auto text = app.selection->text(*app.model)) {
+                    copyToClipboard(*text);
+                }
+            }
+            app.dragging = false;
+            break;
+        case Kind::Pinch:
+            app.pendingFontCss =
+                steppedFontSize(app.pendingFontCss, int(action.amount));
+            break;
+        }
+    }
+}
+
 void handleEvent(App &app, const SDL_Event &event) {
     auto &model = *app.model;
     if (app.ended) {
@@ -232,6 +391,30 @@ void handleEvent(App &app, const SDL_Event &event) {
              event.key.keysym.sym == SDLK_KP_ENTER)) {
             EM_ASM({ location.reload(); });
         }
+        return;
+    }
+    if ((event.type == SDL_MOUSEBUTTONDOWN ||
+         event.type == SDL_MOUSEBUTTONUP) &&
+        event.button.which == SDL_TOUCH_MOUSEID) {
+        return; // Touches are handled as gestures below.
+    }
+    if (event.type == SDL_MOUSEMOTION &&
+        event.motion.which == SDL_TOUCH_MOUSEID) {
+        return;
+    }
+    if (event.type == SDL_FINGERDOWN || event.type == SDL_FINGERMOTION ||
+        event.type == SDL_FINGERUP) {
+        int width = 0, height = 0;
+        SDL_GetWindowSize(app.window, &width, &height);
+        const double x = event.tfinger.x * width;
+        const double y = event.tfinger.y * height;
+        const int id = int(event.tfinger.fingerId);
+        const auto now = SDL_GetTicks64();
+        applyTouch(app,
+                   event.type == SDL_FINGERDOWN ? app.touch.down(id, x, y, now)
+                   : event.type == SDL_FINGERMOTION
+                       ? app.touch.move(id, x, y, now)
+                       : app.touch.up(id, now));
         return;
     }
     if (event.type == SDL_TEXTINPUT) {
@@ -353,6 +536,7 @@ void handleEvent(App &app, const SDL_Event &event) {
               event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)) {
         const bool gained = event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED;
         if (!gained) {
+            applyTouch(app, app.touch.cancel());
             app.dragging = false;
             app.mouseCaptured = false;
             app.heldButton = MouseEvent::Button::None;
@@ -361,6 +545,30 @@ void handleEvent(App &app, const SDL_Event &event) {
     }
     else if (event.type == SDL_MOUSEWHEEL) {
         handleWheel(app, event.wheel);
+    }
+}
+
+// Rebuild the renderer with the pending font size; the next frame notices the
+// new cell size and resizes the model and the link as for a window resize.
+void changeFont(App &app) {
+    const int wanted = app.pendingFontCss;
+    app.backend.reset(); // The window has one renderer at a time.
+    for (const int css : {wanted, app.fontCss}) {
+        try {
+            app.backend = std::make_unique<SdlBackend>(
+                *app.window, "/assets/font.ttf", fontPixels(css));
+            app.fontCss = css;
+            break;
+        }
+        catch (const std::exception &error) {
+            std::fprintf(stderr, "font change failed: %s\n", error.what());
+        }
+    }
+    app.pendingFontCss = app.fontCss;
+    app.lastSignature.reset();
+    app.touchRows = 0;
+    if (app.backend) {
+        saveFontSize(app.fontCss);
     }
 }
 
@@ -374,6 +582,17 @@ void frame(void *data) {
         if (app.link) {
             handleEvent(app, event);
         }
+    }
+    if (const auto held = app.touch.tick(start); !held.empty()) {
+        app.activeUntil = start + activeMs;
+        applyTouch(app, held);
+    }
+    if (app.pendingFontCss != app.fontCss) {
+        changeFont(app);
+    }
+    // A finger on the screen keeps the loop awake (for the long press).
+    if (app.touch.active()) {
+        app.activeUntil = std::max(app.activeUntil, start + activeMs);
     }
     if (start > app.activeUntil && start - app.lastFull < idleMs &&
         app.lastSignature) {
@@ -532,6 +751,10 @@ int main() {
     }
     static App app;
     gApp = &app;
+    // Touches arrive as fingers only; taps are replayed as clicks by
+    // touchTap and drags are gestures, so SDL must not also fake a mouse.
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+    app.fontCss = app.pendingFontCss = loadFontSize();
     app.window =
         SDL_CreateWindow("matterm",
                          SDL_WINDOWPOS_CENTERED,
@@ -545,7 +768,7 @@ int main() {
     }
     try {
         app.backend = std::make_unique<SdlBackend>(
-            *app.window, "/assets/font.ttf", fontPixels());
+            *app.window, "/assets/font.ttf", fontPixels(app.fontCss));
     }
     catch (const std::exception &error) {
         std::fprintf(stderr, "backend failed: %s\n", error.what());

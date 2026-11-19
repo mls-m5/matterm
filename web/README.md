@@ -90,6 +90,26 @@ work as on the desktop. Checked with touch emulation in `tools/e2e-touch.js`
 (a real Android keyboard has not been tried: its composition and backspace
 behavior varies by keyboard app).
 
+### Touch gestures
+
+Handled in `main.cpp` with the classifier in `src/frontend/touchgesture.h`
+(SDL finger events; SDL's own touch-to-mouse emulation is off).
+
+| Gesture | Primary screen | Alternate screen | Application mouse reporting |
+|---|---|---|---|
+| Tap | click: clears the selection, keyboard opens (`login.js`) | same | press and release of the left button |
+| One-finger drag | scrolls the scrollback (smooth, no inertia) | arrow keys, one per text row | wheel presses at the finger, one per row |
+| Long press (about 0.45 s), then drag | selects a word, dragging extends; lifting copies it to the clipboard | same | not available: the application owns the mouse |
+| Two-finger pinch | font size in 1 px steps (8 to 40 CSS px), stored in `localStorage` as `matterm.fontSize` | same | same |
+
+Ctrl+wheel changes the font size on the desktop. A drag or pinch never focuses
+the keyboard field or toggles the keyboard; only a short single-finger tap does.
+There is no Shift on a phone, so local selection while an application has the
+mouse is not possible by touch. Changing the font rebuilds the renderer, then the
+grid is re-fitted and the server told through the normal resize path. Touch events
+wake the idle-throttled loop, which stays awake while a finger is down.
+`tools/e2e-gestures.js` checks these with CDP touch events.
+
 ## HiDPI
 
 The canvas backing store is sized in device pixels (`devicePixelRatio`) and the
@@ -100,5 +120,5 @@ the browser zoom after load needs a reload for the font size to follow.
 ## Known gaps
 
 Copied text keeps trailing spaces of the selected line (the same model code as
-the native terminal). Touch gestures other than tap (scrolling by dragging, pinch), the `open URL` roadmap item,
+the native terminal). The `open URL` roadmap item
 and a font choice other than the bundled one are not done.
