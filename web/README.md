@@ -48,7 +48,16 @@ node e2e.js http://localhost:8080/ 'the password' out.png
 ```
 
 `e2e.js` logs in, types a command and saves a screenshot (plus `out-login.png`).
-`shot.js` only screenshots a URL.
+`shot.js` only screenshots a URL. `tools/run-e2e.sh SERVER SITE [OUTDIR]` starts
+a server with a throwaway password and runs `e2e-input.js`, `e2e-copy.js` and
+`e2e-lifecycle.js` against it.
+
+## Session lifecycle
+
+When the program exits, the connection fails or the server closes it, the
+terminal prints the reason and `[Press Enter to log in again]`; Enter reloads
+the page and shows the login form. A new login is needed because each login
+allows a single WebSocket upgrade.
 
 ## Input
 
