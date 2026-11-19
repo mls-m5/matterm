@@ -190,18 +190,25 @@ void SdlBackend::render(const RenderFrame &frame) {
                                 colors.background.g,
                                 colors.background.b,
                                 255});
-            if (hasAttribute(cell.attributes, CellAttribute::Blink) &&
-                !frame.textBlinkVisible) {
-                continue;
-            }
+            const auto index = y * frame.cells.columns() + x;
+            const bool overlayUnderline =
+                index >= frame.underlineBegin && index < frame.underlineEnd;
+            const bool hiddenByBlink =
+                hasAttribute(cell.attributes, CellAttribute::Blink) &&
+                !frame.textBlinkVisible;
             const Rgb8 foreground = colors.foreground;
             const SDL_Color ink{foreground.r, foreground.g, foreground.b, 255};
-            if (hasAttribute(cell.attributes, CellAttribute::Underline)) {
+            if (overlayUnderline ||
+                (!hiddenByBlink &&
+                 hasAttribute(cell.attributes, CellAttribute::Underline))) {
                 s.decorations.quad(left,
                                    top + std::max(0, s.cellHeight - 2),
                                    float(s.cellWidth),
                                    1,
                                    ink);
+            }
+            if (hiddenByBlink) {
+                continue;
             }
             if (hasAttribute(cell.attributes, CellAttribute::Strike)) {
                 s.decorations.quad(

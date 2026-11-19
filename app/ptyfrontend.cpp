@@ -247,6 +247,7 @@ int runPtyFrontend(const char *font,
     bool running = true;
     bool rejectedInput = false;
     std::string clipboardError;
+    std::string linkError;
     bool dragging = false;
     std::optional<Selection> selection;
     auto &model = session.model();
@@ -367,16 +368,32 @@ int runPtyFrontend(const char *font,
                                             event.button.x,
                                             event.button.y,
                                             false);
-                dragging = cell.has_value();
-                if (cell) {
-                    selectAt(selection,
-                             model,
-                             *cell,
-                             modifiers(SDL_GetModState()).shift,
-                             event.button.clicks);
+                const auto mod = modifiers(SDL_GetModState());
+                const auto link = cell && localLinkGesture(mod.control,
+                                                           mod.shift,
+                                                           mouseTracking(),
+                                                           mouseCaptured)
+                                      ? urlAt(model, *cell)
+                                      : std::nullopt;
+                if (link) {
+                    dragging = false;
+                    linkError =
+                        SDL_OpenURL(link->text.c_str()) == 0
+                            ? ""
+                            : std::string("open URL failed: ") + SDL_GetError();
                 }
                 else {
-                    selection.reset();
+                    dragging = cell.has_value();
+                    if (cell) {
+                        selectAt(selection,
+                                 model,
+                                 *cell,
+                                 mod.shift,
+                                 event.button.clicks);
+                    }
+                    else {
+                        selection.reset();
+                    }
                 }
             }
             else if ((event.type == SDL_MOUSEMOTION && dragging) ||
@@ -546,6 +563,11 @@ int runPtyFrontend(const char *font,
                 dragging = false;
             }
         }
+        const auto link =
+            hoveredUrl(*window, backend, model, mouseTracking(), mouseCaptured);
+        if (link) {
+            link->underline(model, frame);
+        }
         frame.textBlinkVisible = (now / 500) % 2 == 0;
         // Before blink masking: the glide follows the true cell, not the blink.
         cursorGlide.update(frame.cursor.column,
@@ -565,6 +587,12 @@ int runPtyFrontend(const char *font,
         }
         if (!clipboardError.empty()) {
             currentTitle += " | " + clipboardError;
+        }
+        if (!linkError.empty()) {
+            currentTitle += " | " + linkError;
+        }
+        if (link) {
+            currentTitle += " | " + link->text;
         }
         SDL_SetWindowTitle(window.get(), currentTitle.c_str());
         backend.render(frame);

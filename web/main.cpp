@@ -52,6 +52,7 @@ struct App {
     std::optional<std::pair<int, int>> lastMouseCell;
     bool dragging = false;
     std::optional<Selection> selection;
+    std::string title = "matterm"; // Base title, without the Ctrl-hover target.
 };
 
 App *gApp = nullptr; // For matterm_paste.
@@ -81,6 +82,9 @@ int fontPixels() {
 }
 
 void setTitle(const std::string &title) {
+    if (gApp) {
+        gApp->title = title;
+    }
     EM_ASM({ document.title = UTF8ToString($0); }, title.c_str());
 }
 
@@ -283,16 +287,36 @@ void handleEvent(App &app, const SDL_Event &event) {
                                     event.button.x,
                                     event.button.y,
                                     false);
-        app.dragging = cell.has_value();
-        if (cell) {
-            selectAt(app.selection,
-                     model,
-                     *cell,
-                     modifiers(SDL_GetModState()).shift,
-                     event.button.clicks);
+        const auto mod = modifiers(SDL_GetModState());
+        const auto link = cell && localLinkGesture(mod.control,
+                                                   mod.shift,
+                                                   mouseTracking(app),
+                                                   app.mouseCaptured)
+                              ? urlAt(model, *cell)
+                              : std::nullopt;
+        if (link) {
+            app.dragging = false;
+            // Keep this in the click path (transient browser user activation),
+            // passing data as a string, never interpolating JavaScript source.
+            EM_ASM(
+                {
+                    window.open(
+                        UTF8ToString($0), "_blank", "noopener,noreferrer");
+                },
+                link->text.c_str());
         }
         else {
-            app.selection.reset();
+            app.dragging = cell.has_value();
+            if (cell) {
+                selectAt(app.selection,
+                         model,
+                         *cell,
+                         mod.shift,
+                         event.button.clicks);
+            }
+            else {
+                app.selection.reset();
+            }
         }
     }
     else if ((event.type == SDL_MOUSEMOTION && app.dragging) ||
@@ -367,6 +391,17 @@ void frame(void *data) {
             app.dragging = false;
         }
     }
+    const auto link = app.ended ? std::nullopt
+                                : hoveredUrl(*app.window,
+                                             *app.backend,
+                                             *app.model,
+                                             mouseTracking(app),
+                                             app.mouseCaptured);
+    if (link) {
+        link->underline(*app.model, rendered);
+    }
+    const auto &shownTitle = link ? link->text : app.title;
+    EM_ASM({ document.title = UTF8ToString($0); }, shownTitle.c_str());
     rendered.textBlinkVisible = (now / 500) % 2 == 0;
     // Before blink masking: the glide follows the true cell, not the blink.
     app.cursorGlide.update(rendered.cursor.column,

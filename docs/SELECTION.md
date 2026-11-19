@@ -29,6 +29,12 @@ still go to the program. Hold Shift to initiate local selection instead. Once
 a local drag begins it stays local until release, even if Shift is released.
 Navigation and selection do not send terminal input or change stored text.
 
+Ctrl+left click on a detected HTTP(S) URL opens it instead of changing the
+selection. Hold Ctrl to preview the target in the title and underline it.
+While application mouse reporting is active, add Shift for local link handling;
+otherwise Ctrl+click still goes to the application. See [Links](LINKS.md) for the
+security policy and detection limits.
+
 ## Word and line boundaries
 
 Words contain ASCII letters, digits and the path/URL characters
