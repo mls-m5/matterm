@@ -62,7 +62,7 @@ Consequences of that choice:
 | Path | Contents | Depends on |
 |---|---|---|
 | `src/protocol/` | Message types, binary encode/decode, limits. Pure C++17, no I/O, no SDL. | nothing |
-| `src/transport/` | `Transport` interface (below) and the WebSocket client for WASM; scripted transport for the simulator. | protocol |
+| `src/transport/` | `MessageChannel`, `TerminalLink`, and `ClientSession` (done); the WebSocket channel for WASM and the scripted link (later). | protocol |
 | `src/platform/posix/ptyprocess.*` | Already exists; the server reuses it unchanged. | - |
 | `src/server/` | `matterm-server`: HTTP/WebSocket listener (Boost.Beast on Boost.Asio), auth, rate limiting, session manager, configuration. Linux only, off unless `MATTERM_BUILD_SERVER=ON`. | protocol, ptyprocess, Boost, libsodium, fast-json |
 | `web/` | HTML shell, JS glue (WebSocket, clipboard, resize observer), CSP. | - |
@@ -72,28 +72,19 @@ Consequences of that choice:
 The server must use only `PtyProcess`; no refactor is needed, but the web
 client should not reuse `PtySession`.
 
-Portable transport interface (browser and native clients):
+Two small interfaces separate the layers (`src/transport/`):
 
-```cpp
-class Transport {
-public:
-    virtual ~Transport() = default;
-    virtual void send(std::string_view bytes) = 0;       // client -> remote
-    virtual void resize(int columns, int rows) = 0;
-    // Called from the client's tick; never re-entrantly.
-    struct Events {
-        std::function<void(std::string_view)> output;     // remote -> client
-        std::function<void(int code, int signal)> exited;
-        std::function<void(std::string_view reason)> closed;
-    };
-    virtual void setEvents(Events) = 0;
-};
-```
+- `MessageChannel`: a reliable, ordered, message-oriented channel (WebSocket,
+  later a WebRTC data channel, or an in-memory pair in tests). `send`, `close`,
+  and `opened` / `message` / `closed` events. It knows nothing about the protocol.
+- `TerminalLink`: what a terminal front end needs from wherever its terminal
+  lives: `sendInput`, `resize`, `close`, and `output` / `exited` / `closed`
+  events. The model, parser, and renderer see only this.
 
-Implementations: `PtyTransport` (native, wraps `PtyProcess`; the existing
-frontend can migrate to it later), `WebSocketTransport` (WASM), and
-`ScriptedTransport` (timed VT output for the simulator). The model, parser, and
-renderer never see a transport.
+Implementations of `TerminalLink`: `ClientSession` (implemented: speaks
+matterm-tty over any `MessageChannel`, sends `Hello`, chunks input, acknowledges
+parsed output, pings, and reports exit or failure), a future `PtyLink` for the
+native application, and a `ScriptedLink` for the simulator.
 
 ## 3. Threat Model
 
@@ -391,17 +382,19 @@ the package to install.
 - **Rendering backend.** The first browser backend is the existing SDL2
   renderer built with Emscripten. Backend selection is a build option
   (`MATTERM_WEB_RENDERER=sdl|canvas|webgl`; only `sdl` initially). The
-  renderer boundary should be a small abstract `RenderBackend` interface
-  (`render(const RenderFrame &)`, `present()`, cell metrics, resize). That costs
-  one virtual call per frame, which is negligible next to drawing a frame, so
-  keeping it virtual allows choosing a backend at run time later without a
-  measurable performance loss. Today `SdlBackend` is a concrete class; extracting
-  the interface is a small, separate refactor and must not change native
-  behavior or performance (verify with the benchmarks in BENCHMARKS.md).
+  renderer boundary is already the abstract `RenderBackend`
+  (`render(const RenderFrame &)`, `present()`, in `src/render/renderbackend.h`),
+  which `SdlBackend` implements. That costs one virtual call per frame, which is
+  negligible next to drawing a frame, so a backend can also be chosen at run time
+  later without a measurable performance loss. What the interface does not cover
+  is cell metrics, column/row computation, and construction (the applications use
+  `SdlBackend` directly for those); widening it is only needed once a second
+  backend exists, and must not change native behavior or performance (verify
+  with the benchmarks in BENCHMARKS.md).
 
 ## 7. Terminal Simulator (Later)
 
-`ScriptedTransport` implements `Transport` by playing a timed list of
+`ScriptedLink` implements `TerminalLink` by playing a timed list of
 `(delay, bytes)` records, optionally echoing typed input through a tiny scripted
 "shell". It uses the same parser, model, renderer, and `InputEncoder`. It needs
 no server, no authentication, and no network, so it can be embedded on public
@@ -432,11 +425,11 @@ existing `--record-output` PTY recording gives realistic scripts.
 
 Each phase is independently useful and ends with tests and documentation.
 
-1. **Protocol and transport interface** (codec done: `src/protocol/`, with
-   golden-vector, boundary, and randomized round-trip tests; server-side
-   session state machine `ServerSession` with a fake-host test suite; the
-   `Transport` interface and `PtyTransport` remain). `src/protocol` with tests; `Transport`
-   interface; `PtyTransport` so the native app exercises the interface.
+1. **Protocol and link interfaces** (done: `src/protocol/` codec and
+   `ServerSession`; `src/transport/` `MessageChannel`, `TerminalLink`, and
+   `ClientSession`, all with tests including a client-to-server end-to-end
+   loopback). Remaining: `PtyLink`, so the native application uses the same
+   interface as the web client.
 2. **Local server, no browser.** `matterm-server` on loopback: configuration
    files, static files, `/login` with Argon2id, configurable rate limiter,
    WebSocket, sessions, flow control; a native test client in the test suite.
@@ -447,7 +440,7 @@ Each phase is independently useful and ends with tests and documentation.
    lockout persistence, systemd unit, header audit, fuzzing.
 5. **Public deployment.** Reverse proxy and TLS, optional second factor,
    operational docs (backups of state file, password rotation, log review).
-6. **Terminal simulator.** `ScriptedTransport`, script format, embedding docs.
+6. **Terminal simulator.** `ScriptedLink`, script format, embedding docs.
 7. **WebRTC data channel** only if there is a concrete need (NAT traversal
    without opening a port, lower latency): needs a signaling path and a native
    library (for example libdatachannel). Terminal data needs reliable ordered

@@ -31,6 +31,14 @@ add_library(matterm::protocol ALIAS ttyprotocol)
 target_compile_features(ttyprotocol PUBLIC cxx_std_17)
 target_include_directories(ttyprotocol PUBLIC src/protocol)
 
+# Terminal links: message channel and link interfaces plus the remote client
+# session. Portable C++17, no I/O, so the same code builds for the browser.
+add_library(ttytransport src/transport/clientsession.cpp)
+add_library(matterm::transport ALIAS ttytransport)
+target_compile_features(ttytransport PUBLIC cxx_std_17)
+target_include_directories(ttytransport PUBLIC src/transport)
+target_link_libraries(ttytransport PUBLIC matterm::protocol)
+
 add_library(utf8decoder src/terminal/vt/utf8decoder.cpp)
 add_library(matterm::utf8 ALIAS utf8decoder)
 target_compile_features(utf8decoder PUBLIC cxx_std_17)
