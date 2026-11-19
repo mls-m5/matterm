@@ -95,14 +95,31 @@ TEST_CASE("Missing glyphs use a cached replacement") {
     EXPECT_EQ(missing.source.y, again.source.y);
 }
 
-TEST_CASE("Braille patterns use distinct glyphs rather than a replacement") {
+TEST_CASE(
+    "System font fallback supplies distinct Braille glyphs within a cell") {
+    // Opt in with a primary font without Braille and an installed font that
+    // covers it; minimal/headless builds need not have any system fonts.
+    if (!std::getenv("GLYPH_TEST_EXPECT_BRAILLE_FALLBACK")) {
+        return;
+    }
     Fixture fixture;
+    std::unique_ptr<TTF_Font, decltype(&TTF_CloseFont)> primary{
+        TTF_OpenFont(fixture.font(), 18), TTF_CloseFont};
+    if (!primary) {
+        throw std::runtime_error(TTF_GetError());
+    }
+    EXPECT_EQ(TTF_GlyphIsProvided32(primary.get(), U'\u2801'), 0);
+    EXPECT_EQ(TTF_GlyphIsProvided32(primary.get(), U'\u2880'), 0);
     GlyphAtlas atlas(*fixture.renderer, fixture.font(), 18);
+    const int cellWidth = atlas.getOrInsert(U'M').advanceX;
     const auto first = atlas.getOrInsert(U'\u2801');
     const auto last = atlas.getOrInsert(U'\u2880');
     const auto replacement = atlas.getOrInsert(char32_t(0x10ffff));
     EXPECT_GT(first.source.w, 0);
     EXPECT_GT(last.source.w, 0);
+    EXPECT(first.source.w <= cellWidth);
+    EXPECT(first.source.h <= atlas.lineHeight());
+    EXPECT_EQ(first.advanceX, cellWidth);
     EXPECT(first.source.x != last.source.x || first.source.y != last.source.y);
     EXPECT(first.source.x != replacement.source.x ||
            first.source.y != replacement.source.y);
