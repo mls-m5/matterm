@@ -18,6 +18,7 @@ public:
     using Send = std::function<void(std::string)>;
     using Close = std::function<void(int)>;
     PtySessionHost(ProcessConfig config, Send send, Close close);
+    ~PtySessionHost() override;
     void send(std::string bytes) override;
     void closeTransport(int code) override;
     bool startProcess(std::uint16_t columns, std::uint16_t rows) override;
@@ -29,14 +30,26 @@ public:
     void terminateProcess() override;
     // Bounded nonblocking I/O. Reports exit only after EOF, never just waitpid.
     void pump(protocol::ServerSession &session, protocol::Time now);
+    // True once the process is reaped and its end was reported (or abandoned).
+    bool finished() const noexcept {
+        return finished_;
+    }
 
 private:
+    // HUP the group now and SIGKILL it after the grace period. The leader stays
+    // unreaped until then, so the group id cannot be reused underneath us.
+    void beginCleanup(protocol::Time now);
+
     ProcessConfig config_;
     Send send_;
     Close close_;
     std::unique_ptr<PtyProcess> process_;
     std::string input_;
     std::optional<protocol::Time> killAt_;
-    bool exitReported_ = false;
+    // Set only when the session asked for termination: bounds the wait for PTY
+    // EOF, which never comes if the output window is full and nobody acks.
+    std::optional<protocol::Time> drainBy_;
+    bool killed_ = false;
+    bool finished_ = false;
 };
 } // namespace server

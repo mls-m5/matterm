@@ -45,22 +45,52 @@ void PtySessionHost::resizeProcess(std::uint16_t columns,
     if (process_)
         process_->resize(columns, rows, pixelWidth, pixelHeight);
 }
-void PtySessionHost::terminateProcess() {
-    if (process_ && !killAt_) {
-        process_->signalProcessGroup(SIGHUP);
-        killAt_ = std::chrono::duration_cast<protocol::Time>(
-                      std::chrono::steady_clock::now().time_since_epoch()) +
-                  config_.terminationGrace;
+namespace {
+protocol::Time steadyNow() {
+    return std::chrono::duration_cast<protocol::Time>(
+        std::chrono::steady_clock::now().time_since_epoch());
+}
+} // namespace
+PtySessionHost::~PtySessionHost() {
+    // Whatever the path here, never leave the group running. The leader is
+    // still unreaped unless finished_ (then the group was already killed).
+    if (process_ && !killed_) {
+        process_->signalProcessGroup(SIGKILL);
     }
+}
+void PtySessionHost::beginCleanup(protocol::Time now) {
+    if (killAt_ || !process_) {
+        return;
+    }
+    process_->signalProcessGroup(SIGHUP);
+    killAt_ = now + config_.terminationGrace;
+}
+void PtySessionHost::terminateProcess() {
+    if (!process_ || drainBy_) {
+        return;
+    }
+    const auto now = steadyNow();
+    beginCleanup(now);
+    drainBy_ = now + config_.terminationDrainTimeout;
 }
 void PtySessionHost::pump(protocol::ServerSession &session,
                           protocol::Time now) {
-    if (!process_ || exitReported_)
+    if (!process_ || finished_) {
         return;
-    if (killAt_ && now >= *killAt_)
+    }
+    const bool terminating = drainBy_.has_value();
+    // The leader ending, however it ended, ends the whole session's process
+    // group: HUP now, KILL after the grace period.
+    if (!killAt_ && process_->peekExit()) {
+        beginCleanup(now);
+    }
+    if (killAt_ && !killed_ && now >= *killAt_) {
         process_->signalProcessGroup(SIGKILL);
-    if (!input_.empty())
+        killed_ = true;
+    }
+    if (!terminating && !input_.empty()) {
         input_.erase(0, process_->write(input_));
+    }
     std::array<char, 16375> buffer{};
     // One bounded read per pump, even when output is continually available.
     const auto budget = std::min(buffer.size(), session.outputBudget());
@@ -70,13 +100,26 @@ void PtySessionHost::pump(protocol::ServerSession &session,
             session.onProcessOutput(std::string_view(buffer.data(), read.count),
                                     now);
     }
-    if (process_->closed()) {
-        const auto status = process_->pollExit();
-        if (status) {
-            exitReported_ = true;
-            input_.clear();
-            session.onProcessExit(status->code, status->signal, now);
-        }
+    if (!killed_) {
+        return; // Keep the leader unreaped until the group is gone.
+    }
+    const bool drained = process_->closed();
+    const bool gaveUp = drainBy_ && now >= *drainBy_;
+    if (!drained && !gaveUp) {
+        return;
+    }
+    const auto status = process_->pollExit();
+    if (!status) {
+        return; // SIGKILLed leader not yet reapable; try again next pump.
+    }
+    finished_ = true;
+    input_.clear();
+    if (drained) {
+        session.onProcessExit(status->code, status->signal, now);
+    }
+    else {
+        // Unread output was dropped: never claim a complete Exit.
+        close_(1000);
     }
 }
 } // namespace server
