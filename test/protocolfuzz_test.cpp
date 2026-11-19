@@ -136,14 +136,19 @@ TEST_CASE("Seeded server schedules preserve flow control and terminal states") {
         ServerSession session(config, host);
         Time now{0};
         session.start(now);
-        session.onMessage(wire(ClientMessage{Hello{}}), now);
-        std::string trace;
+        auto hello = wire(ClientMessage{Hello{}});
+        if (trial % 5 == 0)
+            hello = mutate(random, std::move(hello));
+        session.onMessage(hello, now);
+        std::string trace = hello;
         for (unsigned step = 0; step < 80; ++step) {
             const auto before = session.state();
             const auto sentBefore = host.messages.size();
             const auto op = random() % 10;
             trace += static_cast<char>(op);
             now += Time(random() % 101);
+            if (trial % 7 == 0 && step == 45)
+                now += Time(100000);
             std::string bytes;
             switch (op) {
             case 0:
@@ -157,7 +162,8 @@ TEST_CASE("Seeded server schedules preserve flow control and terminal states") {
                 bytes = wire(ClientMessage{Ack{session.sentOffset()}});
                 break;
             case 3:
-                bytes = wire(ClientMessage{Ack{session.sentOffset() + 1}});
+                bytes = wire(ClientMessage{
+                    Ack{session.sentOffset() + (step > 40 ? 1u : 0u)}});
                 break;
             case 4:
                 bytes = wire(
@@ -185,6 +191,8 @@ TEST_CASE("Seeded server schedules preserve flow control and terminal states") {
             case 9:
                 if (step > 60)
                     host.inputOk = false;
+                if (trial % 3 == 0 && step > 45)
+                    bytes = mutate(random, wire(ClientMessage{Resize{}}));
                 break;
             }
             trace += wire(
@@ -272,6 +280,20 @@ TEST_CASE("Hostile server streams fail closed without accumulating output") {
             }
             trace += bytes;
             channel.events.message(bytes);
+            const bool live = before == ClientSession::State::Running ||
+                              before == ClientSession::State::AwaitWelcome;
+            const bool knownInvalid =
+                choice == 1 ||
+                (choice == 0 && before == ClientSession::State::AwaitWelcome) ||
+                (choice == 2 && before == ClientSession::State::Running) ||
+                ((choice == 3 || choice == 4) &&
+                 before == ClientSession::State::AwaitWelcome);
+            if (live && knownInvalid) {
+                EXPECT(check(session.state() == ClientSession::State::Failed &&
+                                 outputBytes == outputsBefore,
+                             trial,
+                             trace));
+            }
             now += Time(20);
             session.tick();
             EXPECT(

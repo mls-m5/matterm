@@ -158,6 +158,11 @@ TEST_CASE(
             check(invariant(whole) && invariant(chunks) && invariant(singles),
                   trial,
                   bytes));
+        const auto initial = snapshot(whole);
+        EXPECT(
+            check(initial == snapshot(chunks) && initial == snapshot(singles),
+                  trial,
+                  bytes));
         // A common suffix tests retained rendition, saved cursor and both
         // screens, not merely the visible state at EOF.
         const std::string suffix = "Z\r\n\x1b[?1049hALT\x1b[?1049l\x1b"
