@@ -70,7 +70,8 @@ application sets `COLORTERM=truecolor` for its child. If a container does not
 inherit it, pass `--env COLORTERM` to Podman when starting the interactive process.
 Compatibility is still incomplete: do not assume full xterm/Vim support or advertise richer
 capabilities blindly. Use `--showcase` for the built-in VT stream, or `--input FILE`
-for regular-file playback:
+for regular-file playback. Use `--record-output FILE` to capture raw native PTY
+output for debugging; see [docs/PTY.md](docs/PTY.md) for limits and privacy notes.
 
 ```sh
 printf '\033[31mHello from VT\033[0m\r\n' > /tmp/matterm.vt

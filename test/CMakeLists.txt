@@ -182,6 +182,11 @@ if(BUILD_TESTING)
                         "test \"$COLORTERM\" = truecolor && test \"$TERM\" = xterm-256color")
                 set_tests_properties(pty_frontend_advertises_truecolor PROPERTIES
                     ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software;COLORTERM=stale" TIMEOUT 5)
+                add_test(NAME pty_frontend_records_raw_output
+                    COMMAND "${CMAKE_COMMAND}" "-DAPP=$<TARGET_FILE:matterm>" "-DFONT=${TEST_FONT_FILE}"
+                        -P "${CMAKE_CURRENT_SOURCE_DIR}/pty_recording.cmake")
+                set_tests_properties(pty_frontend_records_raw_output PROPERTIES
+                    ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software" TIMEOUT 15)
             endif()
         endif()
         if(MATTERM_BUNDLE_FONT)
