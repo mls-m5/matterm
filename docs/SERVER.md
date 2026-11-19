@@ -26,7 +26,7 @@ printf '%s\n' 'a very long passphrase ...' |
 
 build/server/src/server/matterm-server \
     --credentials ~/.config/matterm/credentials \
-    --origin http://localhost:8080 [-- /bin/bash -l]
+    --origin http://localhost:8080 [--static-dir build-web/site] [-- /bin/bash -l]
 ```
 
 - Listens on 127.0.0.1 only. Any other `--listen` address needs
@@ -42,7 +42,7 @@ build/server/src/server/matterm-server \
 
 | Request | Result |
 | --- | --- |
-| `GET /` | Placeholder page (no browser client is served yet). |
+| `GET /` and other client files | With `--static-dir DIR`: the regular files of DIR, by exact name (`/` is `index.html`; read once at startup, 64 MiB max, no subdirectories or dotfiles), with a script-only CSP. Without it: a placeholder page. The browser client is built by `web/` (see web/README.md). |
 | `POST /login` `{"password": "..."}` | 200 and `matterm_session` cookie (HttpOnly, Secure, SameSite=Strict); 401 otherwise; 429 with `Retry-After` when rate limited. |
 | `GET /ws` (WebSocket, subprotocol `matterm-tty.v1`) | Needs the cookie and the exact Origin. One upgrade per login. |
 
@@ -65,6 +65,5 @@ The child gets a small environment allow-list plus `TERM=xterm-256color` and
 
 ## Not in this slice
 
-TLS, config files (everything is a command-line option), serving the browser
-client, second factor, session resume, persistent lockout state. Open review
+TLS, config files (everything is a command-line option), second factor, session resume, persistent lockout state. Open review
 items are in [tasks/server-skeleton.md](tasks/server-skeleton.md).
