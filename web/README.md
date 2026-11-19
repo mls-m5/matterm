@@ -29,8 +29,9 @@ server's Content-Security-Policy forbids it.
 
 ## Run
 
-First create the password file with `tools/set-password.sh` (see docs/SERVER.md,
-"Credentials").
+First create the password file with `matterm-server --setup-credentials`
+(or `tools/set-password.sh`; see docs/SERVER.md, "Credentials"). Without
+`--static-dir` the server finds `build-web/site` by itself.
 
 ```
 build/server/src/server/matterm-server --credentials ~/.config/matterm/credentials \
