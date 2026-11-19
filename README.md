@@ -278,6 +278,14 @@ in both modes so hiding the sidebar does not itself resize the primary screen.
 Full-screen/editor compatibility still needs broader VT support; having a PTY and
 alternate screen alone does not imply complete Vim compatibility.
 
+## Performance Baseline
+
+Build with `-DMATTERM_BUILD_BENCHMARKS=ON` in Release mode for
+`matterm-parser-bench` (no I/O) and `matterm-terminal-bench` (portable POSIX stdout
+workload with optional DSR processing barrier). See [docs/BENCHMARKS.md](docs/BENCHMARKS.md)
+for commands, initial measurements, and what write/processing times do **not**
+measure about display completion. matperf tracing remains off pending review.
+
 ## Design and Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for the implementation checklist, parser/PTY stages,

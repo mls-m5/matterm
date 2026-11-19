@@ -119,6 +119,22 @@ if(BUILD_TESTING)
         set_tests_properties(pty_session PROPERTIES TIMEOUT 20)
     endif()
 
+    if(TARGET matterm-terminal-bench)
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        if(Python3_Interpreter_FOUND)
+            add_test(NAME terminal_bench_dsr_smoke
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terminalbench_smoke.py"
+                    $<TARGET_FILE:matterm-terminal-bench>)
+            set_tests_properties(terminal_bench_dsr_smoke PROPERTIES TIMEOUT 15)
+        endif()
+    endif()
+    if(TARGET matterm-parser-bench)
+        foreach(workload IN ITEMS long short color redraw)
+            add_test(NAME parser_bench_${workload}_smoke
+                COMMAND matterm-parser-bench ${workload} 8192 17 1)
+        endforeach()
+    endif()
+
     set(TEST_FONT_FILE "" CACHE FILEPATH "TrueType font for atlas and rendering tests")
     if(NOT TEST_FONT_FILE AND MATTERM_ASSET_JetBrainsMono-Regular.ttf)
         set(TEST_FONT_FILE "${MATTERM_ASSET_JetBrainsMono-Regular.ttf}")
