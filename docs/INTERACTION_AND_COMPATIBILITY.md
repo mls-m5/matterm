@@ -36,11 +36,17 @@ added separately.
 ## Window chrome
 
 SDL2 provides [window hit testing](https://wiki.libsdl.org/SDL2/SDL_SetWindowHitTest),
-not a GTK-style header bar widget. A future opt-in client-side decoration can
-use a borderless window, draw a header, and reserve drag and resize zones using
-SDL hit-test results. Buttons and terminal cells remain normal input zones.
-We would own button layout, accessibility, HiDPI, maximized/fullscreen behavior,
-and the interaction of chrome with terminal geometry. Keep native decorations
-as the default and as the fallback when hit testing is unsupported. Test X11
-and Wayland separately. If desktop-native styling and accessibility matter more
-than SDL portability, evaluate a distinct GTK frontend with a GtkHeaderBar.
+not a GTK-style header bar widget. Plan a future borderless SDL window with a
+custom header bar. SDL hit testing will reserve drag and resize zones; buttons
+and terminal cells will remain normal input zones.
+
+Treat this as substantial GUI design work, not just a window flag. Prototype the
+layout and visual hierarchy first: title, window controls, spacing, typography,
+icons, and active/inactive states. Design hover, pressed, keyboard-focus, and
+accessible controls, and check contrast and HiDPI sizing. Then verify resize,
+maximize, restore, and fullscreen behavior without disturbing terminal geometry
+or mouse selection.
+
+Keep native decorations as the default during rollout and as a fallback when
+custom decorations are unsupported. Test X11 and Wayland separately before
+considering a change to the default.

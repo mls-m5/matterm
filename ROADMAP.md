@@ -42,7 +42,7 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [x] Local mouse drag selection and UTF-8 clipboard copy across scrollback, joining soft wraps.
 - [ ] Application mouse input: press/release including right-click, wheel, drag/motion, modifier override for local selection, and SGR reporting.
 - [ ] Local right-click Copy/Paste menu, word selection, and drag auto-scroll.
-- [ ] Evaluate optional client-side window decorations; keep native fallback.
+- [ ] Design and prototype a borderless SDL window with a custom title bar. Budget substantial GUI design and polish before rollout; keep native decorations as a fallback.
 - [ ] Reproduce prompt and Pi panel color reports; see [Interaction and Compatibility](docs/INTERACTION_AND_COMPATIBILITY.md).
 - [ ] Golden transcripts from real programs, fuzz/property tests, and compatibility fixtures.
 - [x] Use optional Fontconfig system font fallback on Linux for missing glyphs, including Braille.
