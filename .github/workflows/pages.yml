@@ -72,7 +72,7 @@ jobs:
 
       - name: Check the site has what the page loads
         run: |
-          for f in index.html index.js index.wasm index.data login.js style.css; do
+          for f in index.html index.js index.wasm index.data login.js style.css embed.js; do
             test -s "pages/$f" || { echo "missing pages/$f"; exit 1; }
           done
           grep -q 'matterm-static-demo' pages/index.html
