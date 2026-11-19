@@ -78,6 +78,55 @@ TEST_CASE("Spaces have an advance without visible bitmap data") {
     EXPECT_EQ(space.source.h, 0);
 }
 
+TEST_CASE(
+    "Zero-width rendered text is cached without allocating an atlas slot") {
+    Fixture fixture;
+    std::unique_ptr<TTF_Font, decltype(&TTF_CloseFont)> font{
+        TTF_OpenFont(fixture.font(), 24), TTF_CloseFont};
+    EXPECT(bool(font));
+    EXPECT_GT(TTF_GlyphIsProvided32(font.get(), U'\u00ad'), 0);
+    for (const auto style :
+         {CellAttribute::None, CellAttribute::Bold, CellAttribute::Italic}) {
+        TTF_SetFontStyle(
+            font.get(),
+            (hasAttribute(style, CellAttribute::Bold) ? TTF_STYLE_BOLD : 0) |
+                (hasAttribute(style, CellAttribute::Italic) ? TTF_STYLE_ITALIC
+                                                            : 0));
+        int width = -1, advance = -1;
+        EXPECT_EQ(TTF_SizeUTF8(font.get(), "\xc2\xad", &width, nullptr), 0);
+        EXPECT_EQ(TTF_GlyphMetrics32(font.get(),
+                                     U'\u00ad',
+                                     nullptr,
+                                     nullptr,
+                                     nullptr,
+                                     nullptr,
+                                     &advance),
+                  0);
+        GlyphAtlas atlas(*fixture.renderer, fixture.font(), 24, 64, 64);
+        // SDL_ttf 2.20.1 reports nonempty glyph metrics for soft hyphen,
+        // but regular RenderGlyph32_Blended fails with "Text has zero width".
+        // Synthetic styles can add padding: measure each style separately.
+        const auto glyph = atlas.getOrInsert(U'\u00ad', style);
+        const auto again = atlas.getOrInsert(U'\u00ad', style);
+        EXPECT_EQ(glyph.advanceX, advance);
+        EXPECT_EQ(glyph.advanceX, again.advanceX);
+        EXPECT_EQ(glyph.source.x, again.source.x);
+        EXPECT_EQ(glyph.source.y, again.source.y);
+        if (width == 0) {
+            EXPECT_EQ(glyph.source.w, 0);
+            EXPECT_EQ(glyph.source.h, 0);
+        }
+        // Invisible text must not consume shelf space or break subsequent
+        // glyphs.
+        const auto visible = atlas.getOrInsert(U'-');
+        EXPECT_GT(visible.source.w, 0);
+        if (width == 0) {
+            EXPECT_EQ(visible.source.x, 1);
+            EXPECT_EQ(visible.source.y, 1);
+        }
+    }
+}
+
 TEST_CASE("Invalid Unicode scalars are rejected") {
     Fixture fixture;
     GlyphAtlas atlas(*fixture.renderer, fixture.font(), 24);
@@ -137,7 +186,8 @@ TEST_CASE("A full atlas fails without invalidating existing glyphs") {
         try {
             atlas.getOrInsert(ch);
         }
-        catch (const std::runtime_error &) {
+        catch (const std::runtime_error &error) {
+            EXPECT_EQ(std::string(error.what()), "Glyph atlas is full");
             full = true;
             break;
         }
@@ -146,6 +196,18 @@ TEST_CASE("A full atlas fails without invalidating existing glyphs") {
     const auto again = atlas.getOrInsert(U'A');
     EXPECT_EQ(first.source.x, again.source.x);
     EXPECT_EQ(first.source.y, again.source.y);
+}
+
+TEST_CASE("A glyph larger than its atlas still reports an error") {
+    Fixture fixture;
+    GlyphAtlas atlas(*fixture.renderer, fixture.font(), 24, 2, 2);
+    try {
+        atlas.getOrInsert(U'A');
+        EXPECT(false);
+    }
+    catch (const std::runtime_error &error) {
+        EXPECT_EQ(std::string(error.what()), "Glyph is larger than the atlas");
+    }
 }
 
 TEST_CASE("Invalid dimensions and missing fonts fail cleanly") {

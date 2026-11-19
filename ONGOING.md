@@ -1,5 +1,9 @@
 # Smooth scrolling / cursor investigation
 
+Latest agent3 handoff: the SDL_ttf `Text has zero width` investigation and fix
+are documented in [docs/tasks/zero-width-glyph.md](docs/tasks/zero-width-glyph.md).
+The older smooth-cursor/help work below has already been integrated into `main`.
+
 ## Status and findings
 
 Investigation and CLI changes are complete in worktree `.tmp/agent3`, branch
