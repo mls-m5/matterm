@@ -851,21 +851,24 @@ int main() {
         }
     };
     app.parser = std::make_unique<VtParser>(*app.model, std::move(vtEvents));
-    // ?smooth glides the cursor between positions (off by default);
-    // ?smooth=300 sets the glide time in milliseconds (default 80).
+    // ?smooth glides the cursor between positions; ?smooth=300 sets the glide
+    // time in milliseconds (default 80). It is off for a real terminal session
+    // and on in the static demo (no server URL); ?smooth=0 turns it off there.
+    const auto url = wsUrl();
     CursorGlide::Config glide;
-    const int smoothMs = EM_ASM_INT({
-        const p = new URLSearchParams(location.search);
-        if (!p.has("smooth")) {
-            return 0;
-        }
-        const v = parseInt(p.get("smooth"), 10);
-        return v > 0 ? v : 80;
-    });
+    const int smoothMs = EM_ASM_INT(
+        {
+            const p = new URLSearchParams(location.search);
+            if (!p.has("smooth")) {
+                return $0 ? 80 : 0;
+            }
+            const v = parseInt(p.get("smooth"), 10);
+            return v == = 0 ? 0 : (v > 0 ? v : 80);
+        },
+        url.empty() ? 1 : 0);
     glide.enabled = smoothMs > 0;
     glide.durationSeconds = smoothMs / 1000.0;
     app.cursorGlide = CursorGlide(glide);
-    const auto url = wsUrl();
     if (!url.empty()) {
         try {
             app.channel = std::make_unique<WebSocketChannel>(url);
@@ -923,6 +926,12 @@ int main() {
                 pretend.startCommand += c;
             }
         }
+        // Program output appears at a pace (any key shows the rest);
+        // ?noreveal prints it at once.
+        pretend.revealCharsPerSecond = EM_ASM_INT({
+            return new URLSearchParams(location.search).has("noreveal") ? 0
+                                                                        : 2500;
+        });
         pretend.seed = std::uint64_t(EM_ASM_DOUBLE({ return Date.now(); }));
         pretend.unixTime = std::int64_t(
             EM_ASM_DOUBLE({ return Math.floor(Date.now() / 1000); }));

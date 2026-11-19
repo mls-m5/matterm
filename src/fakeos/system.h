@@ -61,6 +61,10 @@ public:
     bool inProgram() const {
         return program_ != nullptr;
     }
+    // Program output is still being revealed (Config::revealCharsPerSecond).
+    bool revealing() const {
+        return !reveal_.empty();
+    }
 
 private:
     void freshWorld();
@@ -78,6 +82,11 @@ private:
     void launch(const std::string &name, const std::vector<std::string> &args);
     void clicked(const Key &key);
     void endProgram();
+    // Output produced since `mark` (an offset into out_) is held back and shown
+    // at the configured pace, when it is more than a line or two.
+    void queueOutput(std::size_t mark);
+    void drainReveal(Time now);
+    void flushReveal();
     std::string lineText() const;
     Reaction take();
 
@@ -101,6 +110,11 @@ private:
     std::size_t historyIndex_ = 0;
     std::string savedLine_;
     int tabCount_ = 0;
+    std::string reveal_;      // Output waiting to be shown.
+    double revealCredit_ = 0; // Units that may still be shown.
+    double revealRate_ = 0;   // Units per second for the current text.
+    Time revealAt_{0};
+    std::optional<int> deferredExit_; // `exit` after the text has been shown.
     bool startCommandRan_ = false;
 };
 
