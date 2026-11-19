@@ -25,6 +25,10 @@ struct AuthConfig {
 };
 // One owner login, rotated on every successful login; only a digest is
 // retained.
+//
+// Threading: not thread safe. Use it only from the server's single io_context
+// thread (debug builds assert this; the first calling thread becomes the
+// owner). generation() is a plain read and follows the same rule.
 class SessionStore {
 public:
     explicit SessionStore(AuthConfig config = {},
@@ -45,6 +49,7 @@ private:
     Clock::time_point created_{}, touched_{};
     bool claimed_ = false;
     std::uint64_t generation_ = 0;
+    ThreadAffinity affinity_;
 };
 // Strict, bounded single-field JSON object. Supports JSON escapes including
 // Unicode surrogate pairs; rejects extra/duplicate fields and control bytes.

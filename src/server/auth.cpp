@@ -1,5 +1,6 @@
 #include "auth.h"
 #include <array>
+#include <cassert>
 #include <cerrno>
 #include <fcntl.h>
 #include <fstream>
@@ -104,6 +105,7 @@ SessionStore::SessionStore(AuthConfig config, RateLimiter::Now now)
     initializeCrypto();
 }
 std::string SessionStore::issue() {
+    assert(affinity_.check());
     std::array<unsigned char, 32> bytes{};
     randombytes_buf(bytes.data(), bytes.size());
     std::array<char, 65> hex{};
@@ -116,6 +118,7 @@ std::string SessionStore::issue() {
     return token;
 }
 bool SessionStore::valid(std::string_view token, bool touch) {
+    assert(affinity_.check());
     if (token.size() != 64 || digest_.empty())
         return false;
     const auto candidate = digest(token);
@@ -132,12 +135,14 @@ bool SessionStore::valid(std::string_view token, bool touch) {
     return true;
 }
 bool SessionStore::claim(std::string_view token) {
+    assert(affinity_.check());
     if (!valid(token) || claimed_)
         return false;
     claimed_ = true;
     return true;
 }
 bool SessionStore::attachedValid(std::uint64_t generation, bool touch) {
+    assert(affinity_.check());
     if (generation != generation_ || digest_.empty() || !claimed_)
         return false;
     const auto now = now_();
@@ -151,6 +156,7 @@ bool SessionStore::attachedValid(std::uint64_t generation, bool touch) {
     return true;
 }
 void SessionStore::revoke() {
+    assert(affinity_.check());
     digest_.clear();
     claimed_ = false;
 }
