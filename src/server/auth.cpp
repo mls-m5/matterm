@@ -1,4 +1,5 @@
 #include "auth.h"
+#include "message.h"
 #include <array>
 #include <cassert>
 #include <cerrno>
@@ -286,7 +287,7 @@ private:
 };
 } // namespace
 std::optional<std::string> parsePassword(std::string_view json) {
-    if (json.size() > 512)
+    if (json.size() > 512 || !protocol::validUtf8(json))
         return {};
     Json parser(json);
     if (!parser.take('{'))

@@ -1,4 +1,5 @@
 #include "config.h"
+#include "message.h"
 #include <algorithm>
 #include <boost/asio/ip/address.hpp>
 #include <cctype>
@@ -64,6 +65,8 @@ bool unescape(std::string_view raw, std::string &out) {
     out.clear();
     for (std::size_t i = 0; i < raw.size(); ++i) {
         const char c = raw[i];
+        if (static_cast<unsigned char>(c) < 32)
+            return false;
         if (c != '\\') {
             out += c;
             continue;
@@ -126,6 +129,32 @@ struct Context {
     std::string_view text;
     const std::string &label;
 };
+// fast-json validates document structure, but leaves string contents raw.
+// Validate every string, including ignored comment subtrees, before committing
+// the settings. Iteration avoids recursion on deeply nested untrusted input.
+void validateStrings(const Context &context, const JsonNode &root) {
+    std::vector<const JsonNode *> pending{&root};
+    std::string decoded;
+    while (!pending.empty()) {
+        const auto *node = pending.back();
+        pending.pop_back();
+        if (node->next())
+            pending.push_back(node->next());
+        if (node->children())
+            pending.push_back(node->children());
+        const auto &token = node->value();
+        if (token.type != TokenType::STRING && token.type != TokenType::KEY)
+            continue;
+        if (!unescape(token.value, decoded) || !protocol::validUtf8(decoded) ||
+            decoded.find('\0') != std::string::npos) {
+            const auto at = json::get_token_position(token, context.text);
+            throw ConfigError(context.label + ":" +
+                              std::to_string(at.line_number) + ":" +
+                              std::to_string(at.column_number - 1) +
+                              ": syntax error: invalid JSON string");
+        }
+    }
+}
 // One member (or array element) being read; `key` provides the position.
 struct Member {
     const Context &context;
@@ -527,6 +556,9 @@ void applyConfigText(std::string_view text,
         }
         const Context context{text, label};
         readObject(context, *root, {}, topLevelFields(work));
+        // Preserve schema diagnostics (key paths) for known fields; work is
+        // still a private copy, so a later string failure changes nothing.
+        validateStrings(context, *root);
     }
     catch (const ConfigError &) {
         throw;
