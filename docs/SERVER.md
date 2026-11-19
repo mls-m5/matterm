@@ -26,8 +26,12 @@ printf '%s\n' 'a very long passphrase ...' |
 
 build/server/src/server/matterm-server \
     --credentials ~/.config/matterm/credentials \
-    --origin http://localhost:8080 [--static-dir build-web/site] [-- /bin/bash -l]
+    --origin http://localhost:8080 [-- /bin/bash -l]
 ```
+
+Settings can also live in a JSON file (`~/.config/matterm/server.json` or
+`--config PATH`); flags override it. `--print-config` shows the effective
+values. Every key is described in [SERVER_CONFIG.md](SERVER_CONFIG.md).
 
 - Listens on 127.0.0.1 only. Any other `--listen` address needs
   `--allow-plain-http` and prints a warning (put TLS in front of it).
@@ -128,5 +132,5 @@ The child gets a small environment allow-list plus `TERM=xterm-256color` and
 
 ## Not in this slice
 
-TLS, config files (everything is a command-line option), second factor, session resume, persistent lockout state. Open review
+TLS, `trusted_proxy`, writing the configuration back, second factor, session resume, persistent lockout state. Open review
 items are in [tasks/server-skeleton.md](tasks/server-skeleton.md).
