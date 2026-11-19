@@ -141,14 +141,14 @@ TEST_CASE("Program output appears at a pace, and --no-reveal prints at once") {
         }
         s.link.sendInput("seq 1 300\r");
         const auto start = Clock::now();
-        if (!s.until("\r\n300\r\n", 12000)) {
+        if (!s.until("\r\n300\r\n", 15000)) {
             return -1.0; // The mls-unit-test EXPECT cannot be used here.
         }
         return std::chrono::duration<double>(Clock::now() - start).count();
     };
     const double paced = secondsToSee300({});
     const double instant = secondsToSee300({"--no-reveal"});
-    EXPECT(paced > 0.8); // About 300 lines at 25 a second.
+    EXPECT(paced > 2.0); // 300 lines at about 13 a second, within four seconds.
     EXPECT(instant >= 0 && instant < 0.8);
 }
 

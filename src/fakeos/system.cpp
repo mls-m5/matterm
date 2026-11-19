@@ -9,11 +9,15 @@ namespace {
 const char *kEnterApp = "\x1b[?1049h\x1b[?25l\x1b[0m\x1b[2J";
 const char *kLeaveApp = "\x1b[0m\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l";
 // Reveal pacing: a newline costs this many characters' time, so lines (not only
-// characters) set the pace; short texts are not held back at all; and a long
-// text is shown within a few seconds whatever the configured rate.
+// characters) set the pace; even a one-line text takes a moment, so the effect
+// is seen, but only a moment (it must never feel sluggish); and a long text is
+// shown within a few seconds whatever the configured rate.
 constexpr double kNewlineCost = 12;
-constexpr double kInstantCost = 60;
+constexpr double kLeastRevealSeconds = 0.35;
 constexpr double kMostRevealSeconds = 4.0;
+// While text is revealed there is a pip about this often: a short one for the
+// last character shown, a lower, longer one when a line was completed.
+constexpr int kBeepGapMs = 45;
 
 // What showing one unit of terminal output costs, and how many bytes it takes:
 // a character, a line end, or an escape sequence (free).
@@ -96,6 +100,7 @@ void System::freshWorld() {
     fresh.rows = config_.rows;
     fresh.caps = config_.capabilities;
     fresh.background = config_.background;
+    fresh.sound = config_.sound && bool(config_.onBeep);
     fresh.rng = Rng(config_.seed);
     fresh.bootUnix = config_.unixTime;
     fresh.now = world_.now;
@@ -107,6 +112,7 @@ void System::freshWorld() {
 }
 
 Reaction System::take() {
+    forwardBeeps();
     Reaction r;
     r.output = std::move(out_);
     out_.clear();
@@ -456,9 +462,26 @@ void System::submit() {
         world_.history.push_back(line);
     }
     const auto mark = out_.size();
-    out_ += shell_.run(line);
+    const auto result = shell_.run(line);
+    out_ += result;
+    const bool restores = world_.resetRequest;
     afterCommand();
-    queueOutput(mark);
+    if (!result.empty() || restores) { // A bare prompt is never held back.
+        queueOutput(mark);
+    }
+}
+
+// Pips collected from the reveal and from programs go to the host's listener.
+void System::forwardBeeps() {
+    if (!config_.sound || !config_.onBeep) {
+        world_.beeps.clear();
+        return;
+    }
+    for (auto beep : world_.beeps) {
+        beep.at = now_;
+        config_.onBeep(beep);
+    }
+    world_.beeps.clear();
 }
 
 // ---- Revealing program output at a pace -----------------------------------
@@ -473,13 +496,16 @@ void System::queueOutput(std::size_t mark) {
         cost += unit.cost;
         at += unit.bytes;
     }
-    if (cost <= kInstantCost) {
-        return; // A line or two, and the prompt: no need to hold it back.
+    if (cost <= 0) {
+        return; // Nothing visible (only escape sequences).
     }
     reveal_ = out_.substr(mark);
     out_.resize(mark);
-    revealRate_ = std::max(double(config_.revealCharsPerSecond),
-                           cost / kMostRevealSeconds);
+    const double seconds =
+        std::clamp(cost / double(config_.revealCharsPerSecond),
+                   kLeastRevealSeconds,
+                   kMostRevealSeconds);
+    revealRate_ = cost / seconds;
     revealCredit_ = 0;
     revealAt_ = now_;
     if (exitCode_) { // `exit` happens after its text has been shown.
@@ -494,13 +520,29 @@ void System::drainReveal(Time now) {
     revealAt_ = now;
     revealCredit_ += revealRate_ * seconds;
     std::size_t used = 0;
+    unsigned char lastShown = 0;
+    bool lineDone = false;
     while (used < reveal_.size()) {
         const auto unit = nextUnit(reveal_, used);
         if (unit.cost > revealCredit_) {
             break;
         }
         revealCredit_ -= unit.cost;
+        if (unit.cost > 0) {
+            lineDone = lineDone || reveal_[used] == '\n';
+            lastShown = (unsigned char)reveal_[used];
+        }
         used += unit.bytes;
+    }
+    if (lastShown && (now - lastBeepAt_).count() >= kBeepGapMs) {
+        lastBeepAt_ = now;
+        if (lineDone) {
+            world_.beep(520, 50, 0.35);
+        }
+        else {
+            // The pitch follows the character, so the pips make a pattern.
+            world_.beep(1000 + double((lastShown * 37) % 380), 18, 0.25);
+        }
     }
     out_.append(reveal_, 0, used);
     reveal_.erase(0, used);

@@ -124,8 +124,8 @@ public:
         drawBanner(canvas, t, w, h, bg, shade);
         const int textRow =
             std::max(0, h / 2 - 3) + (w >= 45 && h >= 11 ? 7 : 4);
-        drawTagline1(canvas, t, w, textRow, bg, shade);
-        drawTagline2(canvas, t, w, textRow, bg, shade);
+        drawTagline1(world, canvas, t, w, textRow, bg, shade);
+        drawTagline2(world, canvas, t, w, textRow, bg, shade);
         // The red notice blinks for a few seconds in the corner.
         if (t >= kDemoOn && t < kDemoOff &&
             int((t - kDemoOn) / kBlinkMs) % 2 == 0) {
@@ -220,17 +220,24 @@ private:
 
     // First line: typed, held, then each letter turns to noise and vanishes.
     template <typename Shade>
-    void drawTagline1(AsciiCanvas &canvas,
+    void drawTagline1(World &world,
+                      AsciiCanvas &canvas,
                       double t,
                       int w,
                       int row,
                       Rgb bg,
-                      Shade shade) const {
+                      Shade shade) {
         if (t < kTagline1) {
             return;
         }
         const auto cells = layout(kLine1, w, row);
         const int typed = int((t - kTagline1) / kTypeMsPerChar);
+        const int shown = std::min<int>(typed, int(cells.size()));
+        if (shown >
+            typed1_) { // A pip for the letters typed since the last frame.
+            world.beep(1000 + double((shown * 47) % 360), 18, 0.25);
+        }
+        typed1_ = shown;
         static const std::string noise = "#%&*+=-:.<>?/\\|";
         for (std::size_t i = 0; i < cells.size(); ++i) {
             if (int(i) >= typed) {
@@ -257,17 +264,23 @@ private:
     }
 
     template <typename Shade>
-    void drawTagline2(AsciiCanvas &canvas,
+    void drawTagline2(World &world,
+                      AsciiCanvas &canvas,
                       double t,
                       int w,
                       int row,
                       Rgb bg,
-                      Shade shade) const {
+                      Shade shade) {
         if (t < kTagline2) {
             return;
         }
         const auto cells = layout(kLine2, w, row);
         const int typed = int((t - kTagline2) / kTypeMsPerChar);
+        const int shown = std::min<int>(typed, int(cells.size()));
+        if (shown > typed2_) {
+            world.beep(1100 + double((shown * 41) % 330), 18, 0.28);
+        }
+        typed2_ = shown;
         for (std::size_t i = 0; i < cells.size() && int(i) < typed; ++i) {
             canvas.put(cells[i].x,
                        cells[i].y,
@@ -280,6 +293,7 @@ private:
 
     Time start_{0}, lastNow_{0}, leaveAt_{0};
     bool leaving_ = false;
+    int typed1_ = 0, typed2_ = 0; // Letters typed so far, for the pips.
     double alphaAtLeave_ = 1.0, backgroundAtLeave_ = 0.0;
     bool finished_ = false;
 };

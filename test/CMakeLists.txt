@@ -116,6 +116,10 @@ if(BUILD_TESTING)
         COMMAND ${CMAKE_COMMAND} -DFAKEOS_DIR=${PROJECT_SOURCE_DIR}/src/fakeos
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/check_fakeos_includes.cmake)
 
+    add_executable(pipsynth_test pipsynth_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(pipsynth_test PRIVATE ${PROJECT_SOURCE_DIR}/app/demo)
+    add_test(NAME pip_synth COMMAND pipsynth_test)
+
     add_executable(touchgesture_test touchgesture_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(touchgesture_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
     add_test(NAME touch_gesture COMMAND touchgesture_test)

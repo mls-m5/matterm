@@ -33,6 +33,15 @@ struct World {
     std::int64_t bootUnix = 0; // Unix seconds at start; see unixNow().
     // Names of discoveries (easter eggs found, programs unlocked).
     std::set<std::string> flags;
+    // Pips reported by programs (typed text) are collected here and handed to
+    // Config::onBeep by the System; nothing is collected when sound is off.
+    bool sound = false;
+    std::vector<Beep> beeps;
+    void beep(double frequency, int durationMs, double volume = 0.3) {
+        if (sound) {
+            beeps.push_back({frequency, durationMs, volume, Time{0}});
+        }
+    }
     // Set by commands, handled by the System after the command line ran.
     std::optional<int> exitRequest;
     bool resetRequest = false;

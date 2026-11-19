@@ -60,14 +60,37 @@ int brightness(const Pc &pc, std::size_t from = 0, std::size_t to = 99) {
 
 TEST_SUIT_BEGIN(FakeosPrograms)
 
-TEST_CASE("fire is a file on disk, outside the PATH") {
+TEST_CASE(
+    "fire and gradient are easy to find: in the PATH, in Tab, in the hints") {
     Pc pc;
-    pc.run("fire");
-    EXPECT(pc.shows("matterm: fire: command not found"));
-    pc.run("ls /usr/games");
-    EXPECT(pc.shows("fire"));
+    EXPECT(pc.shows("Try: fire, gradient, neofetch, about"));
+    pc.run("which fire gradient");
+    EXPECT(pc.shows("/usr/games/fire\n/usr/games/gradient"));
     pc.run("cat /usr/games/fire");
     EXPECT(pc.shows("#!builtin fire"));
+    pc.type("\x15"
+            "fir\t");
+    EXPECT(pc.last() == kPrompt + " fire");
+    pc.type("\x15");
+    pc.run("clear");
+    pc.run("ls /usr/games");
+    EXPECT(pc.shows("fire"));
+    EXPECT(pc.shows("gradient"));
+    EXPECT(!pc.shows("plasma")); // The rewards are still hidden.
+    EXPECT(!pc.shows("crumble"));
+    pc.run("help");
+    EXPECT(pc.shows("Try: fire, gradient"));
+    pc.run("fire");
+    EXPECT(pc.sys.inProgram());
+    pc.advance(100);
+    EXPECT(pc.shows("fire   q quit"));
+    pc.type("q");
+    pc.run("gradient");
+    EXPECT(pc.sys.inProgram());
+    pc.advance(100);
+    EXPECT(pc.shows("gradient   q quit"));
+    EXPECT(!pc.shows("last chance")); // No pills in the plain gradient.
+    pc.type("q");
     EXPECT(!pc.sys.inProgram());
 }
 
