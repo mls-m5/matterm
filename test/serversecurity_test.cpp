@@ -138,7 +138,6 @@ TEST_CASE("Deploy: the compose files use no flag the server lacks") {
     for (const char *name :
          {"deploy/podman/compose.yaml", "deploy/podman/compose.server.yaml"}) {
         const auto text = readFile(name);
-        EXPECT(text.find("--trusted-proxy") == std::string::npos);
         EXPECT(text.find("--allowed-origin") == std::string::npos);
         EXPECT(text.find("--health-check") == std::string::npos);
     }
@@ -157,18 +156,22 @@ TEST_CASE(
     EXPECT(text.find("default_server") != std::string::npos);
 }
 
-// Design decision pending (docs/SECURITY_REVIEW.md, finding 2): behind a
-// reverse proxy every client has the proxy's address, so one attacker keeps
-// the owner locked out with a single wrong password per lockout period. The
-// test names the wanted behavior and stays disabled until `trusted_proxy`
-// exists.
-TEST_CASE("disabled Lockout of one source does not lock out another") {
+// A trusted proxy's clients have independent source lockouts.
+TEST_CASE("Lockout of one forwarded source does not lock out another") {
     Fixture fixture({"/bin/sh"}, [](server::ServerConfig &config) {
         config.rateLimit.maxFailures = 1;
+        server::Settings settings;
+        settings.server = config;
+        server::applyConfigText(R"({"trusted_proxy":"127.0.0.1"})", settings);
+        config = settings.server;
     });
-    fixture.request(http::verb::post, "/login", "{\"password\":\"x\"}");
-    // Both requests come from 127.0.0.1; an X-Forwarded-For-aware server
-    // would key the second one differently.
+    const auto first =
+        rawExchange(fixture.port,
+                    "POST /login HTTP/1.1\r\nHost: localhost\r\nOrigin: "
+                    "http://localhost\r\n"
+                    "X-Forwarded-For: 203.0.113.8\r\nContent-Length: "
+                    "16\r\n\r\n{\"password\":\"x\"}");
+    EXPECT(first.find("HTTP/1.1 401") == 0);
     net::io_context io;
     beast::tcp_stream stream(io);
     stream.connect({net::ip::make_address("127.0.0.1"), fixture.port});
