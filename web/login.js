@@ -174,7 +174,13 @@
       snapWindow();
       fitCanvas();
     };
-    apply(embed || params.has("fullscreen") || stored === "full");
+    // ?embed (a page inside an <iframe>): edge to edge, no toggle, nothing remembered.
+    if (params.has("embed")) {
+      layoutButton.remove();
+      apply(true);
+      return;
+    }
+    apply(params.has("fullscreen") || stored === "full");
     layoutButton.addEventListener("click", function () {
       const full = document.body.dataset.layout !== "full";
       apply(full);
@@ -282,8 +288,11 @@
     }
   }
 
-  // ?demo skips the login and runs the in-browser simulator (no server needed).
-  if (new URLSearchParams(location.search).has("demo")) {
+  // ?demo skips the login and runs the in-browser pretend system (no server
+  // needed). demo.html (generated from shell.html, see web/CMakeLists.txt) is the
+  // same page with a marker, so a static host can serve it without a query.
+  if (new URLSearchParams(location.search).has("demo") ||
+      document.querySelector('meta[name="matterm-static-demo"]')) {
     start(true);
     return;
   }
