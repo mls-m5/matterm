@@ -70,6 +70,10 @@ if(BUILD_TESTING)
     target_link_libraries(clientsession_test PRIVATE matterm::transport)
     add_test(NAME client_session COMMAND clientsession_test)
 
+    add_executable(scriptedlink_test scriptedlink_test.cpp mls-unit-test/test_main.cpp)
+    target_link_libraries(scriptedlink_test PRIVATE matterm::transport matterm::vt)
+    add_test(NAME scripted_link COMMAND scriptedlink_test)
+
     add_executable(scrollviewport_test
         scrollviewport_test.cpp
         mls-unit-test/test_main.cpp

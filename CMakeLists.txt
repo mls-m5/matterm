@@ -44,7 +44,7 @@ target_include_directories(ttyprotocol PUBLIC src/protocol)
 
 # Terminal links: message channel and link interfaces plus the remote client
 # session. Portable C++17, no I/O, so the same code builds for the browser.
-add_library(ttytransport src/transport/clientsession.cpp)
+add_library(ttytransport src/transport/clientsession.cpp src/transport/scriptedlink.cpp)
 add_library(matterm::transport ALIAS ttytransport)
 target_compile_features(ttytransport PUBLIC cxx_std_17)
 target_include_directories(ttytransport PUBLIC src/transport)
