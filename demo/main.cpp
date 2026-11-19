@@ -1,4 +1,5 @@
 #include "democontent.h"
+#include "fontpath.h"
 #include "scrollviewport.h"
 #include "sdlbackend.h"
 #include "terminalmemory.h"
@@ -206,10 +207,23 @@ int run(const char *fontPath, bool smokeTest) {
 
 int main(int argc, char **argv) {
     demo::printBanner(std::cout);
-    if (argc < 2 || argc > 3 ||
-        (argc == 3 && std::string_view(argv[2]) != "--smoke-test")) {
-        std::cerr << "Usage: " << argv[0]
-                  << " /path/to/monospace.ttf [--smoke-test]\n";
+    const char *fontOverride = nullptr;
+    bool smokeTest = false;
+    bool valid = true;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string_view(argv[i]) == "--smoke-test") {
+            smokeTest = true;
+        }
+        else if (!fontOverride &&
+                 std::string_view(argv[i]).substr(0, 2) != "--") {
+            fontOverride = argv[i];
+        }
+        else {
+            valid = false;
+        }
+    }
+    if (!valid) {
+        std::cerr << "Usage: " << argv[0] << " [font.ttf] [--smoke-test]\n";
         return 1;
     }
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
@@ -223,7 +237,8 @@ int main(int argc, char **argv) {
     }
     int result = 1;
     try {
-        result = run(argv[1], argc == 3);
+        const auto font = applicationFontPath(fontOverride);
+        result = run(font.c_str(), smokeTest);
     }
     catch (const std::exception &error) {
         std::cerr << error.what() << '\n';

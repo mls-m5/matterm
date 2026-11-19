@@ -81,19 +81,25 @@ keyboard input, resize, process cleanup, and bounded I/O. See [docs/PTY.md](docs
 ## Build and Run
 
 Requires CMake 3.23+, a C++17 compiler, SDL2 2.0.18+, SDL2_ttf 2.0.18+, and a
-TrueType font. A monospace font is recommended; no font is bundled.
+TrueType support. JetBrains Mono Regular v2.304 is downloaded and bundled by
+default with its SIL OFL 1.1 license. No manual font lookup is needed.
 
 On Debian/Ubuntu, install `libsdl2-dev`, `libsdl2-ttf-dev`, and optionally
-`fonts-dejavu-core` for the example font below.
+`fonts-dejavu-core` if you prefer an alternative system font.
 
 ```sh
 git submodule update --init
 cmake -S . -B build
 cmake --build build
-./build/matterm-demo /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
-./build/matterm-terminal-demo /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
-./build/matterm /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
+./build/matterm-demo
+./build/matterm-terminal-demo
+./build/matterm
 ```
+
+Font arguments in the examples are optional with the bundled build. Assets live
+in `assets/fonts/` next to the executable, including the license. See
+[docs/FONTS.md](docs/FONTS.md) for licensing, pinned hashes, offline builds,
+`MATTERM_BUNDLE_FONT=OFF`, and relocatable installation.
 
 The project is named `matterm`; both demos remain separate clients of the library.
 The separate `matterm` frontend does not replace either demo.
@@ -115,7 +121,9 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Without `TEST_FONT_FILE`, CTest runs the font-independent cell view, cell buffer,
+When bundling is enabled, an empty `TEST_FONT_FILE` uses the downloaded font and
+adds no-font-argument smoke tests. Without bundling or `TEST_FONT_FILE`, CTest runs
+the font-independent cell view, cell buffer,
 terminal memory, terminal model, UTF-8 decoder, VT parser, scroll viewport, and
 demo content tests. History tests cover
 exact-capacity eviction, block and
