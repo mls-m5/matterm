@@ -34,10 +34,14 @@ const check = (name, ok, detail) => {
   await page.waitForTimeout(500);
   check('the prompt follows the intro', (await text()).includes('guest@matterm'));
   await page.keyboard.type('echo hello | wc -w\n', { delay: 30 });
+  await page.waitForTimeout(800);
+  const piped = await text();
+  check('a pipeline runs', /\n\s+1\s*\n/.test(piped), JSON.stringify(piped.slice(-160)));
+  // help is long and scrolls its first lines away; its last line is enough.
   await page.keyboard.type('help\n', { delay: 30 });
   await page.waitForTimeout(600);
   const shown = await text();
-  check('commands run', shown.includes('Commands:') && shown.includes('\n      1\n'), JSON.stringify(shown.slice(-120)));
+  check('help runs', shown.includes('is in your PATH.'), JSON.stringify(shown.slice(-120)));
   await page.keyboard.type('fire\n', { delay: 30 });
   await page.waitForTimeout(400);
   check('fire is not in the PATH', (await text()).includes('fire: command not found'));
