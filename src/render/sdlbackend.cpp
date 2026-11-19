@@ -338,6 +338,10 @@ void SdlBackend::setPixelSize(int pixelSize) {
     s.textureHeight = textureHeight;
 }
 
+int SdlBackend::scrollbarStrip() noexcept {
+    return scrollbarWidth;
+}
+
 int SdlBackend::cellWidth() const noexcept {
     return impl_->cellWidth;
 }
