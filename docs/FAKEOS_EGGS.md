@@ -39,7 +39,7 @@ watch `/usr/games/fire` for 8 seconds -> `~/.ember` -> `xyzzy` ->
 4. Digital rain: columns of falling glyphs with a bright head and a fading tail,
    seeded, resizing with the window, for about 14 seconds, then the last drops run
    out.
-5. The intro plays again (it also ends at any key) and leads to the prompt. The
+5. The intro plays again (a key makes it fade out quickly) and leads to the prompt. The
    world keeps its changes; the discovery flags (`pill-red`, `matrix-seen`) stay.
 
 A key skips one part at a time: the black, the first line, the second line, the
