@@ -163,14 +163,36 @@ Shared, edit minimally and report: `src/transport/scriptedlink.*` (the
   says plainly what could not be run. clang-format applied, no build products
   committed, `.matterm.files` updated locally.
 
-## Open questions
+## Decisions and open questions
+
+Decided by the owner:
+
+- **No persistence**: a fresh virtual world every page load; nothing is saved
+  (no `localStorage` opt-in for now).
+- **Mouse input in the web demo**: the demo may show clickable text (for example
+  a menu or command links). Do it through the normal terminal mouse reporting:
+  the program turns on DECSET 1000/1006 and receives the same SGR mouse reports
+  a real application would, so the core needs no special click path. The clicked
+  cell is mapped to the text that was drawn there. Not needed for milestone 1,
+  but keep the `Program` interface able to receive mouse reports (they arrive as
+  input bytes).
+- **Possible merge with `matterm-terminal-demo`**: the owner considers folding this
+  concept into the existing terminal demo executable. Do not decide now; keep the
+  core a library with no I/O so either host can use it, and note in the report
+  what overlaps.
+
+Still open:
 
 - Name and place of the native executable (`matterm-fakeos` assumed) and whether
   it ships in the default build or behind an option.
-- Whether the web demo should offer buttons that start animations (sending the
-  command as keystrokes) in addition to typing; not needed for milestone 1.
-- Persistence of the virtual file system between page loads (default: none, a
-  fresh world every time; `localStorage` is a possible later opt-in).
+
+Future direction (not part of this task): chatting with other visitors in the web
+demo. That needs a relay server, so it conflicts with pure static hosting. The
+shape to design later is *apps* that are written against a small program
+interface (this task's `Program`/core), run statically in the browser, and
+optionally talk to a thin relay for multi-user features. Keep the core free of
+assumptions that would block that (no globals, injected time and randomness,
+input and output as byte streams).
 
 ## Handoff
 
