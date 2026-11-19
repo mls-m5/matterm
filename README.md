@@ -96,6 +96,10 @@ cmake --build build
 ./build/matterm
 ```
 
+Set the terminal application's font size at launch with `./build/matterm --font-size 12`.
+`--font-size` accepts integer point sizes from 1 to 128 (default: 24). It also
+works with a custom font path and must appear before `-- COMMAND`.
+
 Font arguments in the examples are optional with the bundled build. Assets live
 in `assets/fonts/` next to the executable, including the license. See
 [docs/FONTS.md](docs/FONTS.md) for licensing, pinned hashes, offline builds,

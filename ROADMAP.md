@@ -132,6 +132,7 @@ future goals, not implementation in the current parser slice.
 - [x] Inspect the local matperf API and document usage/caveats in its repository.
 - [x] Record XDG text configuration, benchmark completion semantics, and deferred pipeline design in docs/SETTINGS_AND_PERFORMANCE.md.
 - [x] Implement approved 12-byte color-reference layout and dark palette before parallel color consumers (docs/COLORS.md).
+- [x] Allow a startup font-size override in the terminal application (`--font-size POINTS`).
 - [ ] Select a text configuration parser/schema and implement typed settings, validation, and atomic saving.
 - [x] Add shared deterministic workloads and first internal parser/model Release measurements (docs/BENCHMARKS.md).
 - [x] Add POSIX stdout benchmark with separate write/DSR timings, bounded reply handling, and termios restoration tests.

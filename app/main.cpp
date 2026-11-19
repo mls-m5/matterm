@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -108,7 +109,7 @@ void smoke(SDL_Window &window,
     std::cout << "VT frontend smoke test passed\n";
 }
 
-int run(const char *font, const char *inputPath, bool smokeTest) {
+int run(const char *font, int fontSize, const char *inputPath, bool smokeTest) {
     std::ifstream file;
     if (inputPath) {
         // Pipes/devices may block the GUI. The future PTY adapter will have its
@@ -134,7 +135,7 @@ int run(const char *font, const char *inputPath, bool smokeTest) {
     if (!window) {
         throw std::runtime_error(SDL_GetError());
     }
-    SdlBackend backend(*window, font, 24, smokeTest);
+    SdlBackend backend(*window, font, fontSize, smokeTest);
     auto width = [&] {
         return std::size_t(std::max(1, backend.columns(true)));
     };
@@ -254,6 +255,7 @@ int main(int argc, char **argv) {
     std::string term = "vt100";
     std::vector<std::string> command;
     const char *fontOverride = nullptr;
+    int fontSize = 24;
     int firstOption = 1;
     if (argc > 1 && std::string_view(argv[1]).substr(0, 2) != "--") {
         fontOverride = argv[1];
@@ -268,6 +270,16 @@ int main(int argc, char **argv) {
             }
             valid = !command.empty();
             break;
+        }
+        else if (arg == "--font-size") {
+            const std::string_view value = ++i < argc ? argv[i] : "";
+            const auto end = value.data() + value.size();
+            const auto parsed = std::from_chars(value.data(), end, fontSize);
+            if (parsed.ec != std::errc{} || parsed.ptr != end || fontSize < 1 ||
+                fontSize > 128) {
+                std::cerr << "--font-size requires an integer from 1 to 128\n";
+                return 1;
+            }
         }
         else if (arg == "--showcase") {
             showcase = true;
@@ -292,11 +304,13 @@ int main(int argc, char **argv) {
         ((!command.empty() || ptySmokeTest) &&
          (inputPath || smokeTest || showcase)) ||
         (ptySmokeTest && command.empty())) {
-        std::cerr << "Usage: " << argv[0]
-                  << " [font.ttf] [--term TERM] [-- COMMAND ARG...]\n"
-                  << "       " << argv[0]
-                  << " [font.ttf] [--input FILE | --showcase | "
-                     "--smoke-test]\n";
+        std::cerr
+            << "Usage: " << argv[0]
+            << " [font.ttf] [--font-size POINTS] [--term TERM] [-- COMMAND "
+               "ARG...]\n"
+            << "       " << argv[0]
+            << " [font.ttf] [--font-size POINTS] [--input FILE | --showcase | "
+               "--smoke-test]\n";
         return 1;
     }
     if (!inputPath && !smokeTest && !showcase) {
@@ -307,7 +321,8 @@ int main(int argc, char **argv) {
         }
         try {
             const auto font = applicationFontPath(fontOverride);
-            return runPtyFrontend(font.c_str(), command, term, ptySmokeTest);
+            return runPtyFrontend(
+                font.c_str(), fontSize, command, term, ptySmokeTest);
         }
         catch (const std::exception &error) {
             std::cerr << error.what() << '\n';
@@ -333,7 +348,7 @@ int main(int argc, char **argv) {
     int result = 1;
     try {
         const auto font = applicationFontPath(fontOverride);
-        result = run(font.c_str(), inputPath, smokeTest);
+        result = run(font.c_str(), fontSize, inputPath, smokeTest);
     }
     catch (const std::exception &error) {
         std::cerr << error.what() << '\n';
