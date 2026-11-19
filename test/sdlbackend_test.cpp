@@ -158,6 +158,49 @@ TEST_CASE(
     EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x1e1e1e));
 }
 
+TEST_CASE("A focused block cursor is opaque and inverts the glyph under it") {
+    Fixture fixture;
+    CellBuffer cells(1, 1);
+    cells.draw(0, 0, U"M", {0, 255, 0}, {50, 0, 0});
+    CursorState cursor;
+    cursor.visible = true;
+    cursor.shape = CursorState::Shape::Block;
+    cursor.color = {255, 255, 255};
+    const int w = fixture.backend->cellWidth();
+    const int h = fixture.backend->cellHeight();
+    fixture.backend->render({cells.view(), cursor});
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0xffffff));
+    EXPECT_EQ(fixture.pixel(w - 1, h - 1), Uint32(0xffffff));
+    bool inverted = false;
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            inverted |= fixture.pixel(x, y) == Uint32(0x320000);
+        }
+    }
+    EXPECT(inverted); // The glyph is drawn in the cell's own background.
+    EXPECT_EQ(cells.at(0, 0).background.r, 50);
+}
+
+TEST_CASE("An unfocused cursor is a hollow outline in every shape") {
+    Fixture fixture;
+    CellBuffer cells(1, 1);
+    CursorState cursor;
+    cursor.visible = true;
+    cursor.focused = false;
+    cursor.shape = CursorState::Shape::Block;
+    cursor.color = {255, 0, 0};
+    const int w = fixture.backend->cellWidth();
+    const int h = fixture.backend->cellHeight();
+    fixture.backend->render({cells.view(), cursor});
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0xff0000));
+    EXPECT_EQ(fixture.pixel(w - 1, h / 2), Uint32(0xff0000));
+    EXPECT_EQ(fixture.pixel(w / 2, h - 1), Uint32(0xff0000));
+    EXPECT_EQ(fixture.pixel(w / 2, h / 2), Uint32(0));
+    cursor.shape = CursorState::Shape::Bar;
+    fixture.backend->render({cells.view(), cursor});
+    EXPECT_EQ(fixture.pixel(w / 2, h / 2), Uint32(0));
+}
+
 TEST_CASE("Glyph geometry uses the cell foreground color") {
     Fixture fixture;
     CellBuffer cells(1, 1);

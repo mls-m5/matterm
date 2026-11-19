@@ -154,6 +154,10 @@ void SdlBackend::render(const RenderFrame &frame) {
                                 row.data()[x].attributes);
         }
     }
+    const bool filledBlock =
+        frame.cursor.visible && frame.cursor.focused &&
+        frame.cursor.shape == CursorState::Shape::Block &&
+        frame.cursor.column >= 0 && frame.cursor.row >= 0;
     for (std::size_t y = 0; y < rows; ++y) {
         const auto row = frame.cells.row(y);
         for (std::size_t x = 0; x < columns; ++x) {
@@ -162,6 +166,12 @@ void SdlBackend::render(const RenderFrame &frame) {
             const float top =
                 float(y) * s.cellHeight + frame.verticalOffsetPixels;
             auto colors = palette.resolve(cell);
+            if (filledBlock && std::size_t(frame.cursor.column) == x &&
+                std::size_t(frame.cursor.row) == y) {
+                // Invert the cell: the glyph keeps showing in the cell color.
+                colors.foreground = colors.background;
+                colors.background = frame.cursor.color;
+            }
             if (frame.selectionBegin < frame.selectionEnd) {
                 const auto index = y * frame.cells.columns() + x;
                 if (index >= frame.selectionBegin &&
@@ -240,27 +250,23 @@ void SdlBackend::render(const RenderFrame &frame) {
                            frame.verticalOffsetPixels,
                        float(s.cellWidth),
                        float(s.cellHeight)};
-        Uint8 alpha = 255;
-        if (cursor.shape == CursorState::Shape::Underline) {
-            rect.h = float(std::min(2, s.cellHeight));
-            rect.y += s.cellHeight - rect.h;
+        check(SDL_SetRenderDrawColor(
+            s.renderer.get(), cursor.color.r, cursor.color.g, cursor.color.b, 255));
+        if (!cursor.focused) {
+            // Inactive window: hollow outline, whatever the shape.
+            check(SDL_RenderDrawRectF(s.renderer.get(), &rect));
         }
-        else if (cursor.shape == CursorState::Shape::Bar) {
-            rect.w = float(std::min(2, s.cellWidth));
+        else if (cursor.shape != CursorState::Shape::Block) {
+            if (cursor.shape == CursorState::Shape::Underline) {
+                rect.h = float(std::min(2, s.cellHeight));
+                rect.y += s.cellHeight - rect.h;
+            }
+            else {
+                rect.w = float(std::min(2, s.cellWidth));
+            }
+            check(SDL_RenderFillRectF(s.renderer.get(), &rect));
         }
-        else {
-            alpha = 128; // A translucent overlay keeps the underlying glyph
-                         // visible.
-        }
-        check(
-            SDL_SetRenderDrawBlendMode(s.renderer.get(), SDL_BLENDMODE_BLEND));
-        check(SDL_SetRenderDrawColor(s.renderer.get(),
-                                     cursor.color.r,
-                                     cursor.color.g,
-                                     cursor.color.b,
-                                     alpha));
-        check(SDL_RenderFillRectF(s.renderer.get(), &rect));
-        check(SDL_SetRenderDrawBlendMode(s.renderer.get(), SDL_BLENDMODE_NONE));
+        // A focused block was already drawn by inverting its cell.
     }
     check(SDL_RenderSetClipRect(s.renderer.get(), nullptr));
     if (frame.scrollbar.visible && width > 0 && height > 0) {
