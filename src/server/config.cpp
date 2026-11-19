@@ -18,7 +18,6 @@ namespace {
 using json::JsonNode;
 using json::TokenType;
 constexpr std::size_t maxFileSize = 64 * 1024;
-constexpr int maxDepth = 16;
 
 void appendUtf8(std::string &out, unsigned cp) {
     if (cp < 0x80) {
@@ -123,165 +122,6 @@ bool unescape(std::string_view raw, std::string &out) {
     return true;
 }
 
-// Strict JSON syntax check with positions. fast-json is lenient (it accepts a
-// truncated document, missing commas and trailing garbage, and reads "1.5" as
-// 1), which a security configuration must not inherit: a truncated file would
-// silently fall back to defaults for the rest.
-class Syntax {
-public:
-    Syntax(std::string_view text, const std::string &label)
-        : text_(text)
-        , label_(label) {}
-    void check() {
-        space();
-        if (peek() != '{')
-            fail(pos_, "the document must be an object");
-        value(0);
-        space();
-        if (pos_ != text_.size())
-            fail(pos_, "unexpected data after the document");
-    }
-
-private:
-    char peek() const {
-        return pos_ < text_.size() ? text_[pos_] : '\0';
-    }
-    [[noreturn]] void fail(std::size_t at, const std::string &what) const {
-        std::size_t line = 1, column = 1;
-        for (std::size_t i = 0; i < at && i < text_.size(); ++i) {
-            if (text_[i] == '\n') {
-                ++line;
-                column = 1;
-            }
-            else {
-                ++column;
-            }
-        }
-        throw ConfigError(label_ + ":" + std::to_string(line) + ":" +
-                          std::to_string(column) + ": syntax error: " + what);
-    }
-    void space() {
-        while (pos_ < text_.size() &&
-               (text_[pos_] == ' ' || text_[pos_] == '\t' ||
-                text_[pos_] == '\r' || text_[pos_] == '\n'))
-            ++pos_;
-    }
-    void value(int depth) {
-        if (depth > maxDepth)
-            fail(pos_, "nesting is too deep");
-        space();
-        if (pos_ == text_.size())
-            fail(pos_, "unexpected end of the document");
-        const char c = peek();
-        if (c == '{')
-            object(depth);
-        else if (c == '[')
-            array(depth);
-        else if (c == '"')
-            string();
-        else if (c == '-' || (c >= '0' && c <= '9'))
-            number();
-        else if (!literal("true") && !literal("false") && !literal("null"))
-            fail(pos_, "unexpected character");
-    }
-    bool literal(std::string_view word) {
-        if (text_.substr(pos_, word.size()) != word)
-            return false;
-        const auto after = pos_ + word.size();
-        if (after < text_.size() &&
-            std::isalnum(static_cast<unsigned char>(text_[after])))
-            fail(pos_, "unexpected character");
-        pos_ = after;
-        return true;
-    }
-    void number() {
-        const auto start = pos_;
-        // fast-json's tokenizer never consumes the '-' and loops forever on a
-        // negative number; no setting accepts one anyway.
-        if (peek() == '-')
-            fail(start, "negative numbers are not accepted");
-        if (peek() < '0' || peek() > '9')
-            fail(start, "invalid number");
-        if (peek() == '0' && pos_ + 1 < text_.size() &&
-            text_[pos_ + 1] >= '0' && text_[pos_ + 1] <= '9')
-            fail(start, "numbers must not have leading zeros");
-        while (peek() >= '0' && peek() <= '9')
-            ++pos_;
-        if (peek() == '.' || peek() == 'e' || peek() == 'E')
-            fail(start, "only integers are accepted");
-    }
-    void string() {
-        const auto start = pos_++;
-        while (pos_ < text_.size() && text_[pos_] != '"') {
-            const auto c = static_cast<unsigned char>(text_[pos_]);
-            if (c < 0x20)
-                fail(pos_, "control character in a string");
-            pos_ += c == '\\' ? 2 : 1;
-        }
-        if (pos_ >= text_.size())
-            fail(start, "unterminated string");
-        std::string ignored;
-        if (!unescape(text_.substr(start + 1, pos_ - start - 1), ignored))
-            fail(start, "invalid escape sequence in a string");
-        ++pos_;
-    }
-    void object(int depth) {
-        ++pos_;
-        space();
-        if (peek() == '}') {
-            ++pos_;
-            return;
-        }
-        for (;;) {
-            space();
-            if (pos_ == text_.size())
-                fail(pos_, "unexpected end of the document");
-            if (peek() != '"')
-                fail(pos_, "expected a key");
-            string();
-            space();
-            if (peek() != ':')
-                fail(pos_, "expected ':' after a key");
-            ++pos_;
-            value(depth + 1);
-            space();
-            if (peek() == ',') {
-                ++pos_;
-                continue;
-            }
-            if (peek() == '}') {
-                ++pos_;
-                return;
-            }
-            fail(pos_, "expected ',' or '}'");
-        }
-    }
-    void array(int depth) {
-        ++pos_;
-        space();
-        if (peek() == ']') {
-            ++pos_;
-            return;
-        }
-        for (;;) {
-            value(depth + 1);
-            space();
-            if (peek() == ',') {
-                ++pos_;
-                continue;
-            }
-            if (peek() == ']') {
-                ++pos_;
-                return;
-            }
-            fail(pos_, "expected ',' or ']'");
-        }
-    }
-    std::string_view text_;
-    const std::string &label_;
-    std::size_t pos_ = 0;
-};
-
 struct Context {
     std::string_view text;
     const std::string &label;
@@ -309,9 +149,14 @@ struct Field {
     Apply apply;
 };
 
-std::string decodedKey(const JsonNode &key) {
+std::string decodedKey(const Context &context,
+                       const std::string &path,
+                       const JsonNode &key) {
     std::string name;
-    unescape(key.value().value, name); // Validated by Syntax.
+    if (!unescape(key.value().value, name)) {
+        const Member member{context, path, key, key};
+        member.fail("invalid escape sequence in the key");
+    }
     return name;
 }
 void readObject(const Context &context,
@@ -320,7 +165,7 @@ void readObject(const Context &context,
                 const std::vector<Field> &fields) {
     std::set<std::string> seen;
     for (const auto &key : object) {
-        const auto name = decodedKey(key);
+        const auto name = decodedKey(context, path, key);
         if (!name.empty() && name[0] == '_')
             continue; // Comment.
         Member member{context,
@@ -374,7 +219,8 @@ std::string stringOf(const Member &member, std::size_t maxSize) {
     if (member.type() != TokenType::STRING)
         member.fail("must be a string");
     std::string text;
-    unescape(member.value.value().value, text);
+    if (!unescape(member.value.value().value, text))
+        member.fail("invalid escape sequence in the string");
     if (text.empty() || text.size() > maxSize ||
         text.find('\0') != std::string::npos)
         member.fail("must be a non-empty string of at most " +
@@ -661,10 +507,24 @@ void applyConfigText(std::string_view text,
     if (text.size() > maxFileSize)
         throw ConfigError(label + ": too large (limit " +
                           std::to_string(maxFileSize) + " bytes)");
-    Syntax(text, label).check();
     Settings work = settings;
     try {
-        const auto root = json::parse_json(text);
+        json::JsonRoot root;
+        try {
+            root = json::parse_json(text);
+        }
+        catch (const json::ParseError &error) {
+            throw ConfigError(label + ":" + std::to_string(error.line()) + ":" +
+                              std::to_string(error.column()) +
+                              ": syntax error: " + error.message());
+        }
+        if (root->value().type != TokenType::BEGIN_OBJECT) {
+            const auto start = text.find_first_not_of(" \t\r\n");
+            const auto at = json::get_offset_position(text, start);
+            throw ConfigError(label + ":" + std::to_string(at.line_number) +
+                              ":" + std::to_string(at.column_number) +
+                              ": syntax error: the document must be an object");
+        }
         const Context context{text, label};
         readObject(context, *root, {}, topLevelFields(work));
     }
