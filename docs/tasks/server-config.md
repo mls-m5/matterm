@@ -64,3 +64,21 @@ equal to today's behavior). Another agent works in `src/server/ratelimiter.*`,
 
 As in docs/PARALLEL_WORK.md: full commit SHAs in dependency order, changed
 files, commands run and results, limitations, deferred items. Do not push.
+
+## Status (branch agent2-config, based on main 44933e5)
+
+Done: loader, paths, CLI (`--config`, `--print-config`), `docs/SERVER_CONFIG.md`
+with two tested example files in `docs/examples/`, build integration. It
+exposes the settings added by the hardening task (`global_counts_failures_only`,
+`source_idle_expiry_seconds`, `timeouts`, `session`) and `static_dir`.
+`password_hash` is output-only: `--print-config` writes a placeholder and the
+loader accepts only that placeholder, so the hash stays in the credentials file.
+
+fast-json findings, handled in `config.cpp` (the submodule is untouched): its
+tokenizer loops forever on a negative number, accepts truncated documents,
+missing commas and trailing text, reads `1.5` as `1`, cannot decode `\u`
+escapes and does not detect duplicate keys. The loader therefore runs its own
+strict syntax check (with line and column) before handing the text to fast-json,
+rejects negative numbers, decodes strings itself and checks duplicates itself.
+`--print-config` uses a small writer instead of `JsonOut`, which cannot write an
+empty array. Not done: writing the config back, `trusted_proxy`, TLS.

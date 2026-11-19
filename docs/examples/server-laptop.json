@@ -1,0 +1,21 @@
+{
+  "_note": "Lenient settings for a laptop: loopback only, forgiving limits.",
+  "listen_address": "127.0.0.1",
+  "port": 8080,
+  "allowed_origin": "http://localhost:8080",
+  "static_dir": "build/web",
+  "rate_limit": {
+    "max_failures": 10,
+    "lockout_initial_seconds": 10,
+    "lockout_max_seconds": 300,
+    "global_attempts_per_hour": 0,
+    "exempt_loopback": true
+  },
+  "auth": {
+    "idle_timeout_seconds": 86400,
+    "absolute_timeout_seconds": 2592000
+  },
+  "process": {
+    "arguments": ["/bin/bash", "-l"]
+  }
+}

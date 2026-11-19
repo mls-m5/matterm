@@ -1,0 +1,38 @@
+{
+  "_note": "Strict settings for a public host behind a TLS-terminating reverse proxy on the same machine.",
+  "listen_address": "127.0.0.1",
+  "port": 8080,
+  "allowed_origin": "https://term.example.org",
+  "static_dir": "/srv/matterm/web",
+  "credentials": "/etc/matterm/credentials",
+  "max_connections": 8,
+  "max_unauthenticated": 4,
+  "rate_limit": {
+    "_note": "The proxy connects from loopback, so loopback must not be exempt.",
+    "max_failures": 3,
+    "lockout_initial_seconds": 60,
+    "lockout_max_seconds": 3600,
+    "global_attempts_per_hour": 10,
+    "global_counts_failures_only": true,
+    "exempt_loopback": false,
+    "max_sources": 1024,
+    "source_idle_expiry_seconds": 7200
+  },
+  "auth": {
+    "idle_timeout_seconds": 3600,
+    "absolute_timeout_seconds": 43200
+  },
+  "process": {
+    "arguments": ["/bin/bash", "-l"],
+    "environment_allow_list": ["HOME", "USER", "LOGNAME", "LANG"],
+    "termination_grace_milliseconds": 500
+  },
+  "timeouts": {
+    "request_milliseconds": 3000,
+    "websocket_idle_milliseconds": 30000
+  },
+  "session": {
+    "idle_timeout_milliseconds": 30000,
+    "ack_stall_timeout_milliseconds": 15000
+  }
+}
