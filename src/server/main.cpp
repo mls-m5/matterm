@@ -171,6 +171,12 @@ int main(int argc, char **argv) {
             std::cout << server::printConfig(settings);
             return 0;
         }
+        // The built-in origin names port 8080; follow --port when the origin
+        // was left at that default, otherwise every login would be refused.
+        if (settings.server.allowedOrigin == "http://localhost:8080" &&
+            settings.server.port != 8080 && settings.server.port != 0)
+            settings.server.allowedOrigin =
+                "http://localhost:" + std::to_string(settings.server.port);
         const auto origin = settings.server.allowedOrigin;
         const auto hasClient = !settings.server.staticDir.empty();
         boost::asio::io_context io;
