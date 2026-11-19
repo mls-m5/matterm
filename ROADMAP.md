@@ -211,3 +211,4 @@ These describe much more functionality than matterm currently implements.
 - [ ] Web demo as a platform: static apps written against a small program interface,
   optional relay for chat/multi-user later (see docs/tasks/fakeos-demo.md).
   The fakeos demo became the new `matterm-demo`; the old demos are now `matterm-render-demo` and `matterm-lib-demo`.
+- [ ] Animated text reveal: demo pacing first, then an opt-in renderer effect for the regular terminal. See docs/tasks/text-reveal-animation.md.
