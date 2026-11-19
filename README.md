@@ -3,8 +3,7 @@
 A terminal emulator in C++ that runs both as a native app and in the browser, on a
 reusable cell-grid renderer and a small terminal model.
 
-**[Try it online](https://mls-m5.github.io/matterm/)**: a pretend Unix to explore,
-with a few things to find. No install, nothing is sent anywhere.
+**[Try it online](https://mls-m5.github.io/matterm/)**
 
 ## What is in here
 
