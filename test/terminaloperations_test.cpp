@@ -80,6 +80,73 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "ED3 erases saved lines and clamps a fractional historical viewport") {
+    TerminalModel model(8, 3, 20);
+    VtParser parser(model);
+    parser.feed("one\r\ntwo\r\nthree\r\nfour\r\nfive");
+    model.scrollBy(1.5);
+    model.advanceViewport(10);
+    parser.feed("\x1b[2J");
+    EXPECT_GT(model.historySize(), std::size_t(0));
+    const auto cursor = model.cursor();
+    const auto epoch = model.selectionEpoch();
+    parser.feed("\x1b[3J");
+    EXPECT_EQ(model.historySize(), std::size_t(0));
+    EXPECT_EQ(model.cursor().row, cursor.row);
+    EXPECT_EQ(model.cursor().column, cursor.column);
+    EXPECT_GT(model.selectionEpoch(), epoch);
+    model.scrollToOldest();
+    model.advanceViewport(0.01);
+    EXPECT(model.viewport().atTail());
+    EXPECT_FALSE(model.frame(16).scrollbar.visible);
+    EXPECT_EQ(model.frame(16).verticalOffsetPixels, 0.0f);
+    model.resize(10, 5);
+    EXPECT_EQ(model.historySize(), std::size_t(0));
+}
+
+TEST_CASE("ED3 keeps the live cells colors saved cursor and deferred wrap") {
+    TerminalModel model(3, 2, 20);
+    VtParser parser(model);
+    parser.feed("abc\r\ndef\r\n\x1b[31mghi\x1b"
+                "7");
+    EXPECT_EQ(model.historySize(), std::size_t(1));
+    parser.feed("\x1b[3J");
+    EXPECT_EQ(model.historySize(), std::size_t(0));
+    EXPECT(model.cell(0, 0).codePoint == U'd');
+    EXPECT(model.cell(0, 1).codePoint == U'g');
+    EXPECT(model.cell(0, 1).foregroundColor().kind ==
+           ColorReference::Kind::Indexed);
+    parser.feed("X");
+    EXPECT(model.cell(0, 0).codePoint == U'g');
+    EXPECT(model.cell(0, 1).codePoint == U'X');
+    EXPECT_EQ(model.historySize(), std::size_t(1));
+    EXPECT(model.textRowWrapped(model.firstRetainedRow() + 1));
+    parser.feed("\x1b"
+                "8");
+    EXPECT_EQ(model.cursor().column, 2);
+    EXPECT_EQ(model.cursor().row, 1);
+}
+
+TEST_CASE("ED3 on alternate screen and EL3 do not erase primary history") {
+    TerminalModel model(8, 3, 20);
+    VtParser parser(model);
+    parser.feed("a\r\nb\r\nc\r\nd");
+    const auto history = model.historySize();
+    EXPECT_GT(history, std::size_t(0));
+    parser.feed("\x1b[3K");
+    EXPECT_EQ(model.historySize(), history);
+    parser.feed("\x1b[?1049hALT\x1b[3J");
+    EXPECT(model.cell(0, 0).codePoint == U'A');
+    EXPECT_EQ(model.historySize(), std::size_t(0));
+    model.scrollToOldest();
+    model.advanceViewport(10);
+    EXPECT(model.viewport().atTail());
+    parser.feed("\x1b[?1049l");
+    EXPECT_EQ(model.historySize(), history);
+    EXPECT(model.cell(0, 0).codePoint == U'b');
+}
+
+TEST_CASE(
     "Shrinking the height keeps a short TUI frame out of the scrollback") {
     TerminalModel model(20, 10, 100);
     VtParser parser(model);
