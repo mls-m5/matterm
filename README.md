@@ -53,7 +53,16 @@ The native PTY starts before SDL workers and is resized after font metrics are k
 ./build/matterm /path/to/font.ttf
 ./build/matterm /path/to/font.ttf -- /bin/bash --noprofile --norc -i
 ./build/matterm /path/to/font.ttf --showcase
+./build/matterm --help
+./build/matterm --smooth-cursor -- /bin/bash -i
 ```
+
+`--smooth-cursor` enables optional cursor gliding in native PTY mode (off by
+default). Put it before `-- COMMAND`; it is not supported with `--input` or
+`--showcase`. History navigation already uses smooth fractional-row scrolling,
+without a flag. There is no `--smooth-scroll` option, and live program output
+still advances by whole rows. Cursor animation and smooth history navigation
+are separate features.
 
 In native terminal mode, Escape/function keys go to the program. Ctrl+C and Ctrl+D
 are tty input, not GUI shortcuts. Close the window or press Ctrl+Shift+Q to quit.

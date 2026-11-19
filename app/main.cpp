@@ -23,6 +23,42 @@
 #include <vector>
 
 namespace {
+void printUsage(std::ostream &out, const char *program) {
+    out << "Usage: " << program << " [font.ttf] [OPTIONS] [-- COMMAND ARG...]\n"
+        << "       " << program
+        << " [font.ttf] [--font-size PIXELS] [--input FILE | --showcase]\n\n"
+        << "Start an interactive shell ($SHELL -i, otherwise /bin/sh -i) by "
+           "default.\n"
+           "Options must precede --; arguments after -- belong to the "
+           "child.\n\n"
+           "  --help, -h           Show this help without opening a window.\n"
+           "  --font-size PIXELS   Font size, 1..128 renderer pixels (default: "
+           "18).\n"
+           "  --term TERM          Child TERM (default: xterm-256color).\n"
+           "  --smooth-cursor      Animate cursor movement (native PTY only; "
+           "default: off).\n"
+           "  --record-output FILE Record raw PTY output to a new file (max 64 "
+           "MiB).\n"
+           "  --input FILE         Play a regular UTF-8/VT file, without a "
+           "shell.\n"
+           "  --showcase           Show the built-in VT example, without a "
+           "shell.\n"
+           "  --smoke-test         Run the hidden VT rendering self-test.\n"
+           "  --pty-smoke-test     Run the hidden PTY self-test; requires -- "
+           "COMMAND.\n\n"
+           "History navigation is already smooth; there is no --smooth-scroll "
+           "flag.\n"
+           "Native: wheel / Shift+PageUp/PageDown scroll history; Ctrl+Shift+Q "
+           "quits.\n"
+           "Live program output still scrolls by whole rows, not an "
+           "animation.\n\n"
+        << "Example: " << program << " --smooth-cursor -- /bin/bash -i\n";
+#ifndef MATTERM_HAS_PTY
+    out << "\nThis build has no native PTY support; the default is the VT "
+           "showcase.\n";
+#endif
+}
+
 std::string startup() {
     std::string bytes = "\x1b[2J\x1b[H\x1b]2;VT stream frontend - PTY pending\a"
                         "\x1b[38;2;120;220;170mmatterm - VT stream frontend\r\n"
@@ -262,7 +298,8 @@ int main(int argc, char **argv) {
     const char *fontOverride = nullptr;
     int fontSize = 18;
     int firstOption = 1;
-    if (argc > 1 && std::string_view(argv[1]).substr(0, 2) != "--") {
+    if (argc > 1 && std::string_view(argv[1]) != "-h" &&
+        std::string_view(argv[1]).substr(0, 2) != "--") {
         fontOverride = argv[1];
         firstOption = 2;
     }
@@ -275,6 +312,10 @@ int main(int argc, char **argv) {
             }
             valid = !command.empty();
             break;
+        }
+        else if (arg == "--help" || arg == "-h") {
+            printUsage(std::cout, argv[0]);
+            return 0;
         }
         else if (arg == "--font-size") {
             const std::string_view value = ++i < argc ? argv[i] : "";
@@ -313,19 +354,24 @@ int main(int argc, char **argv) {
             valid = false;
         }
     }
+    if (smoothCursor && (inputPath || smokeTest || showcase)) {
+        std::cerr << "--smooth-cursor requires native PTY mode; do not combine "
+                     "it with --input, --showcase or --smoke-test\n";
+        return 1;
+    }
+#ifndef MATTERM_HAS_PTY
+    if (smoothCursor) {
+        std::cerr
+            << "--smooth-cursor requires a build with native PTY support\n";
+        return 1;
+    }
+#endif
     if (!valid || (inputPath && smokeTest) ||
         (recordPath && (inputPath || smokeTest || showcase || ptySmokeTest)) ||
         ((!command.empty() || ptySmokeTest) &&
          (inputPath || smokeTest || showcase)) ||
         (ptySmokeTest && command.empty())) {
-        std::cerr
-            << "Usage: " << argv[0]
-            << " [font.ttf] [--font-size PIXELS] [--term TERM] "
-               "[--record-output FILE] [--smooth-cursor] [-- COMMAND "
-               "ARG...]\n"
-            << "       " << argv[0]
-            << " [font.ttf] [--font-size PIXELS] [--input FILE | --showcase | "
-               "--smoke-test]\n";
+        printUsage(std::cerr, argv[0]);
         return 1;
     }
     if (!inputPath && !smokeTest && !showcase) {
