@@ -128,8 +128,12 @@ Current width resize clips or pads each retained row, preserving chronological
 order and colors but not reflowing text. It explicitly reallocates and copies
 retained cells; failure preserves the original storage. Height only changes the
 visible slice in the direct-memory demo. TerminalModel additionally resizes its
-screen: shrinking keeps bottom rows, growing appends blanks, and both buffers
-resize together. Full text reflow remains open.
+screen: shrinking first drops blank rows below the cursor (as xterm and VTE do),
+then keeps the bottom rows and pushes the top rows into the scrollback; growing
+appends blanks (it does not pull scrollback down); both buffers resize together.
+Dropping blank rows first keeps a short full-frame program's output on screen,
+so its redraw after SIGWINCH does not duplicate it. Full text reflow remains
+open: matterm follows xterm (no reflow), not VTE.
 
 view(first, count) rebuilds only a bounded list of borrowed row descriptors,
 clipping count to retained rows. Descriptors expire on the next view call,

@@ -175,6 +175,33 @@ struct TerminalModel::Impl {
         }
     }
 
+    // True when nothing visible is in the row: spaces with the screen's
+    // erase background, or cells never written since the screen was created.
+    bool blankRow(const Screen &screen, std::size_t y) const {
+        const auto empty = blank(screen);
+        const auto row = screen.memory.row(y);
+        const auto sameBackground = [](const FChar &a, const FChar &b) {
+            return a.backgroundColor().kind == b.backgroundColor().kind &&
+                   a.background.r == b.background.r &&
+                   a.background.g == b.background.g &&
+                   a.background.b == b.background.b;
+        };
+        const FChar pristine;
+        constexpr auto visibleStyle = CellAttribute::Underline |
+                                      CellAttribute::Strike |
+                                      CellAttribute::Inverse;
+        for (std::size_t x = 0; x < columns; ++x) {
+            const auto &cell = row.data()[x];
+            if ((cell.codePoint != U' ' && cell.codePoint != 0) ||
+                hasAttribute(cell.attributes, visibleStyle) ||
+                !(sameBackground(cell, empty) ||
+                  sameBackground(cell, pristine))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     std::unique_ptr<Screen> resized(const Screen &old,
                                     std::size_t width,
                                     std::size_t height,
@@ -183,7 +210,18 @@ struct TerminalModel::Impl {
             std::make_unique<Screen>(width, height, history, blank(old));
         result->memory.clear();
         result->softWrap.clear();
-        for (std::size_t y = 0; y < old.memory.size(); ++y) {
+        // Shrinking: rows that are blank and below the cursor go first, as in
+        // xterm and VTE, so a program that printed a short frame at the top
+        // keeps it on screen instead of having it pushed into the scrollback
+        // (where its redraw after SIGWINCH would duplicate it).
+        std::size_t dropped = 0;
+        for (std::size_t limit = rows > height ? rows - height : 0;
+             dropped < limit &&
+             rows - 1 - dropped > std::size_t(old.cursor.row) &&
+             blankRow(old, start(old) + rows - 1 - dropped);
+             ++dropped) {
+        }
+        for (std::size_t y = 0; y < old.memory.size() - dropped; ++y) {
             result->append(old.memory.row(y),
                            blank(old),
                            width == columns && old.softWrap[y]);
@@ -202,7 +240,7 @@ struct TerminalModel::Impl {
         result->insert = old.insert;
         result->cursor = old.cursor;
         result->cursor.column = std::min(old.cursor.column, int(width) - 1);
-        const auto removed = rows > height ? rows - height : 0;
+        const auto removed = rows > height ? rows - height - dropped : 0;
         const auto oldRow = std::size_t(old.cursor.row);
         result->cursor.row = int(oldRow >= removed ? oldRow - removed : 0);
         result->cursor.row = std::min(result->cursor.row, int(height) - 1);

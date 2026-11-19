@@ -29,6 +29,8 @@ All escape sequences below use seven-bit `ESC` introducers, not raw C1 bytes.
 CSI parameter coordinates are one-based; omitted/zero movement parameters use one.
 Movement clamps to the screen or origin-mode margins. Resize currently resets
 margins/origin to the full screen; applications can re-establish them on SIGWINCH.
+A height shrink drops blank rows below the cursor before pushing top rows into
+the scrollback; there is no reflow on width changes.
 
 | Input | Behavior |
 |---|---|

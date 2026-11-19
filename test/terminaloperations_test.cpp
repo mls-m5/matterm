@@ -15,9 +15,85 @@ void filled(TerminalModel &model) {
         model.write(std::u32string(model.columns(), char32_t(U'A' + y)));
     }
 }
+// All retained text, history first, one line per row.
+std::string everything(const TerminalModel &model) {
+    const auto first = model.firstRetainedRow();
+    const auto last = first + model.historySize() + model.rows() - 1;
+    return model.copyText({first, 0}, {last, model.columns() - 1}, 1 << 20)
+        .value_or("<none>");
+}
+std::size_t count(const std::string &text, const std::string &needle) {
+    std::size_t result = 0;
+    for (auto at = text.find(needle); at != std::string::npos;
+         at = text.find(needle, at + 1)) {
+        ++result;
+    }
+    return result;
+}
+// What an Ink-style program does after SIGWINCH: go up over its previous
+// frame, erase to the end of the screen and print the frame again.
+const char kFrame[] = "alpha\r\nbeta\r\ngamma\r\n";
+const char kRedraw[] = "\x1b[3A\x1b[Jalpha\r\nbeta\r\ngamma\r\n";
 } // namespace
 
 TEST_SUIT_BEGIN(TerminalOperations)
+
+TEST_CASE(
+    "Shrinking the height keeps a short TUI frame out of the scrollback") {
+    TerminalModel model(20, 10, 100);
+    VtParser parser(model);
+    parser.feed(kFrame);
+    model.resize(20, 5); // Rows below the cursor are blank: drop those first.
+    EXPECT_EQ(model.historySize(), std::size_t(0));
+    EXPECT_EQ(model.cursor().row, 3);
+    EXPECT(model.cell(0, 0).codePoint == U'a');
+    parser.feed(kRedraw);
+    const auto text = everything(model);
+    EXPECT_EQ(count(text, "alpha"), std::size_t(1));
+    EXPECT_EQ(count(text, "beta"), std::size_t(1));
+    EXPECT_EQ(count(text, "gamma"), std::size_t(1));
+}
+
+TEST_CASE("Resizing back and forth under a TUI never duplicates its rows") {
+    TerminalModel model(20, 10, 100);
+    VtParser parser(model);
+    parser.feed("old output\r\n");
+    parser.feed(kFrame);
+    for (const auto rows : {6, 4, 12, 5, 10}) {
+        model.resize(20, std::size_t(rows));
+        parser.feed(kRedraw);
+        const auto text = everything(model);
+        EXPECT_EQ(count(text, "alpha"), std::size_t(1));
+        EXPECT_EQ(count(text, "gamma"), std::size_t(1));
+        EXPECT_EQ(count(text, "old output"), std::size_t(1));
+    }
+}
+
+TEST_CASE(
+    "Shrinking keeps content below the cursor and drops only blank rows") {
+    TerminalModel model(20, 8, 100);
+    VtParser parser(model);
+    parser.feed("top\r\n\x1b[8;1Hstatus\x1b[1;1H");
+    model.resize(20, 4); // The status row is not blank: nothing to drop.
+    EXPECT(model.cell(0, 3).codePoint == U's');
+    EXPECT_EQ(model.historySize(), std::size_t(4));
+    TerminalModel colored(20, 8, 100);
+    VtParser coloredParser(colored);
+    coloredParser.feed("\x1b[1;1Htop\x1b[7;1H\x1b[44m\x1b[K\x1b[0m\x1b[1;1H");
+    colored.resize(20, 4); // A colored row is content: it is kept, not dropped.
+    EXPECT(colored.cell(0, 3).backgroundColor().kind ==
+           ColorReference::Kind::Indexed);
+}
+
+TEST_CASE("A resize that must scroll still puts the cursor on its content") {
+    TerminalModel model(20, 6, 100);
+    VtParser parser(model);
+    parser.feed("1\r\n2\r\n3\r\n4\r\n5\r\n6");
+    model.resize(20, 3);
+    EXPECT_EQ(model.cursor().row, 2);
+    EXPECT_EQ(model.historySize(), std::size_t(3));
+    EXPECT(model.cell(0, 2).codePoint == U'6');
+}
 
 TEST_CASE("Scrolling margins preserve outside rows and partial scrolls never "
           "enter history") {
