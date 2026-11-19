@@ -1,6 +1,8 @@
 # matterm-tty Wire Protocol, Version 1
 
-Status: **specification for implementation, nothing implemented.** Rationale,
+Status: **specification.** The message codec (`src/protocol/`, phase 1) is
+implemented and tested against the examples in section 9; the server, session
+state machine, and clients are not. Rationale,
 threat model, authentication, and deployment are in
 [WEB_TERMINAL.md](WEB_TERMINAL.md); this file defines only the bytes.
 
@@ -266,7 +268,7 @@ A mouse press in SGR encoding (the terminal enabled mode 1006) is an ordinary
 
 ## 10. Implementation notes
 
-- `src/protocol/` provides, in C++17 and without I/O, one struct per message, a
+- `src/protocol/` (`matterm::protocol`) provides, in C++17 and without I/O, one struct per message, a
   `std::variant` over each direction, `encode(message, std::string &out)`, and
   `decode(std::string_view)` returning the message or a `DecodeError`
   (`Truncated`, `Trailing`, `UnknownType`, `WrongDirection`, `BadString`,

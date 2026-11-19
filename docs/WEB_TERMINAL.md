@@ -432,7 +432,9 @@ existing `--record-output` PTY recording gives realistic scripts.
 
 Each phase is independently useful and ends with tests and documentation.
 
-1. **Protocol and transport interface.** `src/protocol` with tests; `Transport`
+1. **Protocol and transport interface** (codec done: `src/protocol/`, with
+   golden-vector, boundary, and randomized round-trip tests; `Transport`
+   interface and `PtyTransport` remain). `src/protocol` with tests; `Transport`
    interface; `PtyTransport` so the native app exercises the interface.
 2. **Local server, no browser.** `matterm-server` on loopback: configuration
    files, static files, `/login` with Argon2id, configurable rate limiter,

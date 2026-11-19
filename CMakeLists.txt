@@ -25,6 +25,12 @@ add_library(matterm::terminal ALIAS terminalmodel)
 target_include_directories(terminalmodel PUBLIC src/terminal)
 target_link_libraries(terminalmodel PUBLIC terminalmemory)
 
+# Wire protocol for remote terminals: pure data and codec, no I/O.
+add_library(ttyprotocol src/protocol/message.cpp)
+add_library(matterm::protocol ALIAS ttyprotocol)
+target_compile_features(ttyprotocol PUBLIC cxx_std_17)
+target_include_directories(ttyprotocol PUBLIC src/protocol)
+
 add_library(utf8decoder src/terminal/vt/utf8decoder.cpp)
 add_library(matterm::utf8 ALIAS utf8decoder)
 target_compile_features(utf8decoder PUBLIC cxx_std_17)
