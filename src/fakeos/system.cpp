@@ -105,9 +105,11 @@ void System::freshWorld() {
     fresh.rows = config_.rows;
     fresh.caps = config_.capabilities;
     fresh.background = config_.background;
-    fresh.sound = config_.sound && bool(config_.onBeep);
-    // The host's choice to start with: on when it asks for a pace or for sound.
-    fresh.slow = config_.revealCharsPerSecond > 0 || fresh.sound;
+    fresh.soundAvailable = bool(config_.onBeep); // The host can play pips...
+    fresh.sound =
+        config_.sound && fresh.soundAvailable; // ...and starts on or off.
+    fresh.slow =
+        config_.revealCharsPerSecond > 0; // The host's choice to start with.
     fresh.rng = Rng(config_.seed);
     fresh.bootUnix = config_.unixTime;
     fresh.now = world_.now;
@@ -140,6 +142,10 @@ Reaction System::start() {
 }
 
 void System::showWelcome() {
+    if (clearOnWelcome_) {
+        clearOnWelcome_ = false;
+        out_ += kClearScreen;
+    }
     const auto mark = out_.size();
     if (const auto *motd = world_.fs.find("/etc/motd")) {
         for (char c : motd->data) {
@@ -560,7 +566,7 @@ int System::revealRate() const {
 }
 
 void System::forwardBeeps() {
-    if (!config_.sound || !config_.onBeep) {
+    if (!world_.sound || !config_.onBeep) {
         world_.beeps.clear();
         return;
     }
@@ -659,7 +665,50 @@ void System::flushReveal() {
     }
 }
 
+// One key answers: y crashes the machine, anything else backs out.
+void System::answerQuestion(const Key &key) {
+    answering_ = false;
+    world_.crashQuestion.clear();
+    const bool yes = key.isText("y") || key.isText("Y");
+    out_ += (yes ? "y" : "n");
+    out_ += "\r\n";
+    if (yes) {
+        startCrash();
+        return;
+    }
+    out_ += "Wise choice.\r\n";
+    showPrompt();
+}
+
+// The disk is gone and the machine hangs on a boot failure; it restarts by
+// itself (the "crash" program).
+void System::startCrash() {
+    // Everything under / goes.
+    for (const auto &entry : world_.fs.list("/")) {
+        world_.fs.remove(VirtualFs::join("/", entry.first), "root", true);
+    }
+    world_.history.clear();
+    launch("crash", {});
+}
+
 void System::afterCommand() {
+    if (!world_.crashQuestion.empty()) {
+        answering_ = true; // No prompt: it waits for the answer.
+        return;
+    }
+    if (world_.rebootRequest) {
+        // The system had enough: a new world, and the intro again.
+        world_.rebootRequest = false;
+        out_ += "\r\nRebooting the system...\r\n";
+        freshWorld();
+        clearOnWelcome_ = true;
+        if (findProgram("intro")) {
+            launch("intro", {});
+            return;
+        }
+        showWelcome();
+        return;
+    }
     if (world_.resetRequest) {
         world_.resetRequest = false;
         freshWorld();
@@ -724,6 +773,17 @@ void System::endProgram() {
         out_ += c;
     }
     pendingText_.clear();
+    if (world_.rebootRequest) { // The crash is over: a new world and the intro.
+        world_.rebootRequest = false;
+        freshWorld();
+        clearOnWelcome_ = true;
+        if (findProgram("intro")) {
+            launch("intro", {});
+            return;
+        }
+        showWelcome();
+        return;
+    }
     if (world_.launch) { // A program (or a click egg) asked for the next one.
         const auto request = *world_.launch;
         world_.launch.reset();
@@ -794,6 +854,12 @@ Reaction System::input(std::string_view bytes) {
             if (exitCode_) {
                 break;
             }
+        }
+        if (answering_) {
+            if (!key.is(Key::Type::Mouse)) {
+                answerQuestion(key);
+            }
+            continue;
         }
         if (program_) {
             const auto serial = programSerial_;

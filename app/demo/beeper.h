@@ -26,5 +26,6 @@ private:
     static void callback(void *self, Uint8 *stream, int bytes);
 
     SDL_AudioDeviceID device_ = 0;
+    bool started_ = false;
     std::unique_ptr<PipSynth> synth_;
 };

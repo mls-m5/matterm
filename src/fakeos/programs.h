@@ -58,5 +58,6 @@ std::unique_ptr<Program> makePager(const std::vector<std::string> &args);
 std::unique_ptr<Program> makeTop(const std::vector<std::string> &args);
 std::unique_ptr<Program> makeCrumble(const std::vector<std::string> &args);
 std::unique_ptr<Program> makeMatrix(const std::vector<std::string> &args);
+std::unique_ptr<Program> makeCrash(const std::vector<std::string> &args);
 
 } // namespace fakeos

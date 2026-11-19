@@ -1238,6 +1238,25 @@ int cmdFalse(World &, const Args &, CommandIo &) {
     return 1;
 }
 
+int cmdSound(World &w, const Args &args, CommandIo &io) {
+    if (args.size() > 2 ||
+        (args.size() == 2 && args[1] != "on" && args[1] != "off")) {
+        io.err += "usage: sound on|off\n";
+        return 2;
+    }
+    if (!w.soundAvailable) {
+        io.err += "Sound is not available here.\n";
+        return 1;
+    }
+    if (args.size() == 2) {
+        w.sound = args[1] == "on";
+        w.fs.put("/etc/motd", motdText(w), "root", 0644, w.unixNow());
+    }
+    io.out +=
+        std::string("Sound: ") + (w.sound ? "on" : "off") + " (sound on|off)\n";
+    return 0;
+}
+
 int cmdSlow(World &w, const Args &args, CommandIo &io) {
     if (args.size() > 2 ||
         (args.size() == 2 && args[1] != "on" && args[1] != "off")) {
@@ -1247,7 +1266,7 @@ int cmdSlow(World &w, const Args &args, CommandIo &io) {
     if (args.size() == 2) {
         w.slow = args[1] == "on";
         w.slowAsked = w.slowAsked || w.slow;
-        w.fs.put("/etc/motd", motdText(w.slow), "root", 0644, w.unixNow());
+        w.fs.put("/etc/motd", motdText(w), "root", 0644, w.unixNow());
     }
     io.out += std::string("Dramatic typing speed: ") +
               (w.slow ? "enabled" : "disabled") + " (slow on|off)\n";
@@ -1328,6 +1347,7 @@ int cmdHelp(World &, const Args &, CommandIo &io) {
         "     echo hi | wc, grep -n the /usr/share/dict/words\n"
         "Dramatic typing speed: 'slow off' turns it off, 'slow on' back on "
         "(Space skips).\n"
+        "Sound: 'sound on' turns the typing pips on, 'sound off' off.\n"
         "Use Tab to complete, Up for history. There is more to find than "
         "what is in your PATH.\n";
     return 0;
@@ -2471,6 +2491,7 @@ const std::vector<CommandInfo> &commands() {
         {"export", cmdExport, true, "set environment variables"},
         {"unset", cmdUnset, true, "remove environment variables"},
         {"slow", cmdSlow, true, "turn the dramatic typing speed on or off"},
+        {"sound", cmdSound, true, "turn the typing pips on or off"},
         {"history", cmdHistory, true, "show the command history"},
         {"clear", cmdClear, true, "clear the screen"},
         {"reset",

@@ -151,7 +151,7 @@ For the static demo (`demo.html`, or `index.html?demo`; see docs/DEMO.md):
 | `?noreveal` | Print program output at once, not at a pace. |
 | `?cmd=...` | Type and run a command at the first prompt, letter by letter after the intro (text only, 200 characters; nothing runs by itself without it). |
 | `?theme=light\|dark` | Page colors around the terminal (not the terminal palette). |
-| `?sound=1` / `?mute` | Pips for revealed and typed text (WebAudio, after the first key or click): on in the demo page, off when embedded, `?sound=1` on anywhere, `?mute` off. |
+| `?sound=1` / `?mute` | Pips for revealed and typed text (WebAudio, after the first key or click): off by default; `?sound=1` starts with them on, `sound on` in the demo turns them on, `?mute` keeps them off. |
 | `?smooth=N` | Cursor glide in milliseconds; on (80) in the demo, `?smooth=0` turns it off. |
 
 While the page is out of view (a hidden tab, an iframe scrolled away) the loop

@@ -36,14 +36,21 @@ struct World {
     std::set<std::string> flags;
     // Pips reported by programs (typed text) are collected here and handed to
     // Config::onBeep by the System; nothing is collected when sound is off.
-    bool sound = false;
+    bool sound = false;          // Pips are on (`sound on|off`).
+    bool soundAvailable = false; // The host can play them.
     // The dramatic typing speed (revealed text and its pips): `slow on|off`.
     bool slow = false;
+    // How grumpy the system is about repeated greetings, by group (eggs.h).
+    std::map<std::string, int> moods;
+    bool rebootRequest = false;
+    // A yes/no question the system waits to have answered with one key; yes
+    // crashes the machine (the rm -rf --no-preserve-root egg).
+    std::string crashQuestion;
     bool slowAsked =
         false; // `slow on` was typed: reveal even if the host set no pace.
     std::vector<Beep> beeps;
     void beep(double frequency, int durationMs, double volume = 0.3) {
-        if (sound && slow) {
+        if (sound) {
             beeps.push_back({frequency, durationMs, volume, Time{0}});
         }
     }
@@ -80,6 +87,6 @@ struct World {
 // Fills `world` with the initial virtual system for its user and clock.
 void seedWorld(World &world);
 // The welcome text for the current typing-speed setting (also /etc/motd).
-std::string motdText(bool slow);
+std::string motdText(const World &world);
 
 } // namespace fakeos

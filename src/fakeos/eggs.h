@@ -40,6 +40,14 @@ struct Egg {
     bool replaces;               // Skip the shell for this line.
     bool once;                   // Fires once per world.
     const char *repeatPrint;     // Printed instead after the first time.
+    // A mood: every trigger of the same `group` makes the system grumpier, one
+    // step per greeting (the answer is steps[count], the last repeated); a
+    // different command between calms it by one; the last step reboots.
+    const char *group;
+    std::vector<const char *> steps;
+    // Asks this first; "y" crashes the machine, any other key backs out ("Wise
+    // choice."). Empty: no question.
+    const char *crashQuestion;
 };
 
 const std::vector<Egg> &eggs();
@@ -52,5 +60,7 @@ const Egg *matchClickEgg(const World &world,
 // Performs the egg: prints, creates files, requests a program. Returns false
 // when it had nothing to do (a `once` egg already found, without repeat text).
 bool applyEgg(World &world, const Egg &egg, std::string &terminal);
+// A line that is not a greeting: every mood cools a step (never below zero).
+void calmMoods(World &world);
 
 } // namespace fakeos

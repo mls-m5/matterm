@@ -53,16 +53,19 @@ const char *kNotes = "Notes\n=====\nThe fire in /usr/games is nice to "
 
 } // namespace
 
-std::string motdText(bool slow) {
+std::string motdText(const World &world) {
     return std::string("Welcome to Mattrix OS 6.0 Professional Edition\n"
                        "\n"
                        " * No real file systems were harmed. Type 'help', or "
                        "read README.\n") +
-           (slow ? " * Dramatic typing speed: Enabled (Space skips, 'slow off' "
-                   "turns it off)\n"
-                 : " * Dramatic typing speed: Disabled ('slow on' turns it "
-                   "on)\n") +
-           " * Try: fire, gradient, neofetch, about\n"
+           (world.slow ? " * Dramatic typing speed: Enabled (Space skips, "
+                         "'slow off' turns it off)\n"
+                       : " * Dramatic typing speed: Disabled ('slow on' turns "
+                         "it on)\n") +
+           (!world.soundAvailable ? " * Sound: not available here\n"
+            : world.sound         ? " * Sound: On ('sound off' turns it off)\n"
+                          : " * Sound: Off ('sound on' turns it on)\n") +
+           " * Try: fire, gradient, neofetch, about, sound on\n"
            "\n";
 }
 
@@ -82,7 +85,7 @@ void seedWorld(World &world) {
     fs.putDirectory("/home/" + user + "/Documents", user, 0755, base - 9 * day);
     fs.put(
         "/etc/hostname", world.hostname + "\n", "root", 0644, base - 30 * day);
-    fs.put("/etc/motd", motdText(world.slow), "root", 0644, base - 30 * day);
+    fs.put("/etc/motd", motdText(world), "root", 0644, base - 30 * day);
     fs.put("/etc/issue",
            "Mattrix OS 6.0 Professional Edition \\n \\l\n",
            "root",
@@ -174,9 +177,7 @@ void seedWorld(World &world) {
         "It is empty, because everything does.\n\n"
         "You opened it anyway. I knew you would.\n",
         4);
-    own(home + "/Downloads/passwords_final_v3.txt",
-        "password123\n",
-        5);
+    own(home + "/Downloads/passwords_final_v3.txt", "password123\n", 5);
     own(home + "/Downloads/vacation_pics_(1).txt",
         "      <3   <3         <3\n"
         "    <3  <3 <3     <3  <3\n"

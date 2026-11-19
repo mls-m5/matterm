@@ -140,14 +140,24 @@ is in `src/fakeos`. Sound changes nothing about the text (a test compares the
 streams) and is deterministic.
 
 - **Browser** (`login.js`): WebAudio, synthesized (a square wave through a low-pass
-  filter with a short envelope; nothing to download). Browsers allow sound only after
-  a user gesture, so the audio context is created at the first key press or click
-  (until then the pips are silently dropped). On in the demo page, off in an embedded
-  one; `?sound=1` turns it on anywhere, `?mute` or `?sound=0` off.
-- **Native window** (`app/demo/beeper.cpp`, `pipsynth.h`): SDL audio, opt-in with
-  `--sound` (`--mute`), no sound card means silence. The synthesizer is a plain class
-  and is tested without a device (`test/pipsynth_test.cpp`).
+  filter with a short envelope; nothing to download). Off by default: `?sound=1`
+  starts the page with pips on, otherwise the `sound on` command turns them on
+  (typing it is also the user gesture browsers require before any sound). `?mute` or
+  `?sound=0` keep it off.
+- **Native window** (`app/demo/beeper.cpp`, `pipsynth.h`): SDL audio, always ready
+  (the device opens paused) and off by default; `--sound` starts with pips on, `sound on`
+  turns them on later. No sound card means `sound` says it is not available. The
+  synthesizer is a plain class and is tested without a device
+  (`test/pipsynth_test.cpp`).
 - **`--tty`**: no sound.
+
+### `sound on|off`
+
+Pips are off by default in the demos. `sound on` and `sound off` switch them while
+it runs (`sound` shows the state; a host that cannot play says "Sound is not
+available here."), the welcome text names the setting, `help` mentions it, and
+`reset` returns to what the host started with. `Config::sound` is the starting state
+and `Config::onBeep` (presence = the host can play) is what makes it available.
 
 ### The uptime
 

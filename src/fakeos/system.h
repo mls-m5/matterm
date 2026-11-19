@@ -96,6 +96,8 @@ private:
     void drainReveal(Time now);
     void flushReveal();
     void forwardBeeps();
+    void answerQuestion(const Key &key);
+    void startCrash();
     void refreshUptimeFile();
     int revealRate() const;
     void driveAutoType(Time now);
@@ -132,6 +134,7 @@ private:
     Time lastBeepAt_{-1000};
     std::optional<int> deferredExit_; // `exit` after the text has been shown.
     bool startCommandRan_ = false;
+    bool clearOnWelcome_ = false; // After a reboot the old screen goes first.
     std::int64_t procUptimeAt_ = -1;
     // The start command being typed for the visitor.
     std::vector<std::string> autoType_;
@@ -139,6 +142,7 @@ private:
     Time autoTypeAt_{0};
     bool autoTyping_ = false;
     bool autoStarted_ = false;
+    bool answering_ = false; // A question is waiting for y or n.
 };
 
 } // namespace fakeos

@@ -261,7 +261,9 @@ TEST_CASE("More eggs") {
     pc.run("neo");
     EXPECT(pc.shows("The Matrix has you."));
     pc.run("rm -rf --no-preserve-root /");
-    EXPECT(pc.shows("Nice try."));
+    EXPECT(pc.shows("Are you really really sure? (y/n)"));
+    pc.type("n");
+    EXPECT(pc.shows("Wise choice."));
     pc.run(":(){ :|:& };:");
     EXPECT(pc.shows("Resource temporarily unavailable"));
 }

@@ -11,6 +11,7 @@ const std::vector<ProgramInfo> &programs() {
         {"top", makeTop, "watch the processes"},
         {"crumble", makeCrumble, "a word falls apart"},
         {"matrix", makeMatrix, "follow the white rabbit"},
+        {"crash", makeCrash, "a machine without a disk"},
     };
     return table;
 }

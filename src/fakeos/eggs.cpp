@@ -1,5 +1,7 @@
 #include "eggs.h"
 
+#include <algorithm>
+#include <deque>
 #include <utility>
 
 namespace fakeos {
@@ -12,7 +14,7 @@ using T = Egg::Trigger;
 class Builder {
 public:
     Builder(const char *id, T trigger, const char *match) {
-        egg_ = {id, trigger, match, "", {}, "", true, false, ""};
+        egg_ = {id, trigger, match, "", {}, "", true, false, "", "", {}, ""};
     }
     Builder &print(const char *text) {
         egg_.print = text;
@@ -30,6 +32,17 @@ public:
     Builder &once(const char *again = "") {
         egg_.once = true;
         egg_.repeatPrint = again;
+        return *this;
+    }
+    // Grumpier with every greeting of the group; the last step reboots.
+    Builder &mood(const char *group, std::vector<const char *> steps) {
+        egg_.group = group;
+        egg_.steps = std::move(steps);
+        return *this;
+    }
+    // Asks first; yes crashes the machine, anything else backs out.
+    Builder &ask(const char *question) {
+        egg_.crashQuestion = question;
         return *this;
     }
     // The line still reaches the shell afterwards.
@@ -51,57 +64,94 @@ Builder egg(const char *id, T trigger, const char *match) {
 
 } // namespace
 
+// How the system answers a greeting, over and over; the last one is the end.
+const std::vector<const char *> kGreetings = {
+    "Hello, guest. The system hums quietly.",
+    "Hello again, guest.",
+    "Again? Did you forget?",
+    "Is this a test?",
+    "Please stop.",
+    "I am a Professional Edition. Please act professionally.",
+    "I can do this all day. Can you?",
+    "please kill me...",
+};
+
 const std::vector<Egg> &eggs() {
-    static const std::vector<Egg> table = {
-        egg("make-love-sudo", T::Line, "sudo make love")
-            .print("make: don't know how to make love. Stop.\n"),
-        egg("make-love", T::Line, "make love")
-            .print("make: don't know how to make love. Stop.\n"),
-        egg("sandwich-sudo", T::Line, "sudo make me a sandwich")
-            .print("Okay.\n"),
-        egg("sandwich", T::Line, "make me a sandwich")
-            .print("What? Make it yourself.\n"),
-        egg("sudo", T::Command, "sudo")
-            .print("guest is not in the sudoers file. This incident will be "
-                   "reported.\n"),
-        egg("xyzzy", T::Line, "xyzzy")
-            .print("A hollow voice says \"Fool.\"\nSomewhere in /usr/games, "
-                   "something rustles.\n")
-            .create("/usr/games/plasma", "#!builtin gradient --pills\n", 0755)
-            .once("Nothing happens.\n"),
-        egg("editor", T::Command, "vim")
-            .print("There is no editor here, only echo and redirects. Nice "
-                   "try.\n"),
-        egg("editor-vi", T::Command, "vi")
-            .print("There is no editor here, only echo and redirects. Nice "
-                   "try.\n"),
-        egg("editor-nano", T::Command, "nano")
-            .print("There is no editor here, only echo and redirects. Nice "
-                   "try.\n"),
-        egg("editor-emacs", T::Command, "emacs")
-            .print("There is no editor here, only echo and redirects. Nice "
-                   "try.\n"),
-        egg("no-preserve-root", T::Prefix, "rm -rf --no-preserve-root")
-            .print(
-                "Nice try. The simulated system folds its arms and says no.\n"),
-        egg("forkbomb", T::Line, ":(){ :|:& };:")
-            .print("matterm: fork: Resource temporarily unavailable. (This "
-                   "system has more sense.)\n"),
-        egg("answer", T::Line, "42")
-            .print("That is the answer. The question is still open.\n"),
-        egg("neo", T::Command, "neo").print("The Matrix has you.\n"),
-        egg("hello", T::Command, "hello")
-            .print("Hello, guest. The system hums quietly.\n"),
-        // Clicks on words a program drew (mouse reporting): the pills of the
-        // plasma program. The blue one ends the story.
-        egg("pill-red", T::Click, "gradient/red")
-            .print("You take the red pill. The rabbit hole opens.\n")
-            .launch("matrix"),
-        egg("pill-blue", T::Click, "gradient/blue")
-            .print("You close your eyes. When you open them you are at your "
-                   "own keyboard,\n"
-                   "and you believe whatever you want to believe.\n"),
-    };
+    static const std::vector<Egg> table = [] {
+        std::vector<Egg> rows = {
+            egg("make-love-sudo", T::Line, "sudo make love")
+                .print("make: don't know how to make love. Stop.\n"),
+            egg("make-love", T::Line, "make love")
+                .print("make: don't know how to make love. Stop.\n"),
+            egg("sandwich-sudo", T::Line, "sudo make me a sandwich")
+                .print("Okay.\n"),
+            egg("sandwich", T::Line, "make me a sandwich")
+                .print("What? Make it yourself.\n"),
+            egg("sudo", T::Command, "sudo")
+                .print(
+                    "guest is not in the sudoers file. This incident will be "
+                    "reported.\n"),
+            egg("xyzzy", T::Line, "xyzzy")
+                .print(
+                    "A hollow voice says \"Fool.\"\nSomewhere in /usr/games, "
+                    "something rustles.\n")
+                .create(
+                    "/usr/games/plasma", "#!builtin gradient --pills\n", 0755)
+                .once("Nothing happens.\n"),
+            egg("editor", T::Command, "vim")
+                .print("There is no editor here, only echo and redirects. Nice "
+                       "try.\n"),
+            egg("editor-vi", T::Command, "vi")
+                .print("There is no editor here, only echo and redirects. Nice "
+                       "try.\n"),
+            egg("editor-nano", T::Command, "nano")
+                .print("There is no editor here, only echo and redirects. Nice "
+                       "try.\n"),
+            egg("editor-emacs", T::Command, "emacs")
+                .print("There is no editor here, only echo and redirects. Nice "
+                       "try.\n"),
+            egg("forkbomb", T::Line, ":(){ :|:& };:")
+                .print("matterm: fork: Resource temporarily unavailable. (This "
+                       "system has more sense.)\n"),
+            egg("answer", T::Line, "42")
+                .print("That is the answer. The question is still open.\n"),
+            egg("neo", T::Command, "neo").print("The Matrix has you.\n"),
+            egg("hello", T::Command, "hello").mood("hello", kGreetings),
+            egg("hi", T::Command, "hi").mood("hello", kGreetings),
+            egg("hej", T::Command, "hej").mood("hello", kGreetings),
+            // Clicks on words a program drew (mouse reporting): the pills of
+            // the plasma program. The blue one ends the story.
+            egg("pill-red", T::Click, "gradient/red")
+                .print("You take the red pill. The rabbit hole opens.\n")
+                .launch("matrix"),
+            egg("pill-blue", T::Click, "gradient/blue")
+                .print(
+                    "You close your eyes. When you open them you are at your "
+                    "own keyboard,\n"
+                    "and you believe whatever you want to believe.\n"),
+        };
+        // rm -rf with --no-preserve-root, with or without sudo, in either
+        // order: it asks, and yes ends badly.
+        static std::deque<std::string>
+            texts; // Stable addresses for the matches.
+        for (const char *sudo : {"", "sudo "}) {
+            for (const char *rm : {"rm -rf", "rm -fr"}) {
+                for (const char *form :
+                     {"--no-preserve-root /", "/ --no-preserve-root"}) {
+                    texts.push_back(std::string(sudo) + rm + " " + form);
+                    rows.push_back(
+                        egg("crash", T::Line, texts.back().c_str())
+                            .ask("Are you really really sure? (y/n)"));
+                }
+            }
+        }
+        // The questions come first: `sudo rm ...` must not be taken for plain
+        // sudo.
+        std::stable_partition(rows.begin(), rows.end(), [](const Egg &e) {
+            return *e.crashQuestion != 0;
+        });
+        return rows;
+    }();
     return table;
 }
 
@@ -158,7 +208,30 @@ const Egg *matchEgg(const World &, const std::string &line) {
     return nullptr;
 }
 
+void calmMoods(World &world) {
+    for (auto &entry : world.moods) {
+        entry.second = std::max(0, entry.second - 1);
+    }
+}
+
 bool applyEgg(World &world, const Egg &egg, std::string &terminal) {
+    if (*egg.crashQuestion) {
+        // Wait for one key: y crashes the machine (System::input).
+        world.crashQuestion = egg.crashQuestion;
+        terminal += std::string(egg.crashQuestion) + " ";
+        return true;
+    }
+    if (!egg.steps.empty()) {
+        const int last = int(egg.steps.size()) - 1;
+        int &count = world.moods[egg.group];
+        terminal +=
+            std::string(egg.steps[std::size_t(std::min(count, last))]) + "\n";
+        if (count >= last) {
+            world.rebootRequest = true;
+        }
+        ++count;
+        return true;
+    }
     if (egg.once && world.flags.count(egg.id)) {
         if (*egg.repeatPrint) {
             terminal += egg.repeatPrint;

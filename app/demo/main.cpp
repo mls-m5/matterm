@@ -148,20 +148,19 @@ int runWindow(const char *font,
     config.columns = pretend.columns;
     config.rows = pretend.rows;
     // The pips of revealed and typed text, through SDL audio when asked for.
-    std::unique_ptr<Beeper> beeper;
+    // Always ready to play (the device opens paused and stays quiet): `sound
+    // on` can then turn the pips on; --sound starts with them on.
+    std::unique_ptr<Beeper> beeper = std::make_unique<Beeper>();
     int pips = 0;
-    if (sound) {
-        beeper = std::make_unique<Beeper>();
-        if (beeper->ok()) {
-            pretend.sound = true;
-            pretend.onBeep = [&beeper, &pips](const fakeos::Beep &beep) {
-                ++pips;
-                beeper->play(beep);
-            };
-        }
-        else {
-            std::cerr << "No audio device: continuing silently\n";
-        }
+    if (beeper->ok()) {
+        pretend.sound = sound;
+        pretend.onBeep = [&beeper, &pips](const fakeos::Beep &beep) {
+            ++pips;
+            beeper->play(beep);
+        };
+    }
+    else if (sound) {
+        std::cerr << "No audio device: continuing silently\n";
     }
     link = std::make_unique<ScriptedLink>(
         config, Script(), std::make_unique<fakeos::ScriptedProgram>(pretend));
