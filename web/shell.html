@@ -13,7 +13,13 @@
   <button type="submit">Log in</button>
   <p id="message" role="alert"></p>
 </form>
-<canvas id="canvas" hidden tabindex="-1"></canvas>
+<!-- The terminal window: the canvas fills it, its CSS size is the grid. On wide
+     desktop viewports it is a framed panel; elsewhere it is edge to edge. -->
+<main id="window" hidden>
+  <canvas id="canvas" tabindex="-1"></canvas>
+  <button id="layout" type="button" aria-pressed="false"
+    title="Toggle full screen" aria-label="Toggle full screen">&#x2922;</button>
+</main>
 <!-- Touch devices: a focusable field brings up the on-screen keyboard, and the
      bar adds the keys a phone keyboard lacks. Shown only for coarse pointers. -->
 <textarea id="softkeys" hidden autocapitalize="off" autocomplete="off"

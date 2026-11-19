@@ -5,11 +5,15 @@
   const password = document.getElementById("password");
   const message = document.getElementById("message");
   const canvas = document.getElementById("canvas");
+  const terminalWindow = document.getElementById("window");
+  const layoutButton = document.getElementById("layout");
 
   function start(demo) {
     form.hidden = true;
-    canvas.hidden = false;
+    terminalWindow.hidden = false;
+    document.body.classList.add("started");
     fitCanvas();
+    setupLayout();
     // Demo: no server link, so the page runs the built-in simulator.
     if (!demo) {
       window.mattermWs =
@@ -29,7 +33,6 @@
     const script = document.createElement("script");
     script.src = "index.js";
     document.body.appendChild(script);
-    window.addEventListener("resize", fitCanvas);
   }
 
   // Touch devices: tapping the terminal focuses a hidden field so the on-screen
@@ -139,12 +142,90 @@
     });
   }
 
-  // The canvas's CSS size is the window; its backing store is in device pixels
-  // so text stays sharp on HiDPI screens (the terminal scales its font too).
+  // Framed (default on wide desktop viewports, see style.css) or edge to edge.
+  // `?fullscreen` and the toggle choose edge to edge; the choice is remembered
+  // per browser. localStorage can be unavailable, then the choice lasts for the
+  // page only.
+  function setupLayout() {
+    const params = new URLSearchParams(location.search);
+    let stored = null;
+    try {
+      stored = localStorage.getItem("matterm.layout");
+    } catch (e) {}
+    const apply = function (full) {
+      if (full) {
+        document.body.dataset.layout = "full";
+      } else {
+        delete document.body.dataset.layout;
+      }
+      layoutButton.setAttribute("aria-pressed", String(full));
+      fitCanvas();
+    };
+    apply(params.has("fullscreen") || stored === "full");
+    layoutButton.addEventListener("click", function () {
+      const full = document.body.dataset.layout !== "full";
+      apply(full);
+      try {
+        localStorage.setItem("matterm.layout", full ? "full" : "framed");
+      } catch (e) {}
+      layoutButton.classList.remove("near");
+      canvas.focus(); // Keys belong to the terminal, not to the button.
+    });
+    // The button appears when a mouse is near the top edge of the window.
+    document.addEventListener("pointermove", function (event) {
+      if (event.pointerType !== "mouse") {
+        return;
+      }
+      const box = terminalWindow.getBoundingClientRect();
+      const near = event.clientY < box.top + 48 && event.clientY >= box.top - 24 &&
+        event.clientX > box.right - 160 && event.clientX <= box.right + 24;
+      layoutButton.classList.toggle("near", near);
+    });
+    document.addEventListener("pointerleave", function () {
+      layoutButton.classList.remove("near");
+    });
+  }
+
+  // The canvas fills the terminal window, so its CSS size is the container's
+  // and the backing store is the container in device pixels: text stays sharp
+  // on HiDPI screens and the grid matches what is visible. A ResizeObserver
+  // sees every cause (window resize, rotation, layout toggle, keyboard bar).
+  let fitted = [0, 0];
+  function setBackingSize(width, height) {
+    width = Math.max(1, width);
+    height = Math.max(1, height);
+    if (width === fitted[0] && height === fitted[1]) {
+      return;
+    }
+    fitted = [width, height];
+    canvas.width = width;
+    canvas.height = height;
+    // SDL learns the new window size from a resize event; the layout can
+    // change without the browser sending one.
+    window.dispatchEvent(new Event("resize"));
+  }
+  let observed = false; // Once the observer reports sizes it is the only source.
   function fitCanvas() {
+    if (observed) {
+      return;
+    }
     const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.round(canvas.clientWidth * ratio);
-    canvas.height = Math.round(canvas.clientHeight * ratio);
+    setBackingSize(Math.round(canvas.clientWidth * ratio),
+      Math.round(canvas.clientHeight * ratio));
+  }
+  if (window.ResizeObserver) {
+    new ResizeObserver(function (entries) {
+      observed = true;
+      const size = entries[0].devicePixelContentBoxSize;
+      if (size && size.length) {
+        setBackingSize(size[0].inlineSize, size[0].blockSize); // Exact device pixels.
+      } else {
+        fitCanvas();
+      }
+    }).observe(canvas, { box: "device-pixel-content-box" });
+  }
+  if (!window.ResizeObserver) {
+    window.addEventListener("resize", fitCanvas);
   }
 
   // ?demo skips the login and runs the in-browser simulator (no server needed).
