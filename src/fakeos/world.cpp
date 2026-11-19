@@ -175,8 +175,7 @@ void seedWorld(World &world) {
         "You opened it anyway. I knew you would.\n",
         4);
     own(home + "/Downloads/passwords_final_v3.txt",
-        "love\n\n"
-        "(Writing it down was a bad idea. Everyone guesses it.)\n",
+        "password123\n",
         5);
     own(home + "/Downloads/vacation_pics_(1).txt",
         "      <3   <3         <3\n"

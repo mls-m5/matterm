@@ -15,7 +15,7 @@ files and programs in the virtual file system, or changes a program makes to the
 | `hello` | Greets you. |
 | The pills | In plasma, click `( blue )` or `( red )`, or press `b` or `r`. Blue ends the story with a short line. Red opens the rabbit hole: the Matrix sequence (see below). |
 | The shy game | `ls -a /usr/games` shows `.crumble` (hinted by `~/.plan`): a word in big letters cracks and falls into a pile. `crumble` takes other words (`/usr/games/.crumble HI`), space plays it again. |
-| Secret-looking files | `~/Downloads` (`ls -a` for `.blush`) holds a love limerick, a "private" poem that ends "You opened it anyway. I knew you would.", `passwords_final_v3.txt` (just "love"), ASCII hearts and a sunset, and a rom-com poster for two processes sharing a pipe. All sweet and harmless. |
+| Secret-looking files | `~/Downloads` (`ls -a` for `.blush`) holds a love limerick, a "private" poem that ends "You opened it anyway. I knew you would.", `passwords_final_v3.txt` (just "password123"), ASCII hearts and a sunset, and a rom-com poster for two processes sharing a pipe. All sweet and harmless. |
 | The romantic history | `~/.bash_history_romantic` (`ls -a ~`) shows `sudo make love` and its answer; typing `make love` (or with `sudo`) answers the same. `/var/log/feelings.log` and `/etc/motd.love` go with it. |
 | The last poem | The history and the vacation pictures point to `~/.local/share/Trash/files/last_poem.txt`. |
 | Editors | `vim`, `vi`, `nano`, `emacs`: "There is no editor here". |
