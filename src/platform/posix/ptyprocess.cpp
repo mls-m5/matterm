@@ -182,7 +182,8 @@ struct PtyProcess::Impl {
         size.ws_col = static_cast<unsigned short>(columns);
         size.ws_row = static_cast<unsigned short>(rows);
         const long maxOpen = ::sysconf(_SC_OPEN_MAX);
-        if (maxOpen < 0) fail("sysconf open maximum");
+        if (maxOpen < 0)
+            fail("sysconf open maximum");
         child = ::forkpty(&master.value, nullptr, nullptr, &size);
         if (child < 0) {
             fail("forkpty");
@@ -193,13 +194,24 @@ struct PtyProcess::Impl {
             // into the shell. Preserve only stdio and the CLOEXEC error pipe.
             bool rangesClosed = false;
 #ifdef SYS_close_range
-            const auto lower = errorWrite.value <= 3 ? 0 : ::syscall(SYS_close_range, 3u, static_cast<unsigned>(errorWrite.value - 1), 0u);
-            const auto upper = ::syscall(SYS_close_range, static_cast<unsigned>(errorWrite.value + 1), UINT_MAX, 0u);
+            const auto lower =
+                errorWrite.value <= 3
+                    ? 0
+                    : ::syscall(SYS_close_range,
+                                3u,
+                                static_cast<unsigned>(errorWrite.value - 1),
+                                0u);
+            const auto upper =
+                ::syscall(SYS_close_range,
+                          static_cast<unsigned>(errorWrite.value + 1),
+                          UINT_MAX,
+                          0u);
             rangesClosed = lower == 0 && upper == 0;
 #endif
             if (!rangesClosed) {
                 for (long fd = 3; fd < maxOpen; ++fd) {
-                    if (fd != errorWrite.value) ::close(static_cast<int>(fd));
+                    if (fd != errorWrite.value)
+                        ::close(static_cast<int>(fd));
                 }
             }
             // All allocation/environment/PATH preparation happened before fork.
@@ -336,9 +348,12 @@ void PtyProcess::resize(int columns,
     }
 }
 std::optional<PtyProcess::ExitStatus> PtyProcess::peekExit() {
-    if (impl_->status) return impl_->status;
+    if (impl_->status)
+        return impl_->status;
     siginfo_t info{};
-    if (::waitid(P_PID, impl_->child, &info, WEXITED | WNOHANG | WNOWAIT) == 0 && info.si_pid == impl_->child) {
+    if (::waitid(P_PID, impl_->child, &info, WEXITED | WNOHANG | WNOWAIT) ==
+            0 &&
+        info.si_pid == impl_->child) {
         return ExitStatus{info.si_code == CLD_EXITED ? info.si_status : -1,
                           info.si_code == CLD_EXITED ? 0 : info.si_status};
     }

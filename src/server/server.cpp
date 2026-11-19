@@ -45,8 +45,6 @@ public:
               [this](std::string bytes) { send(std::move(bytes)); },
               [this](int code) { close(code); })
         , session_({}, host_) {
-        ++shared_->connections;
-        ++shared_->unauthenticated;
         const auto address = beast::get_lowest_layer(socket_)
                                  .socket()
                                  .remote_endpoint()
@@ -55,6 +53,9 @@ public:
         loopback_ = address.is_loopback();
         parser_.header_limit(8192);
         parser_.body_limit(512);
+        // Count last: a throwing constructor never runs the destructor.
+        ++shared_->connections;
+        ++shared_->unauthenticated;
     }
     ~Connection() {
         --shared_->connections;
@@ -292,12 +293,13 @@ private:
         session_.onTransportClosed(timeNow());
         // Keep ownership until the grace period ends, then the host destructor
         // closes the PTY and reaps even a HUP-ignoring child.
-        cleanupAt_ = Clock::now() + shared_->config.process.terminationGrace;
+        cleanupAt_ = Clock::now() + shared_->config.process.terminationGrace +
+                     std::chrono::seconds(1);
         beast::error_code ignored;
         beast::get_lowest_layer(socket_).socket().close(ignored);
     }
     void schedule() {
-        if (dead_ && Clock::now() >= cleanupAt_)
+        if (dead_ && (host_.finished() || Clock::now() >= cleanupAt_))
             return;
         auto delay = protocol::Time(10);
         if (!dead_) {

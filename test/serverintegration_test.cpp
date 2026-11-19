@@ -234,4 +234,69 @@ TEST_CASE("Disconnect kills and reaps a HUP-ignoring shell") {
     client.socket.next_layer().socket().close(ignored);
     EXPECT(gone(pid));
 }
+TEST_CASE("A leftover background process dies with the session leader") {
+    Fixture fixture({"/bin/sh",
+                     "-c",
+                     "trap '' HUP; printf 'CHILD:%s\\n' \"$$\"; "
+                     "sleep 300 </dev/null >/dev/null 2>&1 & "
+                     "printf 'BG:%s\\n' \"$!\"; exit 3"});
+    Client client;
+    client.connect(fixture, fixture.login());
+    client.send(protocol::Hello{1, 80, 24, 0, "", 0});
+    EXPECT(std::holds_alternative<protocol::Welcome>(client.read()));
+    std::string output;
+    int exitCode = -999;
+    for (unsigned i = 0; i < 100 && exitCode == -999; ++i) {
+        auto message = client.read();
+        if (auto *bytes = std::get_if<protocol::Output>(&message)) {
+            output += bytes->data;
+            client.send(protocol::Ack{bytes->offset + bytes->data.size()});
+        }
+        if (auto *exit = std::get_if<protocol::Exit>(&message))
+            exitCode = exit->code;
+    }
+    EXPECT_EQ(exitCode, 3);
+    const auto at = output.find("BG:");
+    EXPECT(at != std::string::npos);
+    const int background =
+        at == std::string::npos ? -1 : std::stoi(output.substr(at + 3));
+    EXPECT(gone(background));
+}
+TEST_CASE("Close with a full unacknowledged window still ends and cleans up") {
+    Fixture fixture(
+        {"/bin/sh", "-c", "printf 'CHILD:%s\\n' \"$$\"; exec yes flood"});
+    Client client;
+    client.connect(fixture, fixture.login());
+    client.send(protocol::Hello{1, 80, 24, 0, "", 0});
+    EXPECT(std::holds_alternative<protocol::Welcome>(client.read()));
+    // Read without acknowledging until the window (256 KiB) is exhausted.
+    std::string output;
+    std::size_t received = 0;
+    while (received < 262144) {
+        auto message = client.read();
+        if (auto *bytes = std::get_if<protocol::Output>(&message)) {
+            output += bytes->data;
+            received += bytes->data.size();
+        }
+    }
+    const int pid = childPid(output);
+    EXPECT(pid > 0);
+    client.send(protocol::Close{});
+    bool sawExit = false;
+    beast::error_code ec;
+    for (unsigned i = 0; i < 200 && !ec; ++i) {
+        beast::flat_buffer buffer;
+        client.socket.read(buffer, ec);
+        if (!ec) {
+            auto decoded =
+                protocol::decodeServer(beast::buffers_to_string(buffer.data()));
+            if (decoded &&
+                std::holds_alternative<protocol::Exit>(*decoded.message))
+                sawExit = true;
+        }
+    }
+    EXPECT(ec == ws::error::closed);
+    EXPECT(!sawExit);
+    EXPECT(gone(pid));
+}
 TEST_SUIT_END
