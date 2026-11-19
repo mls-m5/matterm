@@ -201,7 +201,7 @@ TEST_CASE("neofetch draws a fat old TV next to the system information") {
 TEST_CASE("neofetch in a pipe has no colors and is a clean block") {
     Pc pc;
     pc.run("neofetch | wc -l");
-    EXPECT(pc.shows("     14") || pc.shows("     16"));
+    EXPECT(pc.shows("     15")); // The picture, signed, is 15 rows.
     pc.run("neofetch | grep -c ' '");
     pc.run("clear");
     pc.run("neofetch | head -n 5");
