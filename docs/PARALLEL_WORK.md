@@ -63,8 +63,9 @@ Agents work in separate worktrees with non-overlapping owned paths. Finished and
 integrated: server skeleton, hardening, configuration, ScriptedLink, fast-json
 fixes, resize duplication, zero-width glyph.
 
-- `docs/tasks/fuzz-tests.md`: fuzz and property tests. Worktree `.tmp/agent2`,
-  branch `agent2-fuzz`.
+- `docs/tasks/security-review.md`: security review of the server and browser
+  client, with tests and fixes. Worktree `.tmp/agent2`, branch `agent2-security`.
+  (The fuzz task is integrated.)
 - `docs/tasks/url-open.md`: Ctrl+click opens links. Worktree `.tmp/agent3`,
   branch `agent3-url`. (The selection task is integrated.)
 
