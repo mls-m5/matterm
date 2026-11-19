@@ -1,12 +1,13 @@
 // Browser front end: the terminal model, VT parser and SDL renderer on a
 // canvas, connected to matterm-server through ClientSession (WebSocket). With
-// no server URL it runs an interactive terminal simulator (ScriptedLink).
+// no server URL it runs the pretend system (src/fakeos) through ScriptedLink.
 #include "clientsession.h"
 #include "cursorglide.h"
 #include "framesignature.h"
 #include "inputencoder.h"
 #include "palette.h"
 #include "scriptedlink.h"
+#include "scriptedprogram.h"
 #include "sdlbackend.h"
 #include "sdlinput.h"
 #include "terminalmodel.h"
@@ -38,7 +39,7 @@ struct App {
     std::unique_ptr<VtParser> parser;
     std::unique_ptr<WebSocketChannel> channel;
     std::unique_ptr<ClientSession> session;
-    std::unique_ptr<ScriptedLink> demo; // Simulator when there is no server.
+    std::unique_ptr<ScriptedLink> demo; // The pretend system, no server.
     TerminalLink *link = nullptr;       // session or demo.
     const Palette defaultPalette;
     Palette palette;
@@ -870,14 +871,29 @@ int main() {
         }
     }
     if (!app.link) {
-        // No server: an interactive terminal simulator (docs/SIMULATOR.md).
+        // No server: the pretend system (docs/FAKEOS.md). ?nointro skips the
+        // intro animation.
         ScriptedLink::Config config;
         config.clock = [] {
             return protocol::Time(std::chrono::milliseconds(SDL_GetTicks64()));
         };
         config.columns = int(app.model->columns());
         config.rows = int(app.model->rows());
-        app.demo = ScriptedLink::simulator(config);
+        fakeos::Config pretend;
+        pretend.columns = config.columns;
+        pretend.rows = config.rows;
+        pretend.intro =
+            EM_ASM_INT({
+                return new URLSearchParams(location.search).has("nointro") ? 0
+                                                                           : 1;
+            }) != 0;
+        pretend.seed = std::uint64_t(EM_ASM_DOUBLE({ return Date.now(); }));
+        pretend.unixTime = std::int64_t(
+            EM_ASM_DOUBLE({ return Math.floor(Date.now() / 1000); }));
+        app.demo = std::make_unique<ScriptedLink>(
+            config,
+            Script(),
+            std::make_unique<fakeos::ScriptedProgram>(pretend));
         app.link = app.demo.get();
         TerminalLink::Events events;
         events.output = [](std::string_view bytes) {

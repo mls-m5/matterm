@@ -25,6 +25,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # both compile and link time.
 set(sdl_flags -sUSE_SDL=2 -sUSE_SDL_TTF=2)
 
+file(GLOB fakeos_sources CONFIGURE_DEPENDS ${root}/src/fakeos/*.cpp)
 add_library(matterm-web-core STATIC
     ${root}/src/core/palette.cpp
     ${root}/src/core/cellbuffer.cpp
@@ -39,10 +40,12 @@ add_library(matterm-web-core STATIC
     ${root}/src/protocol/message.cpp
     ${root}/src/transport/clientsession.cpp
     ${root}/src/transport/scriptedlink.cpp
+    ${fakeos_sources}
 )
 target_include_directories(matterm-web-core PUBLIC
     ${root}/src ${root}/src/core ${root}/src/render ${root}/src/terminal
     ${root}/src/terminal/vt ${root}/src/protocol ${root}/src/transport
+    ${root}/src/fakeos
     ${root}/src/frontend)
 target_compile_options(matterm-web-core PUBLIC ${sdl_flags})
 target_link_options(matterm-web-core PUBLIC ${sdl_flags})

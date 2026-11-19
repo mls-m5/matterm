@@ -75,6 +75,16 @@ public:
         virtual Reaction start() = 0;
         virtual Reaction input(std::string_view bytes) = 0;
         virtual void resize(int columns, int rows) = 0;
+        // Called by ScriptedLink::tick() after start() and input(), for
+        // animations. The defaults do nothing and want no wake-up.
+        virtual Reaction tick(protocol::Time /*now*/) {
+            return {};
+        }
+        // When tick() next has something to do; empty when only input can
+        // wake the program.
+        virtual std::optional<protocol::Time> nextDeadline() const {
+            return std::nullopt;
+        }
     };
     enum class State { Running, Exited, Closed };
 
@@ -105,7 +115,7 @@ public:
 
 private:
     bool runStep(protocol::Time now);
-    void runProgram();
+    void runProgram(protocol::Time now);
     void apply(Reaction reaction);
     void emit(std::string_view bytes);
     void finish(int code);
