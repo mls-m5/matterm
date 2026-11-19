@@ -72,15 +72,33 @@
     };
     // Tapping the terminal (not a drag or scroll) opens the keyboard. This
     // needs a user gesture, so it happens in the event handler itself.
+    // Only a short single-finger tap counts: a drag scrolls, a long press
+    // selects and a pinch zooms (main.cpp), none of which may toggle the keyboard.
     let downAt = null;
+    const touching = new Set();
     canvas.addEventListener("pointerdown", function (event) {
-      downAt = event.pointerType === "touch" ? [event.clientX, event.clientY] : null;
+      if (event.pointerType !== "touch") {
+        return;
+      }
+      touching.add(event.pointerId);
+      downAt = touching.size === 1
+        ? [event.clientX, event.clientY, event.timeStamp] : null;
     });
     canvas.addEventListener("pointerup", function (event) {
-      if (downAt && Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) < 10) {
+      touching.delete(event.pointerId);
+      if (downAt && event.timeStamp - downAt[2] < 400 &&
+          Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) < 10) {
         field.focus();
       }
       downAt = null;
+    });
+    canvas.addEventListener("pointercancel", function (event) {
+      touching.delete(event.pointerId);
+      downAt = null;
+    });
+    // A long press must not open the browser's context menu.
+    canvas.addEventListener("contextmenu", function (event) {
+      event.preventDefault();
     });
     // Printable text and, on keyboards that report no key codes, deletion.
     let namedKeyDown = false;
