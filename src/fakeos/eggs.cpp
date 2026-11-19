@@ -53,6 +53,10 @@ Builder egg(const char *id, T trigger, const char *match) {
 
 const std::vector<Egg> &eggs() {
     static const std::vector<Egg> table = {
+        egg("make-love-sudo", T::Line, "sudo make love")
+            .print("make: don't know how to make love. Stop.\n"),
+        egg("make-love", T::Line, "make love")
+            .print("make: don't know how to make love. Stop.\n"),
         egg("sandwich-sudo", T::Line, "sudo make me a sandwich")
             .print("Okay.\n"),
         egg("sandwich", T::Line, "make me a sandwich")

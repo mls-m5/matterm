@@ -144,6 +144,92 @@ void seedWorld(World &world) {
            "root",
            0755,
            base - 30 * day);
+    // Small, sweet and harmless things to find in the home directory.
+    const std::string home = "/home/" + user;
+    fs.putDirectory(home + "/Downloads", user, 0755, base - 3 * day);
+    fs.putDirectory(
+        home + "/.local/share/Trash/files", user, 0755, base - 6 * day);
+    auto own = [&](const std::string &path,
+                   const std::string &text,
+                   std::int64_t age) {
+        fs.put(path, text, user, 0644, base - age * day);
+    };
+    own(home + "/Downloads/definitely_not_homework.txt",
+        "A lonely young cursor named Dee\n"
+        "Blinked softly for someone to see.\n"
+        "Then you came along,\n"
+        "And she hummed a small song,\n"
+        "And stopped blinking: you're stuck with me.\n",
+        3);
+    own(home + "/Downloads/private_DO_NOT_OPEN.txt",
+        "Dear whoever,\n\n"
+        "My favorite directory is the one you are in.\n"
+        "I keep a file of small things that remind me of you.\n"
+        "It is empty, because everything does.\n\n"
+        "You opened it anyway. I knew you would.\n",
+        4);
+    own(home + "/Downloads/passwords_final_v3.txt",
+        "love\n\n"
+        "(Writing it down was a bad idea. Everyone guesses it.)\n",
+        5);
+    own(home + "/Downloads/vacation_pics_(1).txt",
+        "      <3   <3         <3\n"
+        "    <3  <3 <3     <3  <3\n"
+        "      <3   <3 <3 <3   <3\n"
+        "        <3   <3 <3  <3\n"
+        "           <3  <3  <3\n"
+        "              <3 <3\n"
+        "                <3\n\n"
+        "     \\ | /\n"
+        "   -- (   ) --     sunset, 19:42\n"
+        "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n"
+        "P.S. The best picture is in the Trash: ~/.local/share/Trash/files\n",
+        6);
+    own(home + "/Downloads/totally_legit_movie.mkv.txt",
+        "  +------------------------------------------+\n"
+        "  |  A  R O M A N T I C   C O M E D Y        |\n"
+        "  |                                          |\n"
+        "  |     PID 1  ----pipe---->  PID 2          |\n"
+        "  |                                          |\n"
+        "  |  Two processes. One pipe. Zero buffering |\n"
+        "  |  about how they feel.                    |\n"
+        "  |                                          |\n"
+        "  |  Rated PG: contains gentle piping.       |\n"
+        "  +------------------------------------------+\n",
+        7);
+    own(home + "/Downloads/.blush", "oh.\n", 3);
+    own(home + "/.bash_history_romantic",
+        "cd ~/heart\n"
+        "ls -la\n"
+        "cat feelings.log\n"
+        "sudo make love\n"
+        "# make: don't know how to make love. Stop.\n"
+        "echo \"hi\" > crush\n"
+        "ping crush\n"
+        "# no route to heart\n"
+        "kill -9 doubt\n"
+        "cat ~/.local/share/Trash/files/last_poem.txt\n",
+        2);
+    own(home + "/.local/share/Trash/files/last_poem.txt",
+        "I threw this one away, then took it back.\n"
+        "It said: I do not know the syntax for this,\n"
+        "but I would read your logs for hours.\n\n"
+        "Exit code 0.\n",
+        6);
+    fs.put("/var/log/feelings.log",
+           "Jan  1 00:00:01 heart WARN: heart rate above threshold\n"
+           "Jan  1 00:00:02 heart INFO: crush detected on port 143\n"
+           "Jan  1 00:00:03 heart WARN: palms sweating, cooling fan at 100%\n"
+           "Jan  1 00:00:04 heart INFO: pretending to be calm\n",
+           "root",
+           0644,
+           base);
+    fs.put("/etc/motd.love",
+           "  <3  Today's message: someone out there is thinking of you. "
+           "Probably.\n",
+           "root",
+           0644,
+           base - 30 * day);
     // /proc tells the same story as neofetch, free, df and top.
     fs.put("/proc/cpuinfo",
            std::string("processor\t: 0\nmodel name\t: ") + hardware::kCpuModel +
