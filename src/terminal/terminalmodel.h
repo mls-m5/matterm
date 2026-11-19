@@ -51,6 +51,9 @@ public:
     void lineFeed();
     void eraseLine(EraseMode mode = EraseMode::ToEnd);
     void eraseDisplay(EraseMode mode = EraseMode::ToEnd);
+    // ED3: discard primary saved lines, keeping the live screen, rendition,
+    // modes and cursor. A no-op on the history-free alternate screen.
+    void eraseScrollback();
     void eraseCharacters(int count = 1);
     void insertCharacters(int count = 1);
     void deleteCharacters(int count = 1);
@@ -84,9 +87,10 @@ public:
 
     // Positive dimensions only. No reflow: width clips/pads. Height shrink
     // first drops blank rows below the cursor, then keeps the bottom screen
-    // rows (primary top rows become history); growth adds blanks. Preserves
-    // both buffers; resets margins/origin to full screen. Allocation failure
-    // leaves both unchanged.
+    // rows (primary top rows become history). Growth reveals primary saved
+    // rows first, then adds blanks; alternate growth only adds blanks.
+    // Preserves both buffers; resets margins/origin to full screen. Allocation
+    // failure leaves both unchanged.
     void resize(std::size_t columns, std::size_t rows);
 
     struct TextCell {

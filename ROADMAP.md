@@ -43,10 +43,11 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [ ] Application mouse input: press/release including right-click, wheel, drag/motion, modifier override for local selection, and SGR reporting.
 - [ ] Local right-click Copy/Paste menu and drag auto-scroll (word selection is implemented below).
 - [x] Shared native/browser selection: Shift+click/drag preserves the anchor, Ctrl+Shift+A selects retained history plus screen, double/triple click selects words/logical lines, and dragging extends by whole units across soft wraps. CPU-only regression tests cover boundaries, scrollback, invalidation and the explicit 1 MiB copy limit; browser visual verification remains pending without Emscripten. See `docs/SELECTION.md`.
-- [x] Bug: rows duplicated when the window is resized while a full-screen TUI such as Claude Code is running. Cause: a height shrink always pushed the top rows into the scrollback, even when the rows below the cursor were blank, so the program's redraw after SIGWINCH (cursor up, erase, reprint) printed its frame a second time. `TerminalModel::resize` now drops blank rows below the cursor first (xterm/VTE behavior); regression tests in `test/terminaloperations_test.cpp`. Remaining, not part of this fix: no reflow on width change, growth does not pull scrollback down, and a real recorded session has not been compared.
+- [x] Bug: rows duplicated when the window is resized while a full-screen TUI such as Claude Code is running. Cause: a height shrink always pushed the top rows into the scrollback, even when the rows below the cursor were blank, so the program's redraw after SIGWINCH (cursor up, erase, reprint) printed its frame a second time. `TerminalModel::resize` now drops blank rows below the cursor first (xterm/VTE behavior); regression tests in `test/terminaloperations_test.cpp`. Remaining, not part of this fix: no reflow on width change, and a real recorded session has not been compared. Height growth now reveals saved primary rows (see the resize follow-up below).
 - [x] fast-json (our own library, `lib/fast-json`) bugs found by the server config loader: the tokenizer hanging on negative numbers, truncated files and missing commas being accepted, `1.5` read as `1`. Fixed in the library with regression tests (plus valid arrays throwing `vector::_M_range_check` and non-inline specializations); the loader's workaround is removed. A trailing comma before `]` or `}` stays accepted, by decision.
 - [x] Inconsistent blank cells (fixed: screens start with default-color cells): cells never written have an RGB-black background, while cells cleared through the parser use the default color. `blankRow` in `TerminalModel::resized` accepts both; unify them so themes and palette changes treat blank cells the same.
-- [ ] Resize follow-ups from the duplication fix: growing the window adds blank rows at the bottom, where xterm and VTE pull scrollback down; width changes do not reflow (matterm follows xterm, VTE reflows). If duplicated rows persist under Claude Code after narrowing, take a raw PTY recording during a resize (docs/PTY.md) before changing anything.
+- [ ] Resize follow-ups from the duplication fix: width changes do not reflow (matterm follows xterm, VTE reflows). If duplicated rows persist under Claude Code after narrowing, take a raw PTY recording during a resize (docs/PTY.md) before changing anything. Reflow design/risks: [Scrolling and Reflow](docs/SCROLLING_AND_REFLOW.md).
+  - [x] Height growth pulls saved primary rows down before appending blanks, preserves the cursor/content and anchors a historical viewport; alternate growth remains blank-only. Exact shrink/grow and bounded-history tests cover both screens.
 - [x] Smooth cursor animation (optional, `--smooth-cursor` / `?smooth[=ms]`; `CursorGlide` in src/core): glide the cursor between positions instead of jumping (render-side interpolation only; the model keeps exact cell positions; must be optional and cheap when idle).
 - [ ] Typewriter output animation: optionally reveal newly arrived text one character at a time, only under defined conditions (for example small bursts or an explicit mode, never during bulk output). The delay schedule lives in its own buffer, separate from `TerminalModel`, so the model always holds the true state and the renderer decides what is revealed yet.
 - [x] Ctrl+left click opens detected HTTP(S) links, with wrapped-row CPU detection/security tests, a 2048-byte cap, trimmed prose punctuation and a presentation-only hover underline/title. Native uses `SDL_OpenURL`, browser uses `window.open` with `noopener,noreferrer`; application mouse reporting takes precedence unless Shift is also held. No shell or OSC 8 support. Conservative ASCII URI policy and verification limits: `docs/LINKS.md` (browser/real-opener checks pending without Emscripten).
@@ -96,11 +97,18 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [ ] Reproduce and eliminate the reported blank area above the first row in
   both primary and alternate mode; check initial padding, viewport bounds, and
   fractional clipping separately rather than introducing intentional overscroll.
-- [ ] Empty terminal content must not allow scrolling. Distinguish allocated blank
+  CPU first-row/fractional-coverage probes pass in both modes; the reported gap
+  is not reproduced and still needs a recording/geometry/screenshot (see
+  [Scrolling and Reflow](docs/SCROLLING_AND_REFLOW.md)).
+- [x] Empty terminal content must not allow scrolling. Distinguish allocated blank
   screen rows from retained scrollable history; test fresh, cleared, resized,
   alternate, and post-reset states. Do not discard intentional blank output lines.
-- [ ] Decide explicitly whether alternate-mode wheel input should scroll history,
-  be ignored, or encode application input; currently it sends arrow keys.
+  Scrollbars hide with no history; ED2 keeps saved lines and ED3 explicitly
+  discards them without clearing the live screen.
+- [x] Retain alternate-mode wheel input as application mouse reports when enabled,
+  otherwise Up/Down keys, never primary history. CPU-model scroll calls remain
+  no-ops on alternate; no input-handler change. Policy and limitations:
+  [Scrolling and Reflow](docs/SCROLLING_AND_REFLOW.md).
 - [x] Retain default/indexed/RGB color identity in terminal cells and resolve via caller-owned Palette during rendering.
 - [ ] Define palette ownership, 16/256-color lookup, default foreground/background,
   theme changes affecting existing cells, inverse/faint rendering, and future OSC

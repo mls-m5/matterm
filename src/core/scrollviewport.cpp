@@ -61,6 +61,14 @@ void ScrollViewport::rowsAppended(std::size_t count, std::size_t retainedRows) {
     clamp();
 }
 
+void ScrollViewport::rowsRevealed(std::size_t count,
+                                  std::size_t retainedRows,
+                                  std::size_t visibleRows) {
+    target_ = std::max(0.0, target_ - double(count));
+    displayed_ = std::max(0.0, displayed_ - double(count));
+    setGeometry(retainedRows, visibleRows);
+}
+
 bool ScrollViewport::atTail() const noexcept {
     return target_ == 0 && displayed_ == 0;
 }
@@ -91,7 +99,7 @@ float ScrollViewport::pixelOffset(int cellHeight) const noexcept {
 }
 
 ScrollbarState ScrollViewport::scrollbar() const noexcept {
-    return {true,
+    return {maxOffset() > 0,
             maxOffset() > 0 ? float(firstPosition() / maxOffset()) : 0.0f,
             retained_ > 0
                 ? float(std::min(visible_, retained_)) / float(retained_)

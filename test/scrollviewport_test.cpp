@@ -8,6 +8,53 @@
 
 TEST_SUIT_BEGIN(ScrollViewport)
 
+TEST_CASE("No history means no wheel travel and no scrollbar") {
+    ScrollViewport viewport;
+    EXPECT_FALSE(viewport.scrollbar().visible);
+    for (const auto retained :
+         {std::size_t(0), std::size_t(2), std::size_t(4)}) {
+        viewport.setGeometry(retained, 4);
+        viewport.scrollBy(1000);
+        viewport.oldest();
+        viewport.advance(10);
+        EXPECT_EQ(viewport.maxOffset(), 0.0);
+        EXPECT_EQ(viewport.offset(), 0.0);
+        EXPECT_EQ(viewport.targetOffset(), 0.0);
+        EXPECT_FALSE(viewport.scrollbar().visible);
+    }
+    viewport.setGeometry(8, 4);
+    EXPECT(viewport.scrollbar().visible);
+    viewport.oldest();
+    viewport.advance(10);
+    viewport.setGeometry(4, 4);
+    EXPECT(viewport.atTail());
+    EXPECT_FALSE(viewport.scrollbar().visible);
+}
+
+TEST_CASE(
+    "Fractional viewport geometry never creates a top gap or overscroll") {
+    ScrollViewport viewport;
+    viewport.setGeometry(11, 3);
+    for (double delta :
+         {0.0, 1e-12, 0.125, 0.5, 1.0, 8.0, 1000.0, -1000.0, -0.5}) {
+        viewport.scrollBy(delta);
+        for (double dt : {0.0, 0.001, 0.02, 10.0}) {
+            viewport.advance(dt);
+            const auto pixels = viewport.pixelOffset(17);
+            EXPECT(viewport.offset() >= 0.0);
+            EXPECT(viewport.offset() <= viewport.maxOffset());
+            EXPECT(viewport.firstRow() + viewport.rowCount() <= 11);
+            EXPECT(pixels <= 0.0f);
+            EXPECT(pixels > -17.0f);
+            EXPECT(float(viewport.rowCount() * 17) + pixels >= 3 * 17);
+        }
+    }
+    viewport.oldest();
+    viewport.advance(10);
+    EXPECT_EQ(viewport.firstRow(), std::size_t(0));
+    EXPECT_EQ(viewport.pixelOffset(17), 0.0f);
+}
+
 TEST_CASE("Tail position and scrollbar proportions reflect history geometry") {
     ScrollViewport viewport;
     EXPECT_EQ(viewport.rowCount(), std::size_t(0));
