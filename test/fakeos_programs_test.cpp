@@ -1,0 +1,287 @@
+#include "fakeos_harness.h"
+#include "mls-unit-test/unittest.h"
+#include "scriptedprogram.h"
+
+#include <string>
+
+using namespace fakeos;
+using fakeos_test::Pc;
+
+namespace {
+const std::string kPrompt = "guest@matterm:~$";
+
+bool hasAlternateScreenOn(const std::string &raw) {
+    return raw.find("\x1b[?1049h") != std::string::npos;
+}
+bool hasAlternateScreenOff(const std::string &raw) {
+    return raw.find("\x1b[?1049l") != std::string::npos;
+}
+} // namespace
+
+TEST_SUIT_BEGIN(FakeosPrograms)
+
+TEST_CASE("fire is a file on disk, outside the PATH") {
+    Pc pc;
+    pc.run("fire");
+    EXPECT(pc.shows("matterm: fire: command not found"));
+    pc.run("ls /usr/games");
+    EXPECT(pc.shows("fire"));
+    pc.run("cat /usr/games/fire");
+    EXPECT(pc.shows("#!builtin fire"));
+    EXPECT(!pc.sys.inProgram());
+}
+
+TEST_CASE(
+    "Running fire takes the screen, animates and q returns to the shell") {
+    Pc pc;
+    pc.run("/usr/games/fire");
+    EXPECT(pc.sys.inProgram());
+    EXPECT(hasAlternateScreenOn(pc.raw));
+    EXPECT(pc.model.alternateScreen());
+    EXPECT(pc.sys.nextDeadline().has_value());
+    pc.advance(40);
+    const auto first = pc.screen();
+    pc.advance(400);
+    EXPECT(pc.screen() != first); // It moves.
+    EXPECT(pc.shows("fire   q quit"));
+    pc.type("q");
+    EXPECT(!pc.sys.inProgram());
+    EXPECT(hasAlternateScreenOff(pc.raw));
+    EXPECT(!pc.model.alternateScreen());
+    EXPECT(pc.last() == kPrompt);
+    EXPECT(!pc.sys.nextDeadline());
+    EXPECT(pc.shows("/usr/games/fire")); // The command is still on screen.
+}
+
+TEST_CASE("The fire is deterministic for a seed and differs between seeds") {
+    auto film = [](std::uint64_t seed) {
+        Pc pc(false, 40, 12, seed);
+        pc.run("/usr/games/fire");
+        for (int i = 0; i < 30; ++i) {
+            pc.advance(33);
+        }
+        return pc.raw;
+    };
+    EXPECT(film(7) == film(7));
+    EXPECT(film(7) != film(8));
+}
+
+TEST_CASE("Animation frames are small updates, and idle frames cost nothing") {
+    Pc pc(false, 60, 20);
+    pc.run("/usr/games/fire");
+    pc.advance(40);
+    pc.raw.clear();
+    pc.advance(1); // Not due yet.
+    EXPECT(pc.raw.empty());
+    pc.advance(60);
+    EXPECT(!pc.raw.empty());
+    EXPECT(pc.raw.size() <
+           60u * 20u * 40u); // Far below a full repaint of rich cells.
+}
+
+TEST_CASE("Ctrl-C and Escape also end a program; keys reach it") {
+    Pc pc;
+    pc.run("/usr/games/fire");
+    pc.type("+");
+    pc.type("\x03");
+    EXPECT(!pc.sys.inProgram());
+    pc.run("/usr/games/fire");
+    pc.type("\x1b");
+    EXPECT(!pc.sys.inProgram());
+}
+
+TEST_CASE(
+    "Watching the fire for a while leaves an ember in the home directory") {
+    Pc pc;
+    pc.run("ls -a");
+    EXPECT(!pc.shows(".ember"));
+    pc.run("/usr/games/fire");
+    for (int i = 0; i < 300; ++i) { // About 10 seconds.
+        pc.advance(33);
+    }
+    pc.type("q");
+    EXPECT(pc.shows("Something was left in the ashes."));
+    pc.run("cat .ember");
+    EXPECT(pc.shows("the cave knows a word"));
+    // A quick look leaves nothing, and a second long look does not repeat it.
+    Pc quick;
+    quick.run("/usr/games/fire");
+    quick.advance(500);
+    quick.type("q");
+    quick.run("ls -a");
+    EXPECT(!quick.shows(".ember"));
+    EXPECT(!quick.shows("Something was left"));
+}
+
+TEST_CASE("The easter egg chain: .ember, xyzzy, a new program appears") {
+    Pc pc;
+    pc.run("ls /usr/games");
+    EXPECT(!pc.shows("plasma"));
+    pc.run("xyzzy");
+    EXPECT(pc.shows("A hollow voice says \"Fool.\""));
+    pc.run("clear");
+    pc.run("ls /usr/games");
+    EXPECT(pc.shows("plasma"));
+    pc.run("clear");
+    pc.run("xyzzy");
+    EXPECT(pc.shows("Nothing happens."));
+    EXPECT(pc.sys.world().flags.count("xyzzy") == 1);
+    pc.run("/usr/games/plasma");
+    EXPECT(pc.sys.inProgram());
+    pc.advance(200);
+    EXPECT(pc.shows("gradient"));
+    pc.type(" "); // Next pattern.
+    pc.advance(200);
+    pc.type("q");
+    EXPECT(!pc.sys.inProgram());
+    // Another world has not found it.
+    Pc other;
+    other.run("ls /usr/games");
+    EXPECT(!other.shows("plasma"));
+}
+
+TEST_CASE("Other eggs and sudo") {
+    Pc pc;
+    pc.run("sudo ls");
+    EXPECT(pc.shows(
+        "guest is not in the sudoers file. This incident will be reported."));
+    pc.run("make me a sandwich");
+    EXPECT(pc.shows("What? Make it yourself."));
+    pc.run("sudo make me a sandwich");
+    EXPECT(pc.shows("Okay."));
+    pc.run("hello");
+    EXPECT(pc.shows("The system hums quietly."));
+}
+
+TEST_CASE("reset forgets discoveries") {
+    Pc pc;
+    pc.run("xyzzy");
+    pc.run("reset");
+    pc.run("clear");
+    pc.run("ls /usr/games");
+    EXPECT(!pc.shows("plasma"));
+    pc.run("xyzzy");
+    EXPECT(pc.shows("A hollow voice says"));
+}
+
+TEST_CASE("The intro plays first, then the welcome and the prompt") {
+    Pc pc(true);
+    EXPECT(pc.sys.inProgram());
+    EXPECT(hasAlternateScreenOn(pc.raw));
+    pc.advance(1200);
+    EXPECT(pc.sys.inProgram());
+    EXPECT(pc.shows("#")); // The banner is being drawn.
+    pc.advance(2500);
+    EXPECT(!pc.sys.inProgram());
+    EXPECT(pc.shows("Welcome to matterm 1.0"));
+    EXPECT(pc.last() == kPrompt);
+    EXPECT(!pc.sys.nextDeadline());
+}
+
+TEST_CASE("Any key skips the intro") {
+    Pc pc(true);
+    pc.advance(300);
+    pc.type("x");
+    EXPECT(!pc.sys.inProgram());
+    EXPECT(pc.shows("Welcome to matterm 1.0"));
+    EXPECT(pc.last() == kPrompt);
+    // The key that skipped it was not typed at the prompt.
+    EXPECT(pc.last() == kPrompt);
+    Pc click(true);
+    click.advance(300);
+    click.type("\x1b[<0;5;5M");
+    EXPECT(!click.sys.inProgram());
+}
+
+TEST_CASE("The intro adapts to a small terminal") {
+    Pc pc(true, 30, 8);
+    pc.advance(1500);
+    EXPECT(pc.shows("m a t t e r m"));
+    pc.advance(3000);
+    EXPECT(!pc.sys.inProgram());
+}
+
+TEST_CASE("Resizing during a program redraws it at the new size") {
+    Pc pc(false, 60, 20);
+    pc.run("/usr/games/fire");
+    pc.advance(100);
+    pc.sys.resize(30, 10);
+    pc.model.resize(30, 10);
+    pc.advance(100);
+    pc.advance(100);
+    EXPECT(pc.sys.inProgram());
+    pc.type("q");
+    EXPECT(!pc.sys.inProgram());
+}
+
+TEST_CASE("Without alternate screen support the screen is cleared instead") {
+    Config config;
+    config.intro = false;
+    config.capabilities.alternateScreen = false;
+    System system(config);
+    system.start();
+    system.tick(Time(0));
+    system.input("/usr/games/fire\r");
+    const auto frame = system.tick(Time(10));
+    EXPECT(frame.output.find("\x1b[?1049") == std::string::npos);
+    const auto ended = system.input("q");
+    EXPECT(ended.output.find("\x1b[?1049") == std::string::npos);
+    EXPECT(ended.output.find("\x1b[2J") != std::string::npos);
+}
+
+TEST_CASE("Colors degrade with the terminal's capabilities") {
+    Config config;
+    config.intro = false;
+    config.capabilities.truecolor = false;
+    config.capabilities.colors256 = false;
+    System system(config);
+    system.start();
+    system.tick(Time(0));
+    system.input("/usr/games/fire\r");
+    std::string out;
+    for (int i = 1; i < 10; ++i) {
+        out += system.tick(Time(i * 40)).output;
+    }
+    EXPECT(out.find("38;2;") == std::string::npos);
+    EXPECT(out.find("38;5;") == std::string::npos);
+    EXPECT(out.find("\x1b[0;") != std::string::npos);
+}
+
+TEST_CASE("The ScriptedLink adapter runs the system and wakes the host") {
+    long long now = 0;
+    ScriptedLink::Config config;
+    config.clock = [&] { return protocol::Time(now); };
+    Config fake;
+    fake.columns = 60;
+    fake.rows = 20;
+    ScriptedLink link(
+        config, Script(), std::make_unique<ScriptedProgram>(fake));
+    TerminalModel model(60, 20, 10);
+    VtParser parser(model);
+    link.setEvents(
+        {[&](std::string_view b) { parser.feed(b); }, nullptr, nullptr});
+    link.tick();
+    EXPECT(link.nextDeadline().has_value()); // The intro animates.
+    now = 1500;
+    link.tick();
+    EXPECT(model.alternateScreen());
+    link.sendInput("x"); // Skip.
+    now = 1510;
+    link.tick();
+    EXPECT(!model.alternateScreen());
+    EXPECT(!link.nextDeadline());
+    link.sendInput("echo hi\r");
+    now = 1520;
+    link.tick();
+    bool found = false;
+    for (std::size_t y = 0; y < model.rows(); ++y) {
+        std::string row;
+        for (std::size_t x = 0; x < model.columns(); ++x) {
+            row.push_back(char(model.cell(x, y).codePoint));
+        }
+        found = found || row.rfind("hi", 0) == 0;
+    }
+    EXPECT(found);
+}
+
+TEST_SUIT_END
