@@ -6,8 +6,9 @@ of the future terminal application. `matterm-terminal-demo` separately demonstra
 the CPU-only terminal model, including primary/alternate screens.
 `TerminalMemory` supplies a borrowed row view through `RenderFrame` to
 `SdlBackend`, which draws cell backgrounds and atlas glyphs in separate indexed
-geometry batches. SDL2_ttf rasterizes glyphs on cache misses. This is not a
-terminal yet.
+geometry batches. SDL2_ttf rasterizes glyphs on cache misses. On Linux, the
+separate `matterm` program builds a terminal emulator on these libraries (see
+[Native Terminal](#native-terminal-separate-matterm-program)).
 
 Startup prints a matterm ASCII banner and opens a static welcome screen with
 colored text and foreground/background gradients. Nothing streams automatically.
@@ -66,7 +67,10 @@ The window closes once the child exits and its PTY output is drained. In
 an interactive shell, Ctrl+D at an empty prompt normally exits that shell.
 
 TERM defaults to `xterm-256color` (color prompts, mouse, focus, application keypad,
-OSC 4 palette changes); `--term NAME` overrides it. The native
+OSC 4 palette changes); `--term NAME` overrides it. Programs that enable mouse
+reporting (for example `vim` with `:set mouse=a`) receive clicks, drags, and the
+wheel; hold Shift to select text locally instead. An inactive window shows a
+hollow, non-blinking cursor. The native
 application sets `COLORTERM=truecolor` for its child. If a container does not
 inherit it, pass `--env COLORTERM` to Podman when starting the interactive process.
 Compatibility is still incomplete: do not assume full xterm/Vim support or advertise richer
@@ -88,7 +92,7 @@ keyboard input, resize, process cleanup, and bounded I/O. See [docs/PTY.md](docs
 
 ## Build and Run
 
-Requires CMake 3.23+, a C++17 compiler, SDL2 2.0.18+, SDL2_ttf 2.0.18+, and a
+Requires CMake 3.23+, a C++17 compiler (C++20 for the planned web server), SDL2 2.0.18+, SDL2_ttf 2.0.18+, and a
 TrueType support. JetBrains Mono Regular v2.304 is downloaded and bundled by
 default with its SIL OFL 1.1 license. No manual font lookup is needed.
 
@@ -308,6 +312,11 @@ and deferred terminal-output, Emscripten, remote-browser, and simulated-browser
 client ideas. Source layers are `src/core/`
 (cells/storage), `src/render/` (graphics), and `src/terminal/` with `vt/` for stream
 parsing. Both existing demos remain independent of the future `matterm` app.
+
+A browser-based terminal with a server is being designed: see
+[docs/WEB_TERMINAL.md](docs/WEB_TERMINAL.md) (architecture, security, deployment)
+and [docs/PROTOCOL.md](docs/PROTOCOL.md) (wire format). Nothing of it is implemented yet.
+`lib/fast-json` is a git submodule (`git submodule update --init`) reserved for it.
 
 See [DESIGN.md](DESIGN.md) for ownership, cell layout, scrollback storage, backend
 boundaries, and planned milestones. The current atlas is deliberately SDL-specific;

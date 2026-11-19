@@ -1,5 +1,5 @@
 # Site for the host's existing nginx on the public server. Terminates TLS and
-# forwards to the `edge` container, which compose.server.yaml publishes on
+# forwards to the matterm container, which compose.server.yaml publishes on
 # 127.0.0.1:8081 only. Adjust names and certificate paths.
 
 map $http_upgrade $connection_upgrade {
