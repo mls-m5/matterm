@@ -13,8 +13,12 @@ files and programs in the virtual file system, or changes a program makes to the
 | sudo | `sudo ...` is "not in the sudoers file. This incident will be reported." |
 | Sandwiches | `make me a sandwich` and `sudo make me a sandwich`. |
 | `hello` | Greets you. |
+| The blue pill | In plasma, click `blue` (or press `b`). |
 | rm -rf / | Refused like GNU rm, with a hint about `--no-preserve-root` (which the pretend `rm` does not honor: the world is safe anyway, and `reset` restores it). |
 
-Planned: clicks on drawn text through mouse reporting, more programs and
-animations (milestone 3). `Egg::Trigger` has no click kind yet; programs that turn
-on mouse reporting (the intro already does) receive SGR reports as keys.
+Clicks: `Egg::Trigger::Click` with `match = "program/word"` fires when a left
+click, through mouse reporting, lands on a word that program drew. The program
+ends, the egg's text is shown on the restored screen and its `launch` (if any)
+starts next. The plasma program turns mouse reporting on and offers two pills
+(`( blue )` and `( red )`); `b` and `r` make the same choice from the keyboard.
+Blue ends the story with a short line.

@@ -66,6 +66,7 @@ private:
     void submit();
     void afterCommand();
     void launch(const std::string &name, const std::vector<std::string> &args);
+    void clicked(const Key &key);
     void endProgram();
     std::string lineText() const;
     Reaction take();
@@ -76,6 +77,8 @@ private:
     KeyDecoder decoder_;
     AsciiCanvas canvas_;
     std::unique_ptr<Program> program_;
+    std::string programName_; // The builtin that runs, not the file's name.
+    std::string pendingText_; // Shown after the program ends (click eggs).
     bool programBegun_ = false;
     bool programIsIntro_ = false;
     Time now_{0}, base_{0}, nextFrame_{0};

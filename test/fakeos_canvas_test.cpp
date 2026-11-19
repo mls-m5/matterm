@@ -87,6 +87,18 @@ TEST_CASE("Colors follow the terminal's capabilities") {
     EXPECT_EQ(nearestAnsi16({0, 0, 0}), 0);
 }
 
+TEST_CASE("wordAt returns the text drawn under a cell") {
+    AsciiCanvas canvas(30, 3);
+    canvas.text(2, 1, "( blue )  [red]  plain.", {1, 1, 1});
+    EXPECT(canvas.wordAt(5, 1) == "blue");
+    EXPECT(canvas.wordAt(3, 1) == ""); // The parenthesis is not part of a word.
+    EXPECT(canvas.wordAt(13, 1) == "red");
+    EXPECT(canvas.wordAt(20, 1) == "plain.");
+    EXPECT(canvas.wordAt(0, 1) == "");
+    EXPECT(canvas.wordAt(40, 1) == "");
+    EXPECT(canvas.wordAt(5, -1) == "");
+}
+
 TEST_CASE("UTF-8 helpers round trip") {
     const std::string text = "a\xc3\xa5\xe2\x82\xac\xf0\x9f\x94\xa5";
     const auto decoded = decodeUtf8(text);
