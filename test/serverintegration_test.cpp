@@ -5,6 +5,8 @@
 #include <boost/beast/websocket.hpp>
 #include <cerrno>
 #include <csignal>
+#include <filesystem>
+#include <fstream>
 #include <thread>
 #include <unistd.h>
 
@@ -20,14 +22,16 @@ struct Fixture {
     std::unique_ptr<server::Server> listener;
     std::thread thread;
     unsigned short port;
-    Fixture(std::vector<std::string> arguments = {
-                "/bin/sh", "-c", "printf 'CHILD:%s\\n' \"$$\"; exec /bin/sh"}) {
+    Fixture(std::vector<std::string> arguments =
+                {"/bin/sh", "-c", "printf 'CHILD:%s\\n' \"$$\"; exec /bin/sh"},
+            std::string staticDir = {}) {
         server::ServerConfig config;
         config.port = 0;
         config.allowedOrigin = "http://localhost";
         static const auto hash = server::hashPassword(password);
         config.passwordHash = hash;
         config.process.arguments = std::move(arguments);
+        config.staticDir = std::move(staticDir);
         listener = std::make_unique<server::Server>(io, config);
         port = listener->port();
         listener->start();
@@ -298,5 +302,35 @@ TEST_CASE("Close with a full unacknowledged window still ends and cleans up") {
     EXPECT(ec == ws::error::closed);
     EXPECT(!sawExit);
     EXPECT(gone(pid));
+}
+TEST_CASE("Static client files are served by exact name only") {
+    namespace fs = std::filesystem;
+    const auto dir = fs::temp_directory_path() /
+                     ("matterm-static-" + std::to_string(::getpid()));
+    fs::create_directories(dir);
+    std::ofstream(dir / "index.html") << "<title>client</title>";
+    std::ofstream(dir / "app.js") << "var x;";
+    std::ofstream(dir / ".hidden") << "secret";
+    {
+        Fixture fixture({"/bin/sh"}, dir.string());
+        auto index = fixture.request(http::verb::get, "/");
+        EXPECT(index.result() == http::status::ok);
+        EXPECT_EQ(index.body(), "<title>client</title>");
+        EXPECT(std::string(index["Content-Security-Policy"])
+                   .find("script-src 'self'") != std::string::npos);
+        auto script = fixture.request(http::verb::get, "/app.js?v=1");
+        EXPECT(script.result() == http::status::ok);
+        EXPECT_EQ(std::string(script[http::field::content_type]),
+                  "text/javascript; charset=utf-8");
+        for (const char *target : {"/.hidden",
+                                   "/../index.html",
+                                   "/%2e%2e/index.html",
+                                   "//app.js",
+                                   "/missing"}) {
+            EXPECT(fixture.request(http::verb::get, target).result() ==
+                   http::status::not_found);
+        }
+    }
+    fs::remove_all(dir);
 }
 TEST_SUIT_END
