@@ -52,6 +52,10 @@ node e2e.js http://localhost:8080/ 'the password' out.png
 
 ## Known gaps
 
+The last column looks clipped at the right edge in a 1000 px wide window (the
+`usr` entry of `ls /`); check whether the scrollbar strip overlaps it or the
+column count is one too high.
+
 Mouse reporting, clipboard (paste and copy), focus reporting, and window focus
 state for the hollow cursor are not wired up yet. Keyboard input covers text,
 control keys, navigation and function keys.
