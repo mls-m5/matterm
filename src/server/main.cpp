@@ -171,6 +171,8 @@ int main(int argc, char **argv) {
             std::cout << server::printConfig(settings);
             return 0;
         }
+        const auto origin = settings.server.allowedOrigin;
+        const auto hasClient = !settings.server.staticDir.empty();
         boost::asio::io_context io;
         server::Server listener(io, std::move(settings.server));
         boost::asio::signal_set signals(io, SIGINT, SIGTERM);
@@ -178,6 +180,8 @@ int main(int argc, char **argv) {
             [&io](const boost::system::error_code &, int) { io.stop(); });
         listener.start();
         std::cout << "matterm-server listening on port " << listener.port()
+                  << "\nOpen " << origin << '/'
+                  << (hasClient ? "" : "  (no web client found; see --static-dir)")
                   << std::endl;
         io.run();
     }
