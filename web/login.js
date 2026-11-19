@@ -6,13 +6,16 @@
   const message = document.getElementById("message");
   const canvas = document.getElementById("canvas");
 
-  function start() {
+  function start(demo) {
     form.hidden = true;
     canvas.hidden = false;
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-    window.mattermWs =
-      (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
+    // Demo: no server link, so the page runs the built-in simulator.
+    if (!demo) {
+      window.mattermWs =
+        (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
+    }
     window.Module = { canvas: canvas };
     // Ctrl+Shift+V: the browser's paste event carries the clipboard text.
     document.addEventListener("paste", function (event) {
@@ -30,6 +33,12 @@
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
     });
+  }
+
+  // ?demo skips the login and runs the in-browser simulator (no server needed).
+  if (new URLSearchParams(location.search).has("demo")) {
+    start(true);
+    return;
   }
 
   form.addEventListener("submit", async function (event) {
