@@ -181,3 +181,17 @@ future goals, not implementation in the current parser slice.
 - Linux tty ioctls: https://man7.org/linux/man-pages/man4/tty_ioctl.4.html
 
 These describe much more functionality than matterm currently implements.
+
+## Later (owner's notes)
+
+- [ ] Several terminals in one window (tabs/splits) is wanted. It needs a design
+  first: protocol channels per terminal vs. one connection per terminal, server
+  session ownership, focus and input routing, resize per pane, what closing the
+  last pane means. Plan this before building a settings UI.
+- [ ] A settings UI (font size, palette, smooth cursor, ...) after the multi-terminal
+  work, so settings can be per window or per terminal.
+- [ ] Try running `matterm-server` in Termux on Android (Linux userland with PTYs;
+  needs Boost and libsodium packages). The browser then connects to
+  `http://localhost:8080` on the phone. Untested.
+- [ ] `trusted_proxy`: count login failures per client IP behind nginx (see
+  docs/SECURITY_REVIEW.md); a disabled test exists in `test/serversecurity_test.cpp`.
