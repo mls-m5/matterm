@@ -161,7 +161,15 @@ void SdlBackend::render(const RenderFrame &frame) {
             const float left = float(x) * s.cellWidth;
             const float top =
                 float(y) * s.cellHeight + frame.verticalOffsetPixels;
-            const auto colors = palette.resolve(cell);
+            auto colors = palette.resolve(cell);
+            if (frame.selectionBegin < frame.selectionEnd) {
+                const auto index = y * frame.cells.columns() + x;
+                if (index >= frame.selectionBegin &&
+                    index < frame.selectionEnd) {
+                    colors.foreground = {255, 255, 255};
+                    colors.background = {49, 86, 145};
+                }
+            }
             s.backgrounds.quad(left,
                                top,
                                float(s.cellWidth),

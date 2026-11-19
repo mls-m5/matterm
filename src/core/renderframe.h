@@ -20,4 +20,7 @@ struct RenderFrame {
     bool textBlinkVisible = true;
     // Borrowed during render only. Null selects the backend's dark default.
     const Palette *palette = nullptr;
+    // Half-open row-major interval in cells, relative to the supplied view.
+    std::size_t selectionBegin = 0;
+    std::size_t selectionEnd = 0;
 };

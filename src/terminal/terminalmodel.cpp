@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <limits>
 #include <stdexcept>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -24,6 +26,23 @@ struct TerminalModel::Impl {
     struct Screen {
         TerminalMemory memory;
         ScrollViewport viewport;
+        std::deque<bool> softWrap;
+        std::size_t firstRow = 0;
+
+        void append(FStringView row, FChar fill, bool wraps = false) {
+            softWrap.push_back(wraps);
+            try {
+                memory.append(row, fill);
+            }
+            catch (...) {
+                softWrap.pop_back();
+                throw;
+            }
+            if (softWrap.size() > memory.size()) {
+                softWrap.pop_front();
+                ++firstRow;
+            }
+        }
         CursorState cursor;
         FChar style;
         bool wrapPending = false;
@@ -48,7 +67,7 @@ struct TerminalModel::Impl {
             cursor.visible = true;
             scrollBottom = int(rows) - 1;
             for (std::size_t i = 0; i < rows; ++i) {
-                memory.append(FStringView{}, fill);
+                append(FStringView{}, fill);
             }
             viewport.setGeometry(memory.size(), rows);
         }
@@ -60,6 +79,7 @@ struct TerminalModel::Impl {
     std::unique_ptr<Screen> primary;
     std::unique_ptr<Screen> alternate;
     bool useAlternate = false;
+    std::size_t selectionEpoch = 0;
     std::vector<bool> tabStops;
     static std::vector<bool> defaultTabs(std::size_t width) {
         std::vector<bool> result(width, false);
@@ -99,6 +119,9 @@ struct TerminalModel::Impl {
                  std::size_t y,
                  std::size_t begin,
                  std::size_t end) {
+        if (end == columns) {
+            screen.softWrap[start(screen) + y] = false;
+        }
         for (std::size_t x = begin; x < end; ++x) {
             screen.memory.at(x, start(screen) + y) = blank(screen);
         }
@@ -109,6 +132,8 @@ struct TerminalModel::Impl {
             &screen.memory.at(0, start(screen) + std::size_t(destination));
         const auto row = screen.memory.row(start(screen) + std::size_t(source));
         std::memmove(data, row.data(), columns * sizeof(FChar));
+        screen.softWrap[start(screen) + std::size_t(destination)] =
+            screen.softWrap[start(screen) + std::size_t(source)];
     }
     void shiftRows(
         Screen &screen, int top, int bottom, int count, bool up, bool history) {
@@ -118,11 +143,15 @@ struct TerminalModel::Impl {
         count = std::min(count, bottom - top + 1);
         if (up && history && top == 0 && bottom == int(rows) - 1) {
             for (int i = 0; i < count; ++i) {
-                screen.memory.append(FStringView{}, blank(screen));
+                screen.append(FStringView{}, blank(screen));
             }
             screen.viewport.rowsAppended(std::size_t(count),
                                          screen.memory.size());
             return;
+        }
+        ++selectionEpoch;
+        if (top > 0) {
+            screen.softWrap[start(screen) + std::size_t(top - 1)] = false;
         }
         if (up) {
             for (int y = top; y <= bottom - count; ++y) {
@@ -140,6 +169,9 @@ struct TerminalModel::Impl {
                 fillRow(screen, std::size_t(y), 0, columns);
             }
         }
+        if (bottom < int(rows) - 1) {
+            screen.softWrap[start(screen) + std::size_t(bottom)] = false;
+        }
     }
 
     std::unique_ptr<Screen> resized(const Screen &old,
@@ -149,11 +181,14 @@ struct TerminalModel::Impl {
         auto result =
             std::make_unique<Screen>(width, height, history, blank(old));
         result->memory.clear();
+        result->softWrap.clear();
         for (std::size_t y = 0; y < old.memory.size(); ++y) {
-            result->memory.append(old.memory.row(y), blank(old));
+            result->append(old.memory.row(y),
+                           blank(old),
+                           width == columns && old.softWrap[y]);
         }
         for (std::size_t y = rows; y < height; ++y) {
-            result->memory.append(FStringView{}, blank(old));
+            result->append(FStringView{}, blank(old));
         }
         result->style = old.style;
         result->savedCursor = old.savedCursor;
@@ -313,8 +348,23 @@ void TerminalModel::write(std::u32string_view text) {
             ch = U'\ufffd';
         }
         if (screen.wrapPending) {
+            const auto wrapped = screen.firstRow + impl_->start(screen) +
+                                 std::size_t(screen.cursor.row);
+            const auto epoch = impl_->selectionEpoch;
+            const int previousRow = screen.cursor.row;
             carriageReturn();
             lineFeed();
+            if (epoch != impl_->selectionEpoch) {
+                // A scrolling region moved the old cursor line up one row.
+                if (previousRow > screen.scrollTop) {
+                    screen.softWrap[impl_->start(screen) +
+                                    std::size_t(previousRow - 1)] = true;
+                }
+            }
+            else if (wrapped >= screen.firstRow &&
+                     wrapped + 1 < screen.firstRow + screen.memory.size()) {
+                screen.softWrap[wrapped - screen.firstRow] = true;
+            }
         }
         if (screen.insert) {
             insertCharacters(1);
@@ -530,6 +580,7 @@ void TerminalModel::clearTabStops(bool all) {
 void TerminalModel::reset() {
     auto replacement =
         std::make_unique<Impl>(columns(), rows(), impl_->scrollback);
+    replacement->selectionEpoch = impl_->selectionEpoch + 1;
     impl_ = std::move(replacement);
 }
 
@@ -549,6 +600,7 @@ void TerminalModel::setAlternateScreen(bool enabled) {
         impl_->alternate = std::move(screen);
     }
     impl_->useAlternate = enabled;
+    ++impl_->selectionEpoch;
 }
 void TerminalModel::resize(std::size_t columns, std::size_t rows) {
     validateSize(columns, rows, impl_->scrollback);
@@ -567,7 +619,64 @@ void TerminalModel::resize(std::size_t columns, std::size_t rows) {
     impl_->tabStops.swap(tabs);
     impl_->columns = columns;
     impl_->rows = rows;
+    ++impl_->selectionEpoch;
 }
+
+std::size_t TerminalModel::firstRetainedRow() const noexcept {
+    return impl_->active().firstRow;
+}
+std::size_t TerminalModel::selectionEpoch() const noexcept {
+    return impl_->selectionEpoch;
+}
+std::optional<std::string> TerminalModel::copyText(
+    TextCell first, TextCell last, std::size_t byteLimit) const {
+    if (std::tie(last.row, last.column) < std::tie(first.row, first.column)) {
+        std::swap(first, last);
+    }
+    const auto &screen = impl_->active();
+    if (first.row < screen.firstRow ||
+        last.row - screen.firstRow >= screen.memory.size() ||
+        first.column >= columns() || last.column >= columns()) {
+        return std::nullopt;
+    }
+    std::string text;
+    for (std::size_t y = first.row - screen.firstRow;
+         y <= last.row - screen.firstRow;
+         ++y) {
+        const auto line = screen.memory.row(y);
+        const bool final = y == last.row - screen.firstRow;
+        const auto begin = y == first.row - screen.firstRow ? first.column : 0;
+        auto end = final ? last.column + 1 : columns();
+        if (!final && !screen.softWrap[y]) {
+            while (end > begin && line.data()[end - 1].codePoint == U' ') {
+                --end;
+            }
+        }
+        for (auto x = begin; x < end; ++x) {
+            char32_t cp = line.data()[x].codePoint;
+            const unsigned size = cp < 0x80      ? 1
+                                  : cp < 0x800   ? 2
+                                  : cp < 0x10000 ? 3
+                                                 : 4;
+            if (size > byteLimit - text.size()) {
+                return std::nullopt;
+            }
+            constexpr unsigned prefixes[]{0, 0, 0xc0, 0xe0, 0xf0};
+            text.push_back(char(prefixes[size] | (cp >> (6 * (size - 1)))));
+            for (unsigned shift = size - 1; shift > 0; --shift) {
+                text.push_back(char(0x80 | ((cp >> (6 * (shift - 1))) & 0x3f)));
+            }
+        }
+        if (!final && !screen.softWrap[y]) {
+            if (text.size() == byteLimit) {
+                return std::nullopt;
+            }
+            text.push_back('\n');
+        }
+    }
+    return text;
+}
+
 void TerminalModel::scrollBy(double rows) {
     impl_->active().viewport.scrollBy(rows);
 }

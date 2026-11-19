@@ -58,7 +58,10 @@ In native terminal mode, Escape/function keys go to the program. Ctrl+C and Ctrl
 are tty input, not GUI shortcuts. Close the window or press Ctrl+Shift+Q to quit.
 Shift+Page Up/Down and Ctrl+Shift+Home/End navigate scrollback; ordinary navigation
 keys go to the program. Ctrl+Shift+V pastes with control filtering and negotiated
-bracketed paste. Selection/copy is not implemented; Ctrl+Shift+C is reserved.
+bracketed paste. Drag with the left mouse button to select text (including
+scrollback), then press Ctrl+Shift+C to copy it. Copy joins soft-wrapped rows
+and retains explicit line breaks. Resize, screen switches, and eviction of a
+selected row clear the selection.
 After child exit the last frame remains visible with exit status in the title.
 
 TERM defaults conservatively to `vt100`; `--term NAME` overrides it. Compatibility
@@ -85,7 +88,8 @@ TrueType support. JetBrains Mono Regular v2.304 is downloaded and bundled by
 default with its SIL OFL 1.1 license. No manual font lookup is needed.
 
 On Debian/Ubuntu, install `libsdl2-dev`, `libsdl2-ttf-dev`, and optionally
-`fonts-dejavu-core` if you prefer an alternative system font.
+`libfontconfig-dev` and `fonts-dejavu-core` for system glyph fallback (including
+Braille). See [docs/FONTS.md](docs/FONTS.md).
 
 ```sh
 git submodule update --init

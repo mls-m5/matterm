@@ -38,10 +38,16 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [x] Bold/italic atlas variants, underline/strike/faint/blink, configurable tab stops, and cursor shape/blink controls.
 - [ ] Remaining attributes and broader conformance testing.
 - [ ] Distinct DEC private mode semantics (47/1047/1048/1049), beyond the initial subset.
-- [ ] Application keypad/mouse modes (application cursor and bracketed paste state/input encoding are implemented).
+- [ ] Application keypad modes (application cursor and bracketed paste are implemented).
+- [x] Local mouse drag selection and UTF-8 clipboard copy across scrollback, joining soft wraps.
+- [ ] Application mouse input: press/release including right-click, wheel, drag/motion, modifier override for local selection, and SGR reporting.
+- [ ] Local right-click Copy/Paste menu, word selection, and drag auto-scroll.
+- [ ] Evaluate optional client-side window decorations; keep native fallback.
+- [ ] Reproduce prompt and Pi panel color reports; see [Interaction and Compatibility](docs/INTERACTION_AND_COMPATIBILITY.md).
 - [ ] Golden transcripts from real programs, fuzz/property tests, and compatibility fixtures.
-- [x] Draw Braille patterns in the atlas when the selected font lacks them.
-- [ ] Wide cells, combining clusters, shaping, and general font fallback.
+- [x] Use optional Fontconfig system font fallback on Linux for missing glyphs, including Braille.
+- [ ] Verify the Fontconfig-enabled build and Braille fallback with installed system fonts.
+- [ ] Wide cells, combining clusters, shaping, and system font fallback on other platforms.
 
 ## 4. POSIX PTY Adapter (Implemented on Linux)
 

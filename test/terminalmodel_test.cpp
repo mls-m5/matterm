@@ -243,4 +243,35 @@ TEST_CASE("Changing cursor visibility does not cancel pending wrap") {
     EXPECT_FALSE(model.cursor().visible);
 }
 
+TEST_CASE(
+    "Selection copies UTF-8 across scrollback and joins only soft wraps") {
+    TerminalModel model(4, 2, 2);
+    model.write(U"abcd\u2801\U0001f642\r\nnext");
+    const auto first = model.firstRetainedRow();
+    const auto selected = model.copyText({first + 2, 2}, {first, 1}, 32);
+    EXPECT(selected.has_value());
+    if (selected) {
+        EXPECT_EQ(*selected,
+                  std::string("bcd\xe2\xa0\x81\xf0\x9f\x99\x82\nnex"));
+    }
+    EXPECT(!model.copyText({first, 1}, {first + 2, 2}, 7));
+    const auto epoch = model.selectionEpoch();
+    model.write(U"\r\na\r\nb");
+    EXPECT(model.firstRetainedRow() > first);
+    EXPECT_EQ(model.selectionEpoch(), epoch);
+    EXPECT(!model.copyText({first, 1}, {first + 2, 2}, 32));
+    model.setAlternateScreen(true);
+    EXPECT(model.selectionEpoch() != epoch);
+}
+
+TEST_CASE("A full line followed by an explicit newline is not a soft wrap") {
+    TerminalModel model(4, 2);
+    model.write(U"abcd\r\nef");
+    const auto selected = model.copyText({0, 0}, {1, 1}, 7);
+    EXPECT(selected.has_value());
+    if (selected) {
+        EXPECT_EQ(*selected, std::string("abcd\nef"));
+    }
+}
+
 TEST_SUIT_END
