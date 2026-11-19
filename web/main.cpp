@@ -64,10 +64,12 @@ std::optional<InputEncoder::Key> special(SDL_Keycode key) {
     }
 }
 
-// The `ws` query parameter, e.g. ?ws=ws://127.0.0.1:8080/tty. Empty: demo.
+// The `ws` query parameter (?ws=ws://127.0.0.1:8080/ws) or window.mattermWs
+// (set by login.js). Empty: demo.
 std::string wsUrl() {
     char *value = static_cast<char *>(EM_ASM_PTR({
-        const v = new URLSearchParams(location.search).get("ws") || "";
+        const v = new URLSearchParams(location.search).get("ws") ||
+                  globalThis.mattermWs || "";
         const n = lengthBytesUTF8(v) + 1;
         const p = _malloc(n);
         stringToUTF8(v, p, n);
@@ -203,6 +205,7 @@ int main() {
         "\x1b[48;2;40;80;160m  truecolor background  \x1b[0m\r\n"
         "\x1b(0lqqqqqqqqqqqqqqqk\r\nx\x1b(B Line graphics \x1b(0x\r\n"
         "mqqqqqqqqqqqqqqqj\x1b(B\r\n\r\n$ ");
+    SDL_StartTextInput();
     app.last = SDL_GetTicks64();
     emscripten_set_main_loop_arg(frame, &app, 0, 1);
     return 0;

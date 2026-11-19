@@ -1,0 +1,10 @@
+html, body { margin: 0; height: 100%; background: #000; color: #ddd;
+  font: 15px system-ui, sans-serif; overflow: hidden; }
+#login { position: absolute; inset: 0; margin: auto; width: 18rem; height: max-content;
+  display: flex; flex-direction: column; gap: .6rem; }
+#login h1 { margin: 0; font-weight: 500; letter-spacing: .1em; }
+#login input, #login button { padding: .5rem; font: inherit; border: 1px solid #555;
+  background: #111; color: #eee; border-radius: 4px; }
+#login button { cursor: pointer; }
+#message { margin: 0; min-height: 1.2em; color: #f88; }
+#canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; outline: none; }

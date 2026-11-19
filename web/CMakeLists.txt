@@ -5,8 +5,7 @@
 #   source ~/emsdk/emsdk_env.sh
 #   emcmake cmake -S web -B build-web -DMATTERM_FONT=/path/JetBrainsMono-Regular.ttf
 #   cmake --build build-web
-#   (serve build-web/ over HTTP and open matterm-web.html; add
-#   ?ws=ws://host:port/path to connect to a matterm-tty server, else a demo)
+#   matterm-server --static-dir build-web/site ...   (see docs/SERVER.md)
 cmake_minimum_required(VERSION 3.23)
 project(matterm-web LANGUAGES CXX)
 
@@ -48,7 +47,21 @@ target_link_options(matterm-web-core PUBLIC ${sdl_flags})
 
 add_executable(matterm-web main.cpp websocketchannel.cpp)
 target_link_libraries(matterm-web PRIVATE matterm-web-core)
-set_target_properties(matterm-web PROPERTIES SUFFIX ".html")
+# <build>/site/ (index.html, index.js/.wasm/.data, login.js, style.css) is what
+# matterm-server --static-dir serves.
+set_target_properties(matterm-web PROPERTIES
+    OUTPUT_NAME "index" SUFFIX ".js"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/site")
+# No Emscripten HTML shell: the page is ours (shell.html becomes index.html)
+# and loads login.js, which starts index.js after login. Plain files only, as
+# the server's CSP forbids inline script and style.
+add_custom_command(TARGET matterm-web POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/login.js ${CMAKE_CURRENT_SOURCE_DIR}/style.css
+        $<TARGET_FILE_DIR:matterm-web>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/shell.html
+        $<TARGET_FILE_DIR:matterm-web>/index.html)
 target_link_options(matterm-web PRIVATE
     -sALLOW_MEMORY_GROWTH=1
     -sEXIT_RUNTIME=0
