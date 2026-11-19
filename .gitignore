@@ -13,3 +13,4 @@ bin/
 *.includes
 .qtc_clangd/
 *.creator.user.*
+.tmp/
