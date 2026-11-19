@@ -63,7 +63,10 @@ Agents work in separate worktrees with non-overlapping owned paths. Finished and
 integrated: server skeleton, hardening, configuration, ScriptedLink, fast-json
 fixes, resize duplication, zero-width glyph.
 
-No tasks are active. Integrated since the last list: security review, URL opening,
+- `docs/tasks/window-frame.md`: framed, narrower terminal window with margins,
+  rounded corners and shadow. Worktree `.tmp/agent3`, branch `agent3-frame`.
+
+Integrated since the previous list: security review, URL opening,
 touch gestures (`docs/tasks/touch-gestures.md`), empty-scroll/grow/ED3 work
 (`docs/tasks/empty-scroll-and-reflow.md`; reflow is only designed, see
 docs/SCROLLING_AND_REFLOW.md).
