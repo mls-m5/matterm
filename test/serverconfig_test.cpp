@@ -178,10 +178,9 @@ TEST_CASE("Members starting with an underscore are ignored at any depth") {
     EXPECT_EQ(settings.server.port, 9000);
     EXPECT_EQ(settings.server.rateLimit.maxFailures, 7u);
     EXPECT_EQ(settings.server.process.arguments[0], "/bin/true");
-    // A comment must still be well-formed JSON, and numbers are integers
-    // everywhere, comments included.
-    EXPECT(contains(errorOf(R"({"_a": [1,]})"), "syntax error"));
-    EXPECT(contains(errorOf(R"({"_a": 1.5})"), "only integers"));
+    // A comment must still be well-formed JSON.
+    EXPECT(contains(errorOf(R"({"_a": [1 2]})"), "syntax error"));
+    EXPECT(contains(errorOf(R"({"_a": [1,)"), "syntax error"));
     // The underscore marks a comment only at the start of the name.
     EXPECT(contains(errorOf(R"({"a_": 1})"), "a_: unknown key"));
 }
@@ -217,15 +216,23 @@ TEST_CASE("Wrong types name their path") {
     EXPECT(
         contains(errorOf(R"({"process": {"environment_allow_list": ["A-B"]}})"),
                  "process.environment_allow_list[0]: must be an environment"));
-    EXPECT(contains(errorOf(R"({"port": 1.5})"), "syntax error"));
+    EXPECT(contains(errorOf(R"({"port": 1.5})"),
+                    "port: must be an integer between 0 and 65535"));
+    EXPECT(contains(errorOf(R"({"port": 1e3})"),
+                    "port: must be an integer between"));
+    EXPECT(contains(errorOf(R"({"rate_limit": {"max_failures": 2.0}})"),
+                    "rate_limit.max_failures: must be an integer"));
 }
 TEST_CASE("Out-of-range values and cross-field rules name their path") {
     EXPECT(contains(errorOf(R"({"port": 70000})"),
                     "port: must be an integer between 0 and 65535"));
+    // Negative numbers parse (fast-json used to hang on them), then fail the
+    // range.
     EXPECT(contains(errorOf(R"({"port": -1})"),
-                    "negative numbers are not accepted"));
-    EXPECT(contains(errorOf(R"({"_a": -5})"),
-                    "negative numbers are not accepted"));
+                    "port: must be an integer between 0 and 65535"));
+    EXPECT(contains(errorOf(R"({"max_connections": -5})"),
+                    "max_connections: must be"));
+    EXPECT(errorOf(R"({"_a": -5})").empty());
     EXPECT(contains(errorOf(R"({"port": 99999999999999999999})"),
                     "port: must be an integer between"));
     EXPECT(contains(errorOf(R"({"max_connections": 0})"),
@@ -262,35 +269,56 @@ TEST_CASE("Duplicate keys are errors at every level") {
                     "port: duplicate key"));
 }
 TEST_CASE("Malformed JSON is refused with a position") {
+    // Syntax errors come from fast-json (line, column and a description).
+    EXPECT(contains(errorOf(""),
+                    "t.json:1:1: syntax error: Unexpected end of input"));
     EXPECT(
-        contains(errorOf(""), "syntax error: the document must be an object"));
-    EXPECT(contains(errorOf("[]"), "the document must be an object"));
-    EXPECT(contains(errorOf("{"), "unexpected end"));
+        contains(errorOf("[]"),
+                 "t.json:1:1: syntax error: the document must be an object"));
+    EXPECT(
+        contains(errorOf("\n  5"),
+                 "t.json:2:3: syntax error: the document must be an object"));
+    EXPECT(contains(errorOf("{"), "Unexpected end of input"));
     EXPECT(contains(errorOf("{\"port\": 1"),
-                    "t.json:1:11: syntax error: expected ',' or '}'"));
-    EXPECT(contains(errorOf("{\"port\": 1,}"), "expected a key"));
-    EXPECT(contains(errorOf("{\"port\": 1} x"), "unexpected data after"));
+                    "t.json:1:11: syntax error: Unexpected end of input"));
+    EXPECT(contains(errorOf("{\"port\": 1,"), "Unexpected end of input"));
+    EXPECT(contains(errorOf("{\"a\": [1, 2}"), "Unexpected '}'"));
+    EXPECT(contains(
+        errorOf("{\"port\": 1} {}"),
+        "t.json:1:13: syntax error: Unexpected data after the document"));
+    EXPECT(contains(errorOf("{\"port\": 1} x"),
+                    "t.json:1:13: syntax error: Unexpected value x"));
     EXPECT(contains(errorOf("{\"port\": 1}\n{}"),
-                    "t.json:2:1: syntax error: unexpected data"));
-    EXPECT(contains(errorOf("{\"port\" 1}"), "expected ':'"));
-    EXPECT(contains(errorOf("{\"a\": 1 \"b\": 2}"), "expected ',' or '}'"));
-    EXPECT(contains(errorOf("{port: 1}"), "expected a key"));
-    EXPECT(contains(errorOf("{'port': 1}"), "expected a key"));
+                    "t.json:2:1: syntax error: Unexpected data"));
+    EXPECT(contains(errorOf("{\"port\" 1}"), "Expected ':'"));
+    EXPECT(contains(errorOf("{\"a\": 1 \"b\": 2}"),
+                    "t.json:1:9: syntax error: Expected ',' or '}'"));
+    EXPECT(contains(errorOf("{\"a\": [1 2]}"), "Expected ',' or ']'"));
+    EXPECT(contains(errorOf("{\"a\": 1,, \"b\": 2}"), "Unexpected ','"));
+    EXPECT(contains(errorOf("{port: 1}"), "Unexpected value port"));
+    EXPECT(contains(errorOf("{'port': 1}"), "Unexpected character"));
     EXPECT(contains(errorOf("{\"port\": 01}"), "leading zeros"));
-    EXPECT(contains(errorOf("{\"port\": 1e3}"), "only integers"));
-    EXPECT(contains(errorOf("{\"port\": +1}"), "unexpected character"));
-    EXPECT(contains(errorOf("{\"port\": tru}"), "unexpected character"));
-    EXPECT(contains(errorOf("{\"a\": \"x}"), "unterminated string"));
-    EXPECT(contains(errorOf("{\"a\": \"x\ty\"}"), "control character"));
-    EXPECT(contains(errorOf("{\"a\": \"\\x\"}"), "invalid escape"));
-    EXPECT(
-        contains(errorOf("\xef\xbb\xbf{}"), "the document must be an object"));
+    EXPECT(contains(errorOf("{\"port\": +1}"), "Unexpected character"));
+    EXPECT(contains(errorOf("{\"port\": tru}"), "Unexpected value tru"));
+    EXPECT(contains(errorOf("{\"a\": \"x}"),
+                    "t.json:1:7: syntax error: Unterminated string"));
+    EXPECT(contains(errorOf("\xef\xbb\xbf{}"), "Unexpected character"));
+    EXPECT(contains(errorOf("{\"static_dir\": \"\\x\"}"),
+                    "static_dir: invalid escape"));
+    EXPECT(contains(errorOf("{\"_a\\x\": 1}"),
+                    "invalid escape sequence in the key"));
     EXPECT(contains(errorOf(std::string(70000, ' ') + "{}"), "too large"));
     EXPECT(contains(errorOf(std::string(40, '[') + std::string(40, ']')),
                     "must be an object"));
-    EXPECT(contains(
-        errorOf("{\"_a\":" + std::string(40, '[') + std::string(40, ']') + "}"),
-        "nesting is too deep"));
+    // A comma before the closing bracket is accepted (a decision about
+    // fast-json).
+    EXPECT(errorOf("{\"port\": 1,}").empty());
+    EXPECT(errorOf("{\"process\": {\"arguments\": [\"/bin/sh\",]},}").empty());
+    // Comments may hold any well-formed JSON, numbers and deep nesting
+    // included.
+    EXPECT(errorOf("{\"_a\": [1.5, -2, 3e4, " + std::string(100, '[') +
+                   std::string(100, ']') + "]}")
+               .empty());
     // Whitespace of every JSON kind is fine.
     EXPECT(errorOf(" \t\r\n{ \"port\"\n:\t5 }\n").empty());
 }
