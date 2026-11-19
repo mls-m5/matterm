@@ -134,3 +134,11 @@ end.
 4. **Threading.** `SessionStore` and `RateLimiter` have no locking. Keep them
    on the single `io_context` thread and state that in their headers, or add
    locking.
+
+## Status after takeover
+
+The three P1 blockers from the independent review (full-window Close, group
+cleanup after the leader ends, connection counter leak) are fixed and covered
+by `test/serverintegration_test.cpp`. Still worth a second look: shutdown while
+connections are active, bounded write/close deadlines, and credential-parser
+edge cases. Usage is in [../SERVER.md](../SERVER.md).
