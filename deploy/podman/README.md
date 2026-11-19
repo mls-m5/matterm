@@ -5,7 +5,11 @@ the public server, using the same files. The server does not exist yet
 (docs/WEB_TERMINAL.md, phase 2): the `Containerfile` targets, CMake options and
 the server flags used here (`--listen`, `--allow-plain-http`, `--trusted-proxy`,
 `--allowed-origin`, `--set-password`, `--health-check`) are the planned interface and may change.
-None of this has been built or run; Podman was not available when it was written.
+None of this has been run. The files parse with podman-compose 1.0.3 (Debian 12),
+which needs `-p matterm` (it ignores the `name:` key) and does not support nested
+`${A:-${B}}` defaults, so the host paths are fixed to `~/.config/matterm` and
+`~/.local/state/matterm`. Containers cannot be started inside the agent's
+sandbox, so everything past parsing is untested.
 
 ## Layout
 
@@ -42,9 +46,9 @@ Check that the shell really has no network: `curl https://example.org` must fail
 ```sh
 mkdir -p ~/.config/matterm ~/.local/state/matterm
 export MATTERM_UID=$(id -u) MATTERM_GID=$(id -g)
-podman compose -f deploy/podman/compose.yaml build
-podman compose -f deploy/podman/compose.yaml --profile setup run --rm setup
-podman compose -f deploy/podman/compose.yaml up
+podman compose -p matterm -f deploy/podman/compose.yaml build
+podman compose -p matterm -f deploy/podman/compose.yaml --profile setup run --rm setup
+podman compose -p matterm -f deploy/podman/compose.yaml up
 # open http://127.0.0.1:8080
 ```
 

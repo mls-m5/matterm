@@ -52,9 +52,9 @@ services:
       - /home/matterm:size=64m,mode=0700,noexec,nosuid,nodev
     volumes:
       # Read-only at run time: the shell cannot rewrite its own settings.
-      - ${XDG_CONFIG_HOME:-${HOME}/.config}/matterm:/home/matterm/.config/matterm:ro,Z
+      - ${HOME}/.config/matterm:/home/matterm/.config/matterm:ro,Z
       # Lockout counters and session state must persist and be writable.
-      - ${XDG_STATE_HOME:-${HOME}/.local/state}/matterm:/home/matterm/.local/state/matterm:rw,Z
+      - ${HOME}/.local/state/matterm:/home/matterm/.local/state/matterm:rw,Z
     healthcheck:
       test: ["CMD", "/usr/local/bin/matterm-server", "--health-check"]
       interval: 30s
@@ -80,7 +80,7 @@ services:
       - /tmp:size=8m
       - /home/matterm:size=8m,mode=0700
     volumes:
-      - ${XDG_CONFIG_HOME:-${HOME}/.config}/matterm:/home/matterm/.config/matterm:rw,Z
+      - ${HOME}/.config/matterm:/home/matterm/.config/matterm:rw,Z
 
 networks:
   # No gateway and no outbound traffic: the shell cannot reach the internet.
