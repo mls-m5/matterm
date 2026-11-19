@@ -17,6 +17,7 @@
 
 namespace {
 void greeting(TerminalModel &model) {
+    model.setCursorAppearance(CursorState::Shape::Underline, true);
     model.setColors({120, 220, 170}, {14, 17, 22});
     model.eraseDisplay(TerminalModel::EraseMode::All);
     model.moveCursor(0, 0);

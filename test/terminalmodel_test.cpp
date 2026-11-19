@@ -6,6 +6,15 @@
 
 TEST_SUIT_BEGIN(TerminalModel)
 
+TEST_CASE("Terminal cursor defaults to a filled block, including after reset") {
+    TerminalModel model(3, 2);
+    EXPECT(model.cursor().shape == CursorState::Shape::Block);
+    model.setCursorAppearance(CursorState::Shape::Bar, false);
+    model.reset();
+    EXPECT(model.cursor().shape == CursorState::Shape::Block);
+    EXPECT(model.cursor().blink);
+}
+
 TEST_CASE("Writing uses deferred wrap and explicit CR LF semantics") {
     TerminalModel model(3, 2, 4);
     model.write(U"abc");

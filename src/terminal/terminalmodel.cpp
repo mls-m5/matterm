@@ -65,6 +65,7 @@ struct TerminalModel::Impl {
             : memory(columns, rows + history)
             , style(fill) {
             cursor.visible = true;
+            cursor.shape = CursorState::Shape::Block;
             scrollBottom = int(rows) - 1;
             for (std::size_t i = 0; i < rows; ++i) {
                 append(FStringView{}, fill);
