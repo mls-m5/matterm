@@ -25,6 +25,10 @@ public:
     void render(const RenderFrame &frame) override;
     void present() override;
 
+    // Switch to another size of the same font without recreating the renderer.
+    // Throws and keeps the old font if the new atlas cannot be built.
+    void setPixelSize(int pixelSize);
+
     // Drawable-pixel metrics; placement in RenderFrame is always in cells.
     int cellWidth() const noexcept;
     int cellHeight() const noexcept;

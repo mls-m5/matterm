@@ -67,24 +67,28 @@ const check = (name, ok, detail) => {
 
   // A drag scrolls the scrollback and neither moves focus nor selects.
   await run('seq 1 300');
+  // The cursor blinks, so accept either phase as "the same picture".
   const bottom = await canvasHash();
+  await page.waitForTimeout(520);
+  const bottomOther = await canvasHash();
   await drag([200, 200], [200, 600]);
   const scrolled = await canvasHash();
   check('drag down scrolls back', scrolled !== bottom);
   check('drag keeps the keyboard field focused', await page.evaluate(() => document.activeElement.id) === 'softkeys');
   await drag([200, 600], [200, 200]);
-  check('drag up scrolls forward again', await canvasHash() === bottom);
+  { const h = await canvasHash(); check('drag up scrolls forward again', h === bottom || h === bottomOther); }
 
   // Alternate screen: a drag sends arrow keys, as the wheel does.
-  await run("printf '\\033[?1049h'; stty -echo; cat -v");
+  await run("printf '\\033[?1049h'; stty -icanon -echo; cat -v");
   await drag([200, 200], [200, 500]);
   let text = await screenText();
   check('alternate screen drag sends Up keys', /\^\[\[A|\^\[OA/.test(text), JSON.stringify(text.slice(0, 80)));
-  await send('touchStart', [[200, 300]]); await send('touchEnd', []);
   await page.keyboard.press('Control+C');
+  await page.waitForTimeout(400); // Key events reach the terminal on the next frame; text does not wait.
+  await run("printf '\\033[?1049l'; stty sane");
 
   // Application mouse reporting: drag gives wheel presses, tap gives a click.
-  await run("clear; printf '\\033[?1000h\\033[?1006h'; stty -echo; cat -v");
+  await run("clear; printf '\\033[?1000h\\033[?1006h'; stty -icanon -echo; cat -v");
   await drag([200, 200], [200, 500]);
   text = await screenText();
   check('mouse reporting drag sends wheel-up presses', /\^\[\[<64;/.test(text), JSON.stringify(text.slice(0, 80)));
@@ -93,20 +97,21 @@ const check = (name, ok, detail) => {
   text = await screenText();
   check('mouse reporting tap sends press and release', /\^\[\[<0;\d+;\d+M\^\[\[<0;\d+;\d+m/.test(text), JSON.stringify(text.slice(-80)));
   await page.keyboard.press('Control+C');
+  await page.waitForTimeout(400); // Key events reach the terminal on the next frame; text does not wait.
   await run("printf '\\033[?1000l\\033[?1049l'; stty echo");
 
   // Long press selects the word under the finger and copies it.
   await run('clear; echo alpha beta gamma');
   await page.evaluate(() => navigator.clipboard.writeText('unset'));
   // Cells are about 11 x 24 CSS px at the default 18 px font; "beta" is columns
-  // 6-9 of row 1 (row 0 is the command line).
-  const x = 82, y = 36;
+  // 6-9 of row 0 (`clear` leaves the echo output on the first row).
+  const x = 82, y = 12;
   await send('touchStart', [[x, y]]);
   await page.waitForTimeout(700);
   await send('touchEnd', []);
   await page.waitForTimeout(400);
   const word = (await page.evaluate(() => navigator.clipboard.readText())).trim();
-  check('long press copies a word', ['alpha', 'beta', 'gamma'].includes(word), JSON.stringify(word));
+  check('long press copies a word', ['alpha', 'beta', 'gamma'].includes(word), JSON.stringify(word) + ' screen: ' + JSON.stringify((await screenText()).slice(0, 120)));
 
   // Pinch out grows the font (fewer rows and columns), pinch in shrinks it.
   const before = await size();
@@ -126,7 +131,7 @@ const check = (name, ok, detail) => {
   check('pinch size is stored', Number(await page.evaluate(() => localStorage.getItem('matterm.fontSize'))) > 18);
   await pinch(120, 40);
   const smaller = await size();
-  check('pinch in gives more columns again', smaller && bigger && smaller[1] > bigger[1], JSON.stringify([bigger, smaller]));
+  check('pinch in gives more columns again', smaller && bigger && smaller[1] > bigger[1], JSON.stringify([bigger, smaller, await page.evaluate(() => localStorage.getItem('matterm.fontSize'))]));
 
   // The size is restored after a reload.
   await pinch(40, 120);
