@@ -21,13 +21,6 @@ const char *kReadme =
     "(try fire and gradient), and a good explorer looks everywhere, hidden\n"
     "files included (ls -a).\n";
 
-const char *kMotd =
-    "Welcome to Mattrix OS 6.0 Professional Edition\n"
-    "\n"
-    " * No real file systems were harmed. Type 'help', or read README.\n"
-    " * Try: fire, gradient, neofetch, about\n"
-    "\n";
-
 const char *kPlan =
     "Things to try, when there is time:\n"
     "  - the old games in /usr/games (some are shy: ls -a)\n"
@@ -60,6 +53,19 @@ const char *kNotes = "Notes\n=====\nThe fire in /usr/games is nice to "
 
 } // namespace
 
+std::string motdText(bool slow) {
+    return std::string("Welcome to Mattrix OS 6.0 Professional Edition\n"
+                       "\n"
+                       " * No real file systems were harmed. Type 'help', or "
+                       "read README.\n") +
+           (slow ? " * Dramatic typing speed: Enabled (Space skips, 'slow off' "
+                   "turns it off)\n"
+                 : " * Dramatic typing speed: Disabled ('slow on' turns it "
+                   "on)\n") +
+           " * Try: fire, gradient, neofetch, about\n"
+           "\n";
+}
+
 void seedWorld(World &world) {
     auto &fs = world.fs;
     const std::int64_t day = 86400;
@@ -76,7 +82,7 @@ void seedWorld(World &world) {
     fs.putDirectory("/home/" + user + "/Documents", user, 0755, base - 9 * day);
     fs.put(
         "/etc/hostname", world.hostname + "\n", "root", 0644, base - 30 * day);
-    fs.put("/etc/motd", kMotd, "root", 0644, base - 30 * day);
+    fs.put("/etc/motd", motdText(world.slow), "root", 0644, base - 30 * day);
     fs.put("/etc/issue",
            "Mattrix OS 6.0 Professional Edition \\n \\l\n",
            "root",

@@ -214,7 +214,7 @@ TEST_CASE("Colors and escape sequences cost nothing and arrive whole") {
     pc.run("ls -l / /etc");
     // Plenty of text with colors; step in tiny pieces and check the stream is
     // never cut inside an escape sequence.
-    for (int i = 0; i < 400 && pc.sys.revealing(); ++i) {
+    for (int i = 0; i < 700 && pc.sys.revealing(); ++i) {
         pc.advance(10);
         const auto at = pc.raw.rfind('\x1b');
         if (at != std::string::npos && at + 1 < pc.raw.size() &&

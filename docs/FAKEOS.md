@@ -111,6 +111,23 @@ Enter, Escape or Ctrl-C show the rest at once; any other key does too and is the
 typed, like type-ahead. Mouse reports are ignored meanwhile. Typing and echo are
 never delayed. `--no-reveal` and `?noreveal` turn it off.
 
+### `slow on|off`, and the start command
+
+The welcome text says "Dramatic typing speed: Enabled (Space skips, 'slow off'
+turns it off)". `slow off` prints everything at once and silences the pips, `slow on`
+brings them back (a host that started without a pace gets a default one), `slow`
+shows the state; `/etc/motd` follows the setting, `reset` goes back to what the host
+started with, and `help` mentions it. It is a shell builtin, so it works even if
+`/bin` is gone.
+
+`Config::startCommand` (`?cmd=` on the web page, `--cmd TEXT` for `matterm-demo`) is
+typed at the first prompt for the visitor: after the intro and the welcome text, a
+pause, then the letters one at a time (a pip each), a pause, Enter, and the output is
+revealed like any other. A key makes it run at once (Space only skips, any other key
+is then typed ahead). Without a pace it simply runs. Nothing runs by itself unless a
+host asks for it: the demos do not start any command on their own (try `--cmd
+neofetch` or `?cmd=neofetch`).
+
 ### Pips
 
 `Config::sound` and `Config::onBeep` make the core report short electronic pips
@@ -131,6 +148,16 @@ streams) and is deterministic.
   `--sound` (`--mute`), no sound card means silence. The synthesizer is a plain class
   and is tested without a device (`test/pipsynth_test.cpp`).
 - **`--tty`**: no sound.
+
+### The uptime
+
+Mattrix OS "booted" on 1987-02-27 (`hardware::kBootUnix`) and has not been
+restarted since. The core has no clock: uptime is the host's date
+(`Config::unixTime`, the real date in the demos, a fixed 2026-01-01 by default so
+tests repeat) plus the session's own time, so it only counts up: `uptime` ("up
+14188 days"), `uptime -p` (weeks, days, hours, minutes) and `-s`, `neofetch` ("38
+years, 10 months, 5 days, ..."), `top`, `/proc/uptime` (refreshed every second),
+`who -b` and `last reboot`.
 
 ### The imaginary machine
 

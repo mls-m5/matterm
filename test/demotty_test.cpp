@@ -45,6 +45,14 @@ struct Session {
         }
         return found;
     }
+    void pumpFor(int ms) {
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+        while (std::chrono::steady_clock::now() < deadline && !exited) {
+            link.pump();
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+    }
     bool untilExit(int ms = 5000) {
         const auto deadline =
             std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
@@ -150,6 +158,47 @@ TEST_CASE("Program output appears at a pace, and --no-reveal prints at once") {
     const double instant = secondsToSee300({"--no-reveal"});
     EXPECT(paced > 2.0); // 300 lines at about 13 a second, within four seconds.
     EXPECT(instant >= 0 && instant < 0.8);
+}
+
+TEST_CASE(
+    "Nothing runs by itself after the intro; --cmd types a command for you") {
+    Session plain(
+        "xterm-256color", PtyProcess::ColorCapability::TrueColor, true);
+    EXPECT(plain.until("\x1b[?1049h"));
+    plain.link.sendInput(" "); // Skip the intro.
+    EXPECT(plain.until("Welcome to Mattrix OS 6.0 Professional Edition", 8000));
+    plain.pumpFor(2500);
+    EXPECT(plain.output.find("Kernel:") ==
+           std::string::npos); // No neofetch by default.
+    plain.link.sendInput("exit\r");
+    EXPECT(plain.untilExit());
+    Session asked("xterm-256color",
+                  PtyProcess::ColorCapability::TrueColor,
+                  true,
+                  {"--cmd", "neofetch"});
+    EXPECT(asked.until("\x1b[?1049h"));
+    asked.link.sendInput(" ");
+    EXPECT(asked.until("Welcome to Mattrix OS 6.0 Professional Edition", 8000));
+    EXPECT(asked.until("neofetch", 8000)); // Typed for the visitor.
+    EXPECT(asked.until("6.8.0-mattrix", 12000));
+    EXPECT(asked.until("by Mattias Lasersk", 12000));
+    asked.link.sendInput("exit\r");
+    EXPECT(asked.untilExit());
+}
+
+TEST_CASE("--cmd replaces nothing else: a plain --no-intro start stays quiet") {
+    Session plain("xterm-256color", PtyProcess::ColorCapability::TrueColor);
+    EXPECT(plain.until("guest@matterm"));
+    plain.pumpFor(1800);
+    EXPECT(plain.output.find("Kernel:") == std::string::npos);
+    Session custom("xterm-256color",
+                   PtyProcess::ColorCapability::TrueColor,
+                   false,
+                   {"--cmd", "echo hello from cmd"});
+    EXPECT(custom.until("hello from cmd", 8000));
+    EXPECT(custom.until("hello from cmd", 8000)); // Echo, then the output.
+    custom.pumpFor(800);
+    EXPECT(custom.output.find("Kernel:") == std::string::npos);
 }
 
 TEST_CASE("A resize reaches a running program") {

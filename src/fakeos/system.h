@@ -35,7 +35,10 @@ struct Config {
     bool sound = false;
     std::function<void(const Beep &)> onBeep;
     // Typed and run at the first prompt, as if the visitor had entered it (for
-    // embedding a demo that starts with something to look at). Empty: none.
+    // a demo that starts with something to look at). With a reveal pace it is
+    // typed letter by letter (with pips) after the intro and the welcome text,
+    // and a key makes it run at once; without one it runs immediately. Empty:
+    // none.
     std::string startCommand;
     // The pretend clock starts here (Unix seconds); the default is a fixed
     // date so that output is reproducible.
@@ -93,6 +96,10 @@ private:
     void drainReveal(Time now);
     void flushReveal();
     void forwardBeeps();
+    void refreshUptimeFile();
+    int revealRate() const;
+    void driveAutoType(Time now);
+    void finishAutoType();
     std::string lineText() const;
     Reaction take();
 
@@ -120,9 +127,18 @@ private:
     double revealCredit_ = 0; // Units that may still be shown.
     double revealRate_ = 0;   // Units per second for the current text.
     Time revealAt_{0};
+    bool revealAnchored_ =
+        false; // The first tick after queueing sets revealAt_.
     Time lastBeepAt_{-1000};
     std::optional<int> deferredExit_; // `exit` after the text has been shown.
     bool startCommandRan_ = false;
+    std::int64_t procUptimeAt_ = -1;
+    // The start command being typed for the visitor.
+    std::vector<std::string> autoType_;
+    std::size_t autoTypeIndex_ = 0;
+    Time autoTypeAt_{0};
+    bool autoTyping_ = false;
+    bool autoStarted_ = false;
 };
 
 } // namespace fakeos

@@ -60,7 +60,7 @@ Notes:
 
 ```
 matterm-demo [font.ttf] [--font-size N] [--no-intro] [--no-reveal]
-             [--no-smooth-cursor] [--sound] [--seed N]
+             [--no-smooth-cursor] [--sound] [--cmd TEXT] [--seed N]
 ```
 
 The terminal model and the SDL renderer, cell-snapped like the other frontends, with

@@ -18,6 +18,11 @@ constexpr double kMostRevealSeconds = 4.0;
 // While text is revealed there is a pip about this often: a short one for the
 // last character shown, a lower, longer one when a line was completed.
 constexpr int kBeepGapMs = 45;
+// The start command typed for the visitor: a pause, then letters, then a pause
+// before Enter.
+constexpr int kAutoStartPauseMs = 350;
+constexpr int kAutoTypeMs = 70;
+constexpr int kAutoEnterPauseMs = 450;
 
 // What showing one unit of terminal output costs, and how many bytes it takes:
 // a character, a line end, or an escape sequence (free).
@@ -101,11 +106,14 @@ void System::freshWorld() {
     fresh.caps = config_.capabilities;
     fresh.background = config_.background;
     fresh.sound = config_.sound && bool(config_.onBeep);
+    // The host's choice to start with: on when it asks for a pace or for sound.
+    fresh.slow = config_.revealCharsPerSecond > 0 || fresh.sound;
     fresh.rng = Rng(config_.seed);
     fresh.bootUnix = config_.unixTime;
     fresh.now = world_.now;
     seedWorld(fresh);
     world_ = std::move(fresh);
+    refreshUptimeFile();
     line_.clear();
     cursor_ = 0;
     historyIndex_ = 0;
@@ -142,20 +150,70 @@ void System::showWelcome() {
         }
     }
     showPrompt();
-    if (config_.startCommand.empty() || startCommandRan_) {
-        queueOutput(mark); // The welcome text appears at a pace too.
-        return;
-    }
-    if (!config_.startCommand.empty() && !startCommandRan_) {
-        // Typed at the first prompt, so it shows the way a visitor's would.
+    const bool runStart = !config_.startCommand.empty() && !startCommandRan_;
+    std::vector<std::string> command;
+    if (runStart) {
         startCommandRan_ = true;
         for (const auto &character : utf8Characters(config_.startCommand)) {
             if (character.size() > 1 || (unsigned char)character[0] >= 0x20) {
-                insert(character);
+                command.push_back(character);
             }
         }
-        submit();
     }
+    if (!runStart || revealRate() > 0) {
+        queueOutput(mark); // The welcome text appears at a pace too.
+    }
+    if (!runStart) {
+        return;
+    }
+    if (revealRate() <= 0) {
+        // No pace: typed and run at once.
+        for (const auto &character : command) {
+            insert(character);
+        }
+        submit();
+        return;
+    }
+    // Typed for the visitor once the welcome text is out.
+    autoType_ = std::move(command);
+    autoTypeIndex_ = 0;
+    autoTyping_ = true;
+    autoStarted_ = false;
+}
+
+// The start command is typed one letter at a time (a pip each), with a pause
+// before the first and before Enter, like a visitor who is not in a hurry.
+void System::driveAutoType(Time now) {
+    if (!autoTyping_ || !reveal_.empty() || program_) {
+        return;
+    }
+    if (!autoStarted_) {
+        autoStarted_ = true;
+        autoTypeAt_ = now + Time(kAutoStartPauseMs);
+        return;
+    }
+    if (now < autoTypeAt_) {
+        return;
+    }
+    if (autoTypeIndex_ < autoType_.size()) {
+        insert(autoType_[autoTypeIndex_++]);
+        world_.beep(1100 + double((autoTypeIndex_ * 53) % 300), 15, 0.3);
+        autoTypeAt_ =
+            now + Time(autoTypeIndex_ == autoType_.size() ? kAutoEnterPauseMs
+                                                          : kAutoTypeMs);
+        return;
+    }
+    autoTyping_ = false;
+    submit();
+}
+
+// A key: what is left is typed at once and the command runs.
+void System::finishAutoType() {
+    while (autoTypeIndex_ < autoType_.size()) {
+        insert(autoType_[autoTypeIndex_++]);
+    }
+    autoTyping_ = false;
+    submit();
 }
 
 std::string System::promptText(std::size_t *width) const {
@@ -472,6 +530,35 @@ void System::submit() {
 }
 
 // Pips collected from the reveal and from programs go to the host's listener.
+// /proc/uptime follows the clock, once a second.
+void System::refreshUptimeFile() {
+    const auto seconds = world_.uptimeSeconds();
+    if (seconds == procUptimeAt_) {
+        return;
+    }
+    procUptimeAt_ = seconds;
+    world_.fs.put("/proc/uptime",
+                  std::to_string(seconds) + ".00 " +
+                      std::to_string(seconds * hardware::kCpuCores * 97 / 100) +
+                      ".00\n",
+                  "root",
+                  0444,
+                  world_.unixNow());
+}
+
+// Characters per second while text is revealed; 0 when the typing speed is off
+// (`slow off`). With a host that started without a pace, `slow on` uses a
+// default.
+int System::revealRate() const {
+    if (!world_.slow) {
+        return 0;
+    }
+    if (config_.revealCharsPerSecond > 0) {
+        return config_.revealCharsPerSecond;
+    }
+    return world_.slowAsked ? 1250 : 0; // Only if `slow on` was typed.
+}
+
 void System::forwardBeeps() {
     if (!config_.sound || !config_.onBeep) {
         world_.beeps.clear();
@@ -487,7 +574,7 @@ void System::forwardBeeps() {
 // ---- Revealing program output at a pace -----------------------------------
 
 void System::queueOutput(std::size_t mark) {
-    if (config_.revealCharsPerSecond <= 0 || mark >= out_.size()) {
+    if (revealRate() <= 0 || mark >= out_.size()) {
         return;
     }
     double cost = 0;
@@ -501,13 +588,12 @@ void System::queueOutput(std::size_t mark) {
     }
     reveal_ = out_.substr(mark);
     out_.resize(mark);
-    const double seconds =
-        std::clamp(cost / double(config_.revealCharsPerSecond),
-                   kLeastRevealSeconds,
-                   kMostRevealSeconds);
+    const double seconds = std::clamp(
+        cost / double(revealRate()), kLeastRevealSeconds, kMostRevealSeconds);
     revealRate_ = cost / seconds;
     revealCredit_ = 0;
     revealAt_ = now_;
+    revealAnchored_ = false;
     if (exitCode_) { // `exit` happens after its text has been shown.
         deferredExit_ = exitCode_;
         exitCode_.reset();
@@ -515,6 +601,13 @@ void System::queueOutput(std::size_t mark) {
 }
 
 void System::drainReveal(Time now) {
+    if (!revealAnchored_) {
+        // The pace starts at the first tick after the text was queued, so the
+        // time before it (a host that ticks late) is not paid out as a burst.
+        revealAnchored_ = true;
+        revealAt_ = now;
+        return;
+    }
     const double seconds =
         std::clamp(double((now - revealAt_).count()), 0.0, 100.0) / 1000.0;
     revealAt_ = now;
@@ -529,7 +622,8 @@ void System::drainReveal(Time now) {
         }
         revealCredit_ -= unit.cost;
         if (unit.cost > 0) {
-            lineDone = lineDone || reveal_[used] == '\n';
+            lineDone = reveal_[used] ==
+                       '\n'; // A pip for a line only when it ends one.
             lastShown = (unsigned char)reveal_[used];
         }
         used += unit.bytes;
@@ -668,17 +762,33 @@ Reaction System::input(std::string_view bytes) {
         if (exitCode_) {
             break;
         }
+        // Space, Enter, Escape and Ctrl-C only skip; any other key is then
+        // typed, like type-ahead. Mouse reports mean nothing while text is
+        // revealed or the start command is typed.
+        const bool skipKey = key.is(Key::Type::Enter) ||
+                             key.is(Key::Type::Escape) || key.isText(" ") ||
+                             (key.is(Key::Type::Ctrl) && key.text == "c");
         if (!reveal_.empty()) {
-            // A key shows the rest at once. Space, Enter, Escape and Ctrl-C
-            // only skip; any other key is then typed, like type-ahead. Mouse
-            // reports mean nothing here.
+            // A key shows the rest at once.
             if (key.is(Key::Type::Mouse)) {
                 continue;
             }
             flushReveal();
-            if (key.is(Key::Type::Enter) || key.is(Key::Type::Escape) ||
-                key.isText(" ") ||
-                (key.is(Key::Type::Ctrl) && key.text == "c")) {
+            if (skipKey) {
+                continue;
+            }
+            if (exitCode_) {
+                break;
+            }
+        }
+        if (autoTyping_) {
+            // A key makes the start command run now, and its output show.
+            if (key.is(Key::Type::Mouse)) {
+                continue;
+            }
+            finishAutoType();
+            flushReveal();
+            if (skipKey) {
                 continue;
             }
             if (exitCode_) {
@@ -714,11 +824,15 @@ Reaction System::tick(Time now) {
     }
     now_ = now;
     world_.now = now - base_;
+    refreshUptimeFile();
     if (!reveal_.empty()) {
         // A program that is waiting to start shows nothing until the text is
         // out.
         drainReveal(now);
         return take();
+    }
+    if (!program_ && !exitCode_) {
+        driveAutoType(now);
     }
     if (program_ && !exitCode_) {
         if (!programBegun_) {
@@ -751,6 +865,9 @@ void System::resize(int columns, int rows) {
 std::optional<Time> System::nextDeadline() const {
     if (!reveal_.empty()) {
         return revealAt_ + Time(16); // The next little piece of text.
+    }
+    if (autoTyping_ && !program_) {
+        return autoStarted_ ? autoTypeAt_ : now_;
     }
     if (program_ && !exitCode_) {
         return nextFrame_;

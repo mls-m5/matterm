@@ -63,10 +63,7 @@ public:
         canvas.clear();
         const Rgb text{220, 220, 220}, head{0, 0, 0}, back{0, 0, 0},
             accent{120, 200, 255};
-        const auto uptime =
-            std::chrono::duration_cast<std::chrono::seconds>(world.now)
-                .count() +
-            3 * 86400 + 4 * 3600 + 1020;
+        const auto uptime = world.uptimeSeconds();
         canvas.text(0,
                     0,
                     "top - up " + std::to_string(uptime / 86400) +
