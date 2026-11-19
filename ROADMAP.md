@@ -44,6 +44,7 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [ ] Local right-click Copy/Paste menu, word selection, and drag auto-scroll.
 - [ ] Smooth cursor animation: glide the cursor between positions instead of jumping (render-side interpolation only; the model keeps exact cell positions; must be optional and cheap when idle).
 - [ ] Typewriter output animation: optionally reveal newly arrived text one character at a time, only under defined conditions (for example small bursts or an explicit mode, never during bulk output). The delay schedule lives in its own buffer, separate from `TerminalModel`, so the model always holds the true state and the renderer decides what is revealed yet.
+- [ ] URL detection: recognize URLs in terminal text (including ones wrapped across rows) so they can be clicked to open. Needs a security policy first (explicit modifier+click, show the target, allow-list schemes such as http/https, never run commands); OSC 8 hyperlinks stay disabled until then.
 - [ ] Design and prototype a borderless SDL window with a custom title bar. Budget substantial GUI design and polish before rollout; keep native decorations as a fallback.
 - [ ] Reproduce prompt and Pi panel color reports; see [Interaction and Compatibility](docs/INTERACTION_AND_COMPATIBILITY.md).
 - [ ] Golden transcripts from real programs, fuzz/property tests, and compatibility fixtures.
