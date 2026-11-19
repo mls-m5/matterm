@@ -82,10 +82,11 @@ public:
     // variants.
     void setAlternateScreen(bool enabled);
 
-    // Positive dimensions only. No reflow: width clips/pads; height shrink
-    // keeps bottom screen rows (primary top rows become history); growth adds
-    // blanks. Preserves both buffers; resets margins/origin to full screen.
-    // Allocation failure leaves both unchanged.
+    // Positive dimensions only. No reflow: width clips/pads. Height shrink
+    // first drops blank rows below the cursor, then keeps the bottom screen
+    // rows (primary top rows become history); growth adds blanks. Preserves
+    // both buffers; resets margins/origin to full screen. Allocation failure
+    // leaves both unchanged.
     void resize(std::size_t columns, std::size_t rows);
 
     struct TextCell {
