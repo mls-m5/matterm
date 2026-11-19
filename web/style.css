@@ -14,13 +14,13 @@ html, body { margin: 0; height: 100%; color: #ddd;
   --frame-shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px rgba(0, 0, 0, .45),
     0 24px 64px rgba(0, 0, 0, .35);
   --margin: clamp(16px, 3vw, 40px); --radius: 12px;
-  /* A thick, lighter "glass" frame around the terminal, a little like an old
-     window manager: top-lit gradient, a light outer edge, a dark inner edge. */
-  --frame-width: 8px; --frame-top: #5b6376; --frame-bottom: #353a47;
+  /* A thick, lighter frame in one color around the terminal, with a light outer
+     edge and a dark inner edge. */
+  --frame-width: 8px; --frame-color: #353a47;
   --frame-edge: rgba(255, 255, 255, .22); --frame-inner: rgba(0, 0, 0, .65); }
 @media (prefers-color-scheme: light) {
   :root { --page: #d9dce3; --frame-border: rgba(0, 0, 0, .28);
-    --frame-top: #aeb7ca; --frame-bottom: #7d879c; --frame-edge: rgba(255, 255, 255, .6);
+    --frame-color: #7d879c; --frame-edge: rgba(255, 255, 255, .6);
     --frame-inner: rgba(0, 0, 0, .55);
     --frame-shadow: 0 1px 2px rgba(0, 0, 0, .25), 0 8px 24px rgba(0, 0, 0, .22),
       0 24px 64px rgba(0, 0, 0, .18); }
@@ -46,11 +46,11 @@ body.started { background: var(--page); }
   #layout { display: block; }
   body:not([data-layout="full"]) #window { inset: var(--margin) 0;
     width: min(100% - 2 * var(--margin), 1100px); margin-inline: auto;
-    /* The border is transparent so the gradient behind it forms the frame; the
+    /* The border is transparent so the background behind it forms the frame; the
        canvas (the grid) is the padding box, so the frame never changes the
        number of rows and columns for a given window size. */
     border: var(--frame-width) solid transparent; border-radius: var(--radius);
-    background: linear-gradient(180deg, var(--frame-top), var(--frame-bottom)) border-box;
+    background: var(--frame-color) border-box; margin-block: auto;
     box-shadow: 0 0 0 1px var(--frame-edge), var(--frame-shadow); }
   body:not([data-layout="full"]) #window::after { content: ""; position: absolute;
     inset: 0; pointer-events: none; border-radius: calc(var(--radius) - var(--frame-width));

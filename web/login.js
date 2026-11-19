@@ -159,6 +159,7 @@
         delete document.body.dataset.layout;
       }
       layoutButton.setAttribute("aria-pressed", String(full));
+      snapWindow();
       fitCanvas();
     };
     apply(params.has("fullscreen") || stored === "full");
@@ -185,6 +186,32 @@
       layoutButton.classList.remove("near");
     });
   }
+
+  // Framed layout: size the window to a whole number of cells (plus the scrollbar
+  // strip) so no partial cell is left at the right or bottom. The cell size comes
+  // from the terminal (window.mattermCell, device pixels). Edge-to-edge layouts
+  // (no border) keep the full viewport; the leftover there is terminal background.
+  let cell = null;
+  function snapWindow() {
+    terminalWindow.style.width = "";
+    terminalWindow.style.height = "";
+    const style = getComputedStyle(terminalWindow);
+    const border = parseFloat(style.borderTopWidth) || 0;
+    if (!cell || border === 0 || terminalWindow.hidden) {
+      return;
+    }
+    const ratio = window.devicePixelRatio || 1;
+    const rect = terminalWindow.getBoundingClientRect();
+    const cols = Math.max(1, Math.floor(((rect.width - 2 * border) * ratio - cell.strip) / cell.width));
+    const rows = Math.max(1, Math.floor((rect.height - 2 * border) * ratio / cell.height));
+    terminalWindow.style.width = (cols * cell.width + cell.strip) / ratio + 2 * border + "px";
+    terminalWindow.style.height = rows * cell.height / ratio + 2 * border + "px";
+  }
+  window.mattermCell = function (width, height, strip) {
+    cell = { width: width, height: height, strip: strip };
+    snapWindow();
+  };
+  window.addEventListener("resize", snapWindow);
 
   // The canvas fills the terminal window, so its CSS size is the container's
   // and the backing store is the container in device pixels: text stays sharp

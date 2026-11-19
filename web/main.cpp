@@ -550,6 +550,23 @@ void handleEvent(App &app, const SDL_Event &event) {
 
 // Rebuild the renderer with the pending font size; the next frame notices the
 // new cell size and resizes the model and the link as for a window resize.
+// Tell the page the cell size (device pixels) so it can size the window to whole
+// cells; see snapWindow() in login.js.
+void publishCellSize(const App &app) {
+    if (!app.backend) {
+        return;
+    }
+    EM_ASM(
+        {
+            if (window.mattermCell) {
+                window.mattermCell($0, $1, $2);
+            }
+        },
+        app.backend->cellWidth(),
+        app.backend->cellHeight(),
+        SdlBackend::scrollbarStrip());
+}
+
 void changeFont(App &app) {
     const int wanted = app.pendingFontCss;
     try {
@@ -563,6 +580,7 @@ void changeFont(App &app) {
     app.pendingFontCss = app.fontCss;
     app.lastSignature.reset();
     app.touchRows = 0;
+    publishCellSize(app);
 }
 
 void frame(void *data) {
@@ -774,6 +792,7 @@ int main() {
         std::fprintf(stderr, "backend failed: %s\n", error.what());
         return 1;
     }
+    publishCellSize(app);
     app.model = std::make_unique<TerminalModel>(
         std::size_t(std::max(1, app.backend->columns(true))),
         std::size_t(std::max(1, app.backend->rows())),

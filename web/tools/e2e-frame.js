@@ -66,6 +66,8 @@ const args = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swif
   check('framed: backing store is device pixels of the canvas', Math.abs(b.backing[0] - b.width) <= 1, JSON.stringify(b.backing));
   let fit = await gridFits(page, b);
   check('framed: stty size matches the canvas', fit.ok, fit.detail);
+  // The window snaps to whole cells: no partial cell at the right or bottom.
+  check('framed: whole cells (no leftover pixels)', (b.width - 12) % 11 === 0 && b.height % 24 === 0, `${b.width}x${b.height}`);
   if (out) await page.screenshot({ path: path.join(out, 'frame.png') });
 
   // The toggle is hidden until the mouse is near the top edge.
