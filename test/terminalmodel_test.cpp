@@ -261,6 +261,31 @@ TEST_CASE(
     EXPECT_EQ(model.cursor().row, 1);
 }
 
+TEST_CASE("Library saved-line erasure preserves origin margins and live cursor "
+          "state") {
+    TerminalModel model(5, 4, 10);
+    model.write(U"a\r\nb\r\nc\r\nd\r\ne\r\nf");
+    model.setScrollRegion(1, 3);
+    model.setOriginMode(true);
+    model.moveCursor(2, 2);
+    model.setColors({12, 34, 56}, {78, 90, 12});
+    model.saveCursor();
+    const auto live = model.cell(0, 0).codePoint;
+    model.eraseScrollback();
+    EXPECT_EQ(model.historySize(), std::size_t(0));
+    EXPECT_EQ(model.scrollTop(), 1);
+    EXPECT_EQ(model.scrollBottom(), 3);
+    EXPECT(model.originMode());
+    EXPECT_EQ(model.cursor().column, 2);
+    EXPECT_EQ(model.cursor().row, 2);
+    EXPECT(model.cell(0, 0).codePoint == live);
+    model.moveCursor(0, 0);
+    model.restoreCursor();
+    EXPECT_EQ(model.cursor().row, 2);
+    model.write(U"X");
+    EXPECT_EQ(model.cell(2, 2).foreground.r, 12);
+}
+
 TEST_CASE("Switching screens preserves a pending primary wrap") {
     TerminalModel model(2, 2, 2);
     model.write(U"ab");
