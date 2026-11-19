@@ -25,18 +25,108 @@
       event.preventDefault();
     });
     canvas.focus();
+    setupTouchKeyboard();
     const script = document.createElement("script");
     script.src = "index.js";
     document.body.appendChild(script);
     window.addEventListener("resize", fitCanvas);
   }
 
+  // Touch devices: tapping the terminal focuses a hidden field so the on-screen
+  // keyboard appears; its text goes to the terminal through matterm_text. Keys a
+  // phone keyboard lacks come from the bar. Hardware keys are handled by SDL.
+  function setupTouchKeyboard() {
+    const touch = window.matchMedia("(pointer: coarse)").matches ||
+      new URLSearchParams(location.search).has("touch");
+    if (!touch) {
+      return;
+    }
+    const field = document.getElementById("softkeys");
+    const bar = document.getElementById("keybar");
+    field.hidden = false;
+    bar.hidden = false;
+    document.body.classList.add("touch");
+    fitCanvas(); // The bar takes room from the canvas.
+    const latched = { ctrl: false, alt: false };
+    const mods = function () {
+      return (latched.ctrl ? 1 : 0) | (latched.alt ? 2 : 0);
+    };
+    const release = function () {
+      latched.ctrl = latched.alt = false;
+      bar.querySelectorAll("[data-mod]").forEach(function (b) {
+        b.setAttribute("aria-pressed", "false");
+      });
+    };
+    const mod = function () { return window.Module; };
+    const text = function (value) {
+      if (value && mod() && mod().ccall) {
+        mod().ccall("matterm_text", null, ["string", "number"], [value, mods()]);
+        release();
+      }
+    };
+    const key = function (name) {
+      if (mod() && mod().ccall) {
+        mod().ccall("matterm_key", null, ["string", "number"], [name, mods()]);
+        release();
+      }
+    };
+    // Tapping the terminal (not a drag or scroll) opens the keyboard. This
+    // needs a user gesture, so it happens in the event handler itself.
+    let downAt = null;
+    canvas.addEventListener("pointerdown", function (event) {
+      downAt = event.pointerType === "touch" ? [event.clientX, event.clientY] : null;
+    });
+    canvas.addEventListener("pointerup", function (event) {
+      if (downAt && Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) < 10) {
+        field.focus();
+      }
+      downAt = null;
+    });
+    // Printable text and, on keyboards that report no key codes, deletion.
+    let namedKeyDown = false;
+    field.addEventListener("keydown", function (event) {
+      // SDL sees named keys (Enter, Backspace, arrows) itself.
+      namedKeyDown = event.key.length > 1 && event.key !== "Unidentified";
+    }, true);
+    field.addEventListener("beforeinput", function (event) {
+      if (event.inputType === "insertText" || event.inputType === "insertCompositionText") {
+        if (event.data) {
+          text(event.data);
+        }
+      } else if (event.inputType === "deleteContentBackward" && !namedKeyDown) {
+        key("Backspace");
+      } else if (event.inputType === "insertLineBreak" && !namedKeyDown) {
+        key("Enter");
+      }
+      namedKeyDown = false;
+      event.preventDefault(); // The field stays empty; the terminal is the state.
+    });
+    bar.addEventListener("pointerdown", function (event) {
+      event.preventDefault(); // Keep the keyboard open.
+    });
+    bar.addEventListener("click", function (event) {
+      const button = event.target.closest("button");
+      if (!button) {
+        return;
+      }
+      if (button.dataset.mod) {
+        const on = !latched[button.dataset.mod];
+        latched[button.dataset.mod] = on;
+        button.setAttribute("aria-pressed", String(on));
+      } else if (button.dataset.key) {
+        key(button.dataset.key);
+      } else if (button.dataset.text) {
+        text(button.dataset.text);
+      }
+    });
+  }
+
   // The canvas's CSS size is the window; its backing store is in device pixels
   // so text stays sharp on HiDPI screens (the terminal scales its font too).
   function fitCanvas() {
     const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.round(window.innerWidth * ratio);
-    canvas.height = Math.round(window.innerHeight * ratio);
+    canvas.width = Math.round(canvas.clientWidth * ratio);
+    canvas.height = Math.round(canvas.clientHeight * ratio);
   }
 
   // ?demo skips the login and runs the in-browser simulator (no server needed).
