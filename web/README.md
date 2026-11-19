@@ -50,12 +50,22 @@ node e2e.js http://localhost:8080/ 'the password' out.png
 `e2e.js` logs in, types a command and saves a screenshot (plus `out-login.png`).
 `shot.js` only screenshots a URL.
 
+## Input
+
+Keyboard (text, control keys, navigation, function keys, application keypad),
+mouse reporting (all xterm modes and encodings, wheel), focus reporting, local
+text selection (drag, Shift to select while an application reports the mouse),
+Ctrl+Shift+C to copy and Ctrl+Shift+V to paste (through the page's `paste`
+event, so bracketed paste works), OSC 4/104 palette changes, the title (OSC
+0/2) and terminal replies (device attributes, cursor position) are wired up,
+and an unfocused canvas shows the hollow cursor.
+
+Checked with `tools/e2e-input.js` and `tools/e2e-copy.js`. Headless Chromium
+cannot produce a real Ctrl+Shift+V paste, so that test dispatches the `paste`
+event instead.
+
 ## Known gaps
 
-The last column looks clipped at the right edge in a 1000 px wide window (the
-`usr` entry of `ls /`); check whether the scrollbar strip overlaps it or the
-column count is one too high.
-
-Mouse reporting, clipboard (paste and copy), focus reporting, and window focus
-state for the hollow cursor are not wired up yet. Keyboard input covers text,
-control keys, navigation and function keys.
+Copied text keeps trailing spaces of the selected line (the same model code as
+the native terminal). Touch input, HiDPI scaling, the `open URL` roadmap item,
+and a font choice other than the bundled one are not done.
