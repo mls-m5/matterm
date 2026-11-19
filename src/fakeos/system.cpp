@@ -1,5 +1,7 @@
 #include "system.h"
 
+#include "eggs.h"
+
 #include <algorithm>
 
 namespace fakeos {
@@ -408,6 +410,7 @@ void System::launch(const std::string &name,
         return;
     }
     program_ = info->make(args);
+    programName_ = name;
     programBegun_ = false;
     canvas_.resize(world_.columns, world_.rows);
     canvas_.setCapabilities(world_.caps);
@@ -431,6 +434,21 @@ void System::endProgram() {
         out_ += c;
     }
     program_.reset();
+    for (char c : pendingText_) {
+        if (c == '\n') {
+            out_ += '\r';
+        }
+        out_ += c;
+    }
+    pendingText_.clear();
+    if (world_.launch) { // A program (or a click egg) asked for the next one.
+        const auto request = *world_.launch;
+        world_.launch.reset();
+        launch(request.name, request.args);
+        if (program_) {
+            return;
+        }
+    }
     if (programIsIntro_) {
         programIsIntro_ = false;
         showWelcome();
@@ -440,15 +458,37 @@ void System::endProgram() {
     }
 }
 
+// A left click while a program runs: if the word drawn there is a click egg,
+// the program ends and the egg takes effect.
+void System::clicked(const Key &key) {
+    const auto word = canvas_.wordAt(key.column, key.row);
+    if (word.empty()) {
+        return;
+    }
+    if (const auto *egg = matchClickEgg(world_, programName_, word)) {
+        std::string text;
+        if (applyEgg(world_, *egg, text)) {
+            pendingText_ += text;
+            endProgram();
+        }
+    }
+}
+
 Reaction System::input(std::string_view bytes) {
     for (const auto &key : decoder_.feed(bytes)) {
         if (exitCode_) {
             break;
         }
         if (program_) {
-            program_->key(world_, key);
-            if (program_->finished()) {
-                endProgram();
+            if (key.is(Key::Type::Mouse) && key.press && !key.motion &&
+                key.button == 0) {
+                clicked(key);
+            }
+            if (program_) {
+                program_->key(world_, key);
+                if (program_->finished()) {
+                    endProgram();
+                }
             }
         }
         else {

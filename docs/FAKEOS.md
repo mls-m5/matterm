@@ -75,7 +75,21 @@ sequences are emitted.
   transport) runs the `System` as a `ScriptedLink::Program`. `ScriptedLink` gained
   `Program::tick()` and `nextDeadline()` for it; the browser loop's idle throttling
   wakes up as soon as a frame changes the picture.
-- Later milestones: the native `matterm-demo` window and an optional raw-tty mode.
+- **Native window** (`matterm-demo`, `app/demo/main.cpp`): the same `ScriptedProgram`
+  behind a `ScriptedLink`, shown through `TerminalModel`, `VtParser` and the SDL
+  renderer. Like the other frontends it snaps the window to whole cells, reserves
+  the scrollbar strip, reports the mouse to programs that ask for it (the click
+  eggs), and supports selection (Ctrl+Shift+C/V/A), wheel and Shift+PageUp/Down
+  scrolling. `exit` closes it. Options: `--no-intro`, `--seed N`, `--font-size`,
+  an optional font path, `--smoke-test` (hidden window self-test).
+- **Plain terminal** (`matterm-demo --tty`, `app/demo/ttyhost.cpp`, POSIX only):
+  the same core on this process's own terminal: raw mode, `poll` on stdin with a
+  timeout from `nextDeadline()`, `SIGWINCH` through a self-pipe, and the terminal
+  restored on every way out (also on SIGINT/SIGTERM/SIGHUP). Capabilities come
+  from the environment: truecolor from `COLORTERM`, 256 colors from `TERM`, no
+  alternate screen for `TERM=linux`/`dumb`/`vt100`/`vt220`, Unicode from the
+  locale. It refuses to run unless stdin and stdout are terminals, and opens
+  nothing but them. Tested under a pseudo-terminal (`test/demotty_test.cpp`).
 
 ### Adding things
 

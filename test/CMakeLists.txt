@@ -241,6 +241,20 @@ if(BUILD_TESTING)
                 COMMAND matterm-render-demo "${TEST_FONT_FILE}" --smoke-test)
             set_tests_properties(glyph_render_smoke PROPERTIES
                 ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+        if(TARGET matterm-demo AND TARGET ptylink)
+            add_executable(demotty_test demotty_test.cpp mls-unit-test/test_main.cpp)
+            target_link_libraries(demotty_test PRIVATE matterm::ptylink)
+            target_compile_definitions(demotty_test PRIVATE DEMO_BINARY="$<TARGET_FILE:matterm-demo>")
+            add_dependencies(demotty_test matterm-demo)
+            add_test(NAME demo_tty COMMAND demotty_test)
+            set_tests_properties(demo_tty PROPERTIES TIMEOUT 60)
+        endif()
+        if(TARGET matterm-demo)
+            add_test(NAME demo_render_smoke
+                COMMAND matterm-demo "${TEST_FONT_FILE}" --smoke-test)
+            set_tests_properties(demo_render_smoke PROPERTIES
+                ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+        endif()
             add_test(NAME terminal_model_render_smoke
                 COMMAND matterm-lib-demo "${TEST_FONT_FILE}" --smoke-test)
             set_tests_properties(terminal_model_render_smoke PROPERTIES
@@ -286,7 +300,7 @@ if(BUILD_TESTING)
             endif()
         endif()
         if(MATTERM_BUNDLE_FONT)
-            foreach(app IN ITEMS matterm matterm-render-demo matterm-lib-demo)
+            foreach(app IN ITEMS matterm matterm-render-demo matterm-lib-demo matterm-demo)
                 if(TARGET ${app})
                     add_test(NAME ${app}_default_font COMMAND ${app} --smoke-test)
                     set_tests_properties(${app}_default_font PROPERTIES
