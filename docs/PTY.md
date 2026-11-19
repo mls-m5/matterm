@@ -66,7 +66,8 @@ starts before SDL initialization; the real cell size then triggers model/PTY res
 Special keys/Ctrl/Meta and UTF-8 text are encoded to the PTY. AltGr is treated as
 text input, not an extra Escape prefix. Shift+Page Up/Down navigates history;
 ordinary page/function/Escape keys go to the child. Ctrl+Shift+V explicitly pastes.
-Ctrl+Shift+Q/window close shuts down; exited sessions keep the last rendered frame.
+Ctrl+Shift+Q or closing the window shuts down the session. The window also
+closes automatically once the child is reaped and PTY output is drained.
 Mouse wheel navigates primary history or sends arrow keys on the alternate screen;
 full mouse reporting/selection is not implemented.
 

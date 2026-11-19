@@ -67,6 +67,7 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [x] Keyboard/text/paste -> input encoder -> PTY; parser replies share the queued output path.
 - [ ] Capability-appropriate TERM/terminfo; do not advertise xterm-256color prematurely.
 - [x] Controlled tty/job-control/resize/exit tests, interactive bash command test, and end-to-end PTY rendering smoke.
+- [x] Close the application window when its PTY session finishes.
 - [x] Optional integration fixtures for a real Python curses screen (DEC borders/input) and top.
 - [ ] Broader full-screen/editor transcripts and interactive compatibility testing.
 - [x] Keep dangerous OSC actions disabled; any future opt-in requires a security policy.
