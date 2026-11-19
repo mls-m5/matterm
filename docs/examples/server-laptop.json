@@ -3,7 +3,7 @@
   "listen_address": "127.0.0.1",
   "port": 8080,
   "allowed_origin": "http://localhost:8080",
-  "static_dir": "build/web",
+  "static_dir": "build-web/site",
   "rate_limit": {
     "max_failures": 10,
     "lockout_initial_seconds": 10,
