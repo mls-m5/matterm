@@ -61,11 +61,19 @@ struct VtParser::Impl {
     struct Rendition {
         Rgb8 foreground;
         Rgb8 background;
+        bool inverse = false;
+        bool conceal = false;
     };
     struct Context {
         Rendition style;
         Rendition saved;
         bool hasSaved = false;
+        bool g0Graphics = false;
+        bool g1Graphics = false;
+        bool useG1 = false;
+        bool savedG0 = false;
+        bool savedG1 = false;
+        bool savedUseG1 = false;
     };
 
     TerminalModel &model;
@@ -80,6 +88,7 @@ struct VtParser::Impl {
     std::size_t parameterCount = 0;
     char prefix = 0;
     bool intermediate = false;
+    char charsetSelector = 0;
     bool osc = false;
     bool discardString = false;
     std::string controlString;
@@ -100,12 +109,23 @@ struct VtParser::Impl {
         return model.alternateScreen() ? alternate : primary;
     }
     void applyColors() {
-        model.setColors(context().style.foreground, context().style.background);
+        auto foreground = context().style.foreground;
+        auto background = context().style.background;
+        if (context().style.inverse) {
+            std::swap(foreground, background);
+        }
+        if (context().style.conceal) {
+            foreground = background;
+        }
+        model.setColors(foreground, background);
     }
     void save() {
         model.saveCursor();
         context().saved = context().style;
         context().hasSaved = true;
+        context().savedG0 = context().g0Graphics;
+        context().savedG1 = context().g1Graphics;
+        context().savedUseG1 = context().useG1;
     }
     void restore() {
         if (!context().hasSaved) {
@@ -113,16 +133,22 @@ struct VtParser::Impl {
         }
         model.restoreCursor();
         context().style = context().saved;
+        context().g0Graphics = context().savedG0;
+        context().g1Graphics = context().savedG1;
+        context().useG1 = context().savedUseG1;
         applyColors();
     }
     void alternateMode(bool enabled) {
         if (model.alternateScreen() == enabled) {
             return;
         }
-        const auto inherited = context().style;
+        const auto inherited = context();
         model.setAlternateScreen(enabled);
         if (enabled) {
-            alternate = Context{inherited, inherited, false};
+            alternate = Context{inherited.style, inherited.style, false};
+            alternate.g0Graphics = inherited.g0Graphics;
+            alternate.g1Graphics = inherited.g1Graphics;
+            alternate.useG1 = inherited.useG1;
         }
         applyColors();
     }
@@ -136,7 +162,37 @@ struct VtParser::Impl {
         osc = false;
         discardString = false;
     }
+    void paint(std::u32string text) {
+        const auto &ctx = context();
+        if (ctx.useG1 ? ctx.g1Graphics : ctx.g0Graphics) {
+            static constexpr std::u32string_view graphics =
+                U"◆▒␉␌␍␊°±␤␋┘┐┌└┼⎺⎻─⎼⎽├┤┴┬│≤≥π≠£·";
+            static_assert(graphics.size() == 31);
+            for (auto &ch : text) {
+                if (ch >= 0x60 && ch <= 0x7e) {
+                    ch = graphics[std::size_t(ch - 0x60)];
+                }
+            }
+        }
+        model.write(text);
+    }
+    void resetTerminal() {
+        model.reset();
+        primary = Context{defaults, defaults, false};
+        alternate = Context{defaults, defaults, false};
+        modes = {};
+        applyColors();
+        model.eraseDisplay(TerminalModel::EraseMode::All);
+    }
     void control(unsigned char byte) {
+        if (byte == 0x0e) {
+            context().useG1 = true;
+            return;
+        }
+        if (byte == 0x0f) {
+            context().useG1 = false;
+            return;
+        }
         // Only these C0 actions are currently supported. BEL has no side
         // effect.
         if (byte == '\r' || byte == '\n' || byte == '\b' || byte == '\t') {
@@ -180,6 +236,7 @@ struct VtParser::Impl {
         }
         else if (byte >= 0x20 && byte <= 0x2f) {
             state = State::EscapeIntermediate;
+            charsetSelector = byte == '(' || byte == ')' ? char(byte) : 0;
         }
         else {
             state = State::Ground;
@@ -188,6 +245,17 @@ struct VtParser::Impl {
             }
             else if (byte == '8') {
                 restore();
+            }
+            else if (byte == 'c') {
+                resetTerminal();
+            }
+            else if (byte == 'M') {
+                model.reverseIndex();
+            }
+            else if (byte == 'Z') {
+                if (events.reply) {
+                    events.reply("\x1b[?1;0c");
+                }
             }
             else if (byte == 'D') {
                 model.lineFeed();
@@ -212,9 +280,12 @@ struct VtParser::Impl {
         const auto x = std::clamp(std::int64_t(cursor.column) + dx,
                                   std::int64_t(0),
                                   std::int64_t(model.columns() - 1));
+        const auto top = model.originMode() ? model.scrollTop() : 0;
+        const auto bottom =
+            model.originMode() ? model.scrollBottom() : int(model.rows()) - 1;
         const auto y = std::clamp(std::int64_t(cursor.row) + dy,
-                                  std::int64_t(0),
-                                  std::int64_t(model.rows() - 1));
+                                  std::int64_t(top),
+                                  std::int64_t(bottom));
         model.moveCursor(int(x), int(y));
     }
     void sgr() {
@@ -223,6 +294,18 @@ struct VtParser::Impl {
             const int code = value(i, 0, false);
             if (code == 0) {
                 style = defaults;
+            }
+            else if (code == 7) {
+                style.inverse = true;
+            }
+            else if (code == 27) {
+                style.inverse = false;
+            }
+            else if (code == 8) {
+                style.conceal = true;
+            }
+            else if (code == 28) {
+                style.conceal = false;
             }
             else if (code == 39) {
                 style.foreground = defaults.foreground;
@@ -305,6 +388,12 @@ struct VtParser::Impl {
                 else if (parameters[i] == 2004) {
                     modes.bracketedPaste = final == 'h';
                 }
+                else if (parameters[i] == 6) {
+                    model.setOriginMode(final == 'h');
+                }
+                else if (parameters[i] == 7) {
+                    model.setAutoWrap(final == 'h');
+                }
                 else if (parameters[i] == 25) {
                     model.setCursorVisible(final == 'h');
                 }
@@ -315,6 +404,14 @@ struct VtParser::Impl {
             return;
         }
         if (prefix != 0) {
+            return;
+        }
+        if (final == 'h' || final == 'l') {
+            for (std::size_t i = 0; i < parameterCount; ++i) {
+                if (parameters[i] == 4) {
+                    model.setInsertMode(final == 'h');
+                }
+            }
             return;
         }
         const int count = value(0, 1);
@@ -345,11 +442,11 @@ struct VtParser::Impl {
             model.moveCursor(count - 1, model.cursor().row);
             break;
         case 'd':
-            model.moveCursor(model.cursor().column, count - 1);
+            model.addressCursor(model.cursor().column, count - 1);
             break;
         case 'H':
         case 'f':
-            model.moveCursor(value(1, 1) - 1, count - 1);
+            model.addressCursor(value(1, 1) - 1, count - 1);
             break;
         case 'J':
         case 'K': {
@@ -368,6 +465,36 @@ struct VtParser::Impl {
             }
             break;
         }
+        case '@':
+            model.insertCharacters(count);
+            break;
+        case 'P':
+            model.deleteCharacters(count);
+            break;
+        case 'X':
+            model.eraseCharacters(count);
+            break;
+        case 'L':
+            model.insertLines(count);
+            break;
+        case 'M':
+            model.deleteLines(count);
+            break;
+        case 'S':
+            model.scrollUp(count);
+            break;
+        case 'T':
+            model.scrollDown(count);
+            break;
+        case 'r':
+            model.setScrollRegion(count - 1, value(1, int(model.rows())) - 1);
+            break;
+        case 'c':
+            if (parameterCount == 1 && value(0, 0, false) == 0 &&
+                events.reply) {
+                events.reply("\x1b[?1;0c");
+            }
+            break;
         case 'm':
             sgr();
             break;
@@ -384,9 +511,12 @@ struct VtParser::Impl {
                 }
                 else if (parameters[0] == 6) {
                     const auto cursor = model.cursor();
-                    const auto reply = "\x1b[" +
-                                       std::to_string(cursor.row + 1) + ";" +
-                                       std::to_string(cursor.column + 1) + "R";
+                    const auto reply =
+                        "\x1b[" +
+                        std::to_string(
+                            cursor.row + 1 -
+                            (model.originMode() ? model.scrollTop() : 0)) +
+                        ";" + std::to_string(cursor.column + 1) + "R";
                     events.reply(reply);
                 }
             }
@@ -496,7 +626,18 @@ struct VtParser::Impl {
         }
         else if (state == State::EscapeIntermediate) {
             if (byte >= 0x30) {
+                if (byte == '0' || byte == 'B') {
+                    if (charsetSelector == '(') {
+                        context().g0Graphics = byte == '0';
+                    }
+                    else if (charsetSelector == ')') {
+                        context().g1Graphics = byte == '0';
+                    }
+                }
                 state = State::Ground;
+            }
+            else {
+                charsetSelector = 0;
             }
         }
         else if (state == State::Csi || state == State::CsiIgnore) {
@@ -513,7 +654,7 @@ struct VtParser::Impl {
                 } while (i < bytes.size() &&
                          static_cast<unsigned char>(bytes[i]) >= 0x20 &&
                          bytes[i] != 0x7f);
-                model.write(utf8.feed(bytes.substr(begin, i - begin)));
+                paint(utf8.feed(bytes.substr(begin, i - begin)));
             }
             else {
                 if (state == State::Ground) {
