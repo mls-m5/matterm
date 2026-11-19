@@ -46,7 +46,7 @@ TEST_CASE("Child has a controlling tty on all stdio descriptors and initial "
           "winsize") {
     PtyProcess process({PTY_TEST_CHILD, "tty"}, 80, 24);
     const auto output = collect(process);
-    EXPECT(output.find("TTY:80:24:vt100") != std::string::npos);
+    EXPECT(output.find("TTY:80:24:xterm-256color") != std::string::npos);
     EXPECT(process.closed());
     const auto status = process.pollExit();
     EXPECT(status.has_value());

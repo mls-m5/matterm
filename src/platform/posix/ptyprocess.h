@@ -28,7 +28,7 @@ public:
     PtyProcess(const std::vector<std::string> &arguments,
                int columns,
                int rows,
-               const std::string &term = "vt100",
+               const std::string &term = "xterm-256color",
                ColorCapability color = ColorCapability::Unspecified);
     ~PtyProcess();
     PtyProcess(const PtyProcess &) = delete;

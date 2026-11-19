@@ -2,7 +2,11 @@
 #include "terminalmodel.h"
 #include "vtparser.h"
 
+#include "palette.h"
+
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace {
 void filled(TerminalModel &model) {
@@ -255,6 +259,81 @@ TEST_CASE("Cursor shape steady and blink controls do not cancel pending wrap") {
     parser.feed("\x1b[1 q");
     EXPECT(model.cursor().shape == CursorState::Shape::Block);
     EXPECT(model.cursor().blink);
+}
+
+TEST_CASE("REP repeats the last printed character") {
+    TerminalModel model(8, 2);
+    VtParser parser(model);
+    parser.feed("\x1b[3bx\x1b[3b");
+    EXPECT(model.cell(0, 0).codePoint == U'x');
+    EXPECT(model.cell(3, 0).codePoint == U'x');
+    EXPECT(model.cell(4, 0).codePoint == U' ');
+}
+
+TEST_CASE("Soft reset restores modes and rendition but keeps the screen") {
+    TerminalModel model(8, 4);
+    VtParser parser(model);
+    parser.feed("\x1b[1;31mabc\x1b[?1h\x1b[?1000h\x1b[?1006h\x1b[?25l"
+                "\x1b[2;3r\x1b[?6h\x1b[4h\x1b[!p");
+    EXPECT_FALSE(parser.modes().applicationCursor);
+    EXPECT(parser.modes().mouseTracking == TerminalModes::MouseTracking::Off);
+    EXPECT(parser.modes().mouseEncoding == TerminalModes::MouseEncoding::X10);
+    EXPECT(model.cursor().visible);
+    EXPECT_FALSE(model.originMode());
+    EXPECT_EQ(model.scrollTop(), 0);
+    EXPECT_EQ(model.scrollBottom(), 3);
+    EXPECT(model.cell(1, 0).codePoint == U'b');
+    parser.feed("Z"); // Origin reset homes the cursor, over the old 'a'.
+    EXPECT(model.cell(0, 0).codePoint == U'Z');
+    EXPECT_EQ(int(model.cell(0, 0).foregroundColor().kind),
+              int(ColorReference::Kind::Default));
+}
+
+TEST_CASE("Alternate screen modes 47 and 1047 and cursor save mode 1048") {
+    TerminalModel model(8, 2);
+    VtParser parser(model);
+    parser.feed("\x1b[?47h");
+    EXPECT(model.alternateScreen());
+    parser.feed("\x1b[?47l\x1b[?1047h");
+    EXPECT(model.alternateScreen());
+    parser.feed("\x1b[?1047l\x1b[3C\x1b[?1048h\x1b[H\x1b[?1048l");
+    EXPECT_FALSE(model.alternateScreen());
+    EXPECT_EQ(model.cursor().column, 3);
+}
+
+TEST_CASE("OSC 4 and OSC 104 change and reset client palette entries") {
+    TerminalModel model(8, 2);
+    std::vector<std::pair<std::size_t, Rgb8>> set;
+    std::vector<std::optional<std::size_t>> reset;
+    std::string reply;
+    Palette palette;
+    palette.colors[3] = {1, 2, 3};
+    VtEvents events;
+    events.reply = [&](std::string_view bytes) { reply = bytes; };
+    events.setPaletteColor = [&](std::size_t index, Rgb8 color) {
+        set.emplace_back(index, color);
+    };
+    events.resetPaletteColor = [&](std::optional<std::size_t> index) {
+        reset.push_back(index);
+    };
+    events.palette = &palette;
+    VtParser parser(model, events);
+    parser.feed("\x1b]4;1;rgb:ff/00/80;2;#0a0b0c\x1b\\");
+    EXPECT_EQ(set.size(), std::size_t(2));
+    EXPECT_EQ(set[0].first, std::size_t(1));
+    EXPECT_EQ(int(set[0].second.r), 255);
+    EXPECT_EQ(int(set[0].second.g), 0);
+    EXPECT_EQ(int(set[0].second.b), 128);
+    EXPECT_EQ(int(set[1].second.g), 11);
+    parser.feed("\x1b]4;300;rgb:ff/ff/ff\x07\x1b]4;5;nonsense\x07");
+    EXPECT_EQ(set.size(), std::size_t(2));
+    parser.feed("\x1b]4;3;?\x07");
+    EXPECT_EQ(reply, std::string("\x1b]4;3;rgb:0101/0202/0303\x1b\\"));
+    parser.feed("\x1b]104\x07\x1b]104;7;9\x07");
+    EXPECT_EQ(reset.size(), std::size_t(3));
+    EXPECT_FALSE(reset[0].has_value());
+    EXPECT_EQ(*reset[1], std::size_t(7));
+    EXPECT_EQ(*reset[2], std::size_t(9));
 }
 
 TEST_SUIT_END

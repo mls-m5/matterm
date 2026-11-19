@@ -7,7 +7,7 @@ def run(screen):
     try:
         curses.curs_set(0)
     except curses.error:
-        pass  # The conservative vt100 terminfo has no cursor-visibility entry.
+        pass  # Some terminfo entries have no cursor-visibility capability.
     screen.border()
     screen.addstr(1, 2, "CURSES_SESSION")
     screen.addstr(3, 2, "scrolling and DEC graphics fixture")

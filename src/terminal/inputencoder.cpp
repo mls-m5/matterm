@@ -19,6 +19,158 @@ std::string InputEncoder::control(char ascii, bool alt) {
     }
     return {};
 }
+namespace {
+void appendUtf8(std::string &out, int value) {
+    if (value < 0x80) {
+        out += char(value);
+    }
+    else {
+        out += char(0xc0 | (value >> 6));
+        out += char(0x80 | (value & 0x3f));
+    }
+}
+} // namespace
+
+std::string InputEncoder::mouse(const MouseEvent &event,
+                                const TerminalModes &modes) {
+    using Tracking = TerminalModes::MouseTracking;
+    using Encoding = TerminalModes::MouseEncoding;
+    using Button = MouseEvent::Button;
+    using Type = MouseEvent::Type;
+    if (modes.mouseTracking == Tracking::Off || event.column < 0 ||
+        event.row < 0) {
+        return {};
+    }
+    const bool wheel = event.button >= Button::WheelUp;
+    if (wheel && event.type != Type::Press) {
+        return {};
+    }
+    if (event.type == Type::Release && modes.mouseTracking == Tracking::Press) {
+        return {};
+    }
+    if (event.type == Type::Motion) {
+        const bool pressed = event.button != Button::None;
+        if (wheel || modes.mouseTracking == Tracking::Press ||
+            modes.mouseTracking == Tracking::Normal ||
+            (modes.mouseTracking == Tracking::Drag && !pressed)) {
+            return {};
+        }
+    }
+    int code = 0;
+    switch (event.button) {
+    case Button::Left:
+        code = 0;
+        break;
+    case Button::Middle:
+        code = 1;
+        break;
+    case Button::Right:
+        code = 2;
+        break;
+    case Button::None:
+        code = 3;
+        break;
+    case Button::WheelUp:
+        code = 64;
+        break;
+    case Button::WheelDown:
+        code = 65;
+        break;
+    case Button::WheelLeft:
+        code = 66;
+        break;
+    case Button::WheelRight:
+        code = 67;
+        break;
+    }
+    const bool release = event.type == Type::Release;
+    const bool sgr = modes.mouseEncoding == Encoding::Sgr;
+    if (release && !sgr) {
+        code = 3; // Legacy encodings do not say which button was released.
+    }
+    if (modes.mouseTracking != Tracking::Press) {
+        code += 4 * int(event.modifiers.shift) + 8 * int(event.modifiers.alt) +
+                16 * int(event.modifiers.control);
+    }
+    if (event.type == Type::Motion) {
+        code += 32;
+    }
+    const int column = event.column + 1;
+    const int row = event.row + 1;
+    if (sgr) {
+        return "\x1b[<" + std::to_string(code) + ";" + std::to_string(column) +
+               ";" + std::to_string(row) + (release ? 'm' : 'M');
+    }
+    if (modes.mouseEncoding == Encoding::Urxvt) {
+        return "\x1b[" + std::to_string(code + 32) + ";" +
+               std::to_string(column) + ";" + std::to_string(row) + "M";
+    }
+    const int limit = modes.mouseEncoding == Encoding::Utf8 ? 2015 : 223;
+    if (column > limit || row > limit || code + 32 > limit) {
+        return {};
+    }
+    std::string result = "\x1b[M";
+    if (modes.mouseEncoding == Encoding::Utf8) {
+        appendUtf8(result, code + 32);
+        appendUtf8(result, column + 32);
+        appendUtf8(result, row + 32);
+    }
+    else {
+        result += char(code + 32);
+        result += char(column + 32);
+        result += char(row + 32);
+    }
+    return result;
+}
+std::string InputEncoder::focus(bool gained, const TerminalModes &modes) {
+    return modes.focusReporting ? (gained ? "\x1b[I" : "\x1b[O") : "";
+}
+std::string InputEncoder::keypad(char key,
+                                 Modifiers mod,
+                                 const TerminalModes &modes) {
+    if (!modes.applicationKeypad) {
+        return key == '\r' ? InputEncoder::key(Key::Enter, mod, modes)
+                           : text(std::string(1, key), mod.alt);
+    }
+    char final = 0;
+    if (key >= '0' && key <= '9') {
+        final = char('p' + (key - '0'));
+    }
+    else {
+        switch (key) {
+        case '*':
+            final = 'j';
+            break;
+        case '+':
+            final = 'k';
+            break;
+        case ',':
+            final = 'l';
+            break;
+        case '-':
+            final = 'm';
+            break;
+        case '.':
+            final = 'n';
+            break;
+        case '/':
+            final = 'o';
+            break;
+        case '=':
+            final = 'X';
+            break;
+        case '\r':
+            final = 'M';
+            break;
+        default:
+            return {};
+        }
+    }
+    const int modifier =
+        1 + int(mod.shift) + 2 * int(mod.alt) + 4 * int(mod.control);
+    return modifier == 1 ? std::string("\x1bO") + final
+                         : "\x1bO" + std::to_string(modifier) + final;
+}
 std::string InputEncoder::key(Key key,
                               Modifiers mod,
                               const TerminalModes &modes) {

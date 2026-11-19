@@ -18,7 +18,7 @@ public:
                int columns,
                int rows,
                VtEvents events = {},
-               const std::string &term = "vt100",
+               const std::string &term = "xterm-256color",
                PtyProcess::ColorCapability color =
                    PtyProcess::ColorCapability::Unspecified);
     ~PtySession();
