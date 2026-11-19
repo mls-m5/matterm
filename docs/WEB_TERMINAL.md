@@ -126,39 +126,15 @@ default reliability can carry the same messages unchanged. Text frames are
 rejected. No compression (`permessage-deflate` disabled) to avoid CRIME-style
 issues and unbounded inflate sizes.
 
-### 4.2 Message framing
+### 4.2 Messages
 
-Each message is `type (1 byte)` followed by a type-specific payload. Integers
-are unsigned big-endian. Unknown types close the connection with an error.
-Maximum message size is 64 KiB for client->server and 256 KiB for server->client;
-anything larger closes the connection before the payload is buffered.
-
-Client -> server
-
-| Type | Name | Payload |
-|---|---|---|
-| 0x01 | `Hello` | `u16 version`, `u16 columns`, `u16 rows`, `u64 resumeOffset`, `u16 sessionIdLen`, `sessionId` (empty for a new session) |
-| 0x02 | `Input` | raw bytes for the PTY |
-| 0x03 | `Resize` | `u16 columns`, `u16 rows` |
-| 0x04 | `Ack` | `u64 consumedOffset`: output bytes the client has parsed |
-| 0x05 | `Ping` | `u32 nonce` |
-| 0x06 | `Detach` | none: leave the session running (reconnectable) |
-| 0x07 | `Close` | none: terminate the session (SIGHUP the process) |
-
-Server -> client
-
-| Type | Name | Payload |
-|---|---|---|
-| 0x81 | `Welcome` | `u16 version`, `u16 sessionIdLen`, `sessionId`, `u64 startOffset`, `u8 flags` (bit 0: resumed, bit 1: output was lost) |
-| 0x82 | `Output` | `u64 offset`, raw PTY bytes. `offset` is the stream position of the first byte |
-| 0x83 | `Exit` | `i32 code`, `i32 signal`; sent after the last `Output` |
-| 0x84 | `Pong` | `u32 nonce` |
-| 0x85 | `Error` | `u16 code`, UTF-8 reason (bounded to 256 bytes); connection then closes |
-
-Authentication is **not** part of this protocol: the socket is only accepted
-after the HTTP login (section 5). `Hello` must be the first message and must
-arrive within 5 seconds of the upgrade, or the server drops the connection.
-Columns and rows are validated (1..1000); `Resize` is rate-limited.
+The normative wire format (byte layouts, limits, state machine, error codes,
+and worked examples) is in [PROTOCOL.md](PROTOCOL.md). In short, every message
+is one WebSocket binary message of at most 16 KiB: a type byte followed by a
+fixed layout. Client to server: `Hello`, `Input`, `Resize`, `Ack`, `Ping`,
+`Close`. Server to client: `Welcome`, `Output`, `Exit`, `Pong`, `Error`.
+Authentication is not part of the protocol: the socket is only accepted after the
+HTTP login (section 5). `Hello` must arrive within 5 seconds of the upgrade.
 
 ### 4.3 Versioning
 
@@ -181,8 +157,8 @@ consumes it.
   and closes the session with `Error` on overflow. The client chunks pastes to
   4 KiB frames.
 - The server never buffers unbounded data for a slow client; a client that
-  stops acknowledging for 30 seconds is disconnected (but the session survives,
-  see 4.5).
+  stops acknowledging for 30 seconds is disconnected (in v1 that ends the
+  session, see 4.5).
 
 ### 4.5 Session lifetime and reconnection
 
@@ -226,16 +202,22 @@ clipboard and OSC 8 hyperlinks stay disabled in the parser (VT.md).
 - The server refuses to bind a non-loopback address unless TLS is configured,
   or it is explicitly told it sits behind a trusted reverse proxy that
   terminates TLS (`trusted_proxy`, below).
+  A deliberate override, `allow_plain_http` (`--allow-plain-http`), permits plain
+  HTTP on a non-loopback address for the container case, where the address is
+  not routable from outside because the port is published on host loopback only.
+  It is named loudly on purpose and logs a warning at start.
 - Recommended public deployment: the host's existing nginx terminates TLS
   (HTTP/2, certificates, HSTS) and forwards to the server on loopback (or, with
-  the Podman setup, to the `edge` container's loopback port). This keeps
+  the Podman setup, to the container's loopback-published port). This keeps
   certificate handling out of this code base and avoids a second web server
   competing for ports 80/443. Native TLS in the server is optional later.
 - `trusted_proxy` takes the proxy's address (default: loopback only). The
   server accepts connections only from that peer address, and only then may the
   client address come from `X-Forwarded-For`, and only the last hop appended by
-  that proxy. When several proxies are chained (host nginx, then the `edge`
-  container), `trusted_proxy_hops` says how many entries to skip from the right.
+  that proxy. When several proxies are chained, `trusted_proxy_hops` says how many entries
+  to skip from the right. `trusted_proxy = any` is accepted only when the
+  listening port is reachable by the proxy alone, as with a loopback-published
+  container port.
   This also lets the server listen on a private container network
   address without being reachable by anything but the proxy.
 - `localhost` is a secure context in browsers, so the `Secure` cookie flag and
@@ -472,9 +454,9 @@ Each phase is independently useful and ends with tests and documentation.
 
 The first deployments run in Podman, with the same compose files on the laptop
 and on the public server (`deploy/podman/`, provisional until the server
-exists). Two containers: the server with its shell on an `internal` network with
-no outbound access, and an nginx `edge` container as the only published port (loopback only;
-the host's own nginx terminates TLS on the server). Root filesystems are
+exists). One container: the server with its shell on an `internal` network with
+no outbound access; its single port is published on host loopback only, and
+the host's own nginx terminates TLS on the server. Root filesystems are
 read-only, all capabilities are dropped, and resources are limited. Inside the container the
 shell can only see what is mounted, which also answers most of the account
 question in 5.4: the container, not the host account, is the isolation boundary.
@@ -508,8 +490,8 @@ Made:
 9. **Configuration format:** JSON via the project's own `lib/fast-json` (replaces the
     earlier TOML suggestion). Exact key names are chosen during phase 2, when the
     settings exist.
-10. **Containers:** Podman first, with a no-egress server network and an nginx
-    `edge` container (section 10). The container starts out using the host's config and
+10. **Containers:** Podman first, with a no-egress server network and a single
+    loopback-published port (section 10); no proxy container in v1. The container starts out using the host's config and
     state directories.
 
 Open:

@@ -5,12 +5,11 @@
 #   podman compose -f deploy/podman/compose.yaml up --build
 #   -> http://127.0.0.1:8080
 #
-# Layout:  browser -> edge/nginx (published on 127.0.0.1) -> matterm (no internet)
+# Layout:  browser -> 127.0.0.1:8080 (the only published port) -> matterm
 #
 # * `matterm` runs the server and the shell. It is attached only to an
 #   `internal` network, so it has no route to the internet or the LAN.
-# * `edge` (nginx) is attached to both networks and is the only published port,
-#   bound to loopback on the host.
+#   Its single port is published on host loopback only.
 # Host config/state directories are mounted into the container so laptop and
 # server share the same layout (see docs/WEB_TERMINAL.md, section 5.6).
 
@@ -38,12 +37,15 @@ services:
     userns_mode: keep-id
     user: "${MATTERM_UID:-1000}:${MATTERM_GID:-1000}"
     command:
+      # Plain HTTP on a non-loopback address inside the container is only
+      # acceptable because the port is published on host loopback below.
       - --listen=0.0.0.0:8080
-      - --trusted-proxy=10.89.77.2
+      - --allow-plain-http
       - --allowed-origin=http://127.0.0.1:8080
-    networks:
-      backend:
-        ipv4_address: 10.89.77.3
+      - --allowed-origin=http://localhost:8080
+    ports:
+      - "127.0.0.1:${MATTERM_PORT:-8080}:8080"
+    networks: [isolated]
     tmpfs:
       - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
       # The shell's home: scratch space that disappears with the container.
@@ -58,22 +60,6 @@ services:
       interval: 30s
       timeout: 3s
       retries: 3
-
-  edge:
-    <<: *hardening
-    image: docker.io/nginxinc/nginx-unprivileged:1.27-alpine
-    depends_on: [matterm]
-    # Only loopback on the host. Never publish 0.0.0.0 without TLS.
-    ports:
-      - "127.0.0.1:${MATTERM_PORT:-8080}:8080"
-    networks:
-      backend:
-        ipv4_address: 10.89.77.2
-      frontend: {}
-    volumes:
-      - ./edge.conf:/etc/nginx/conf.d/default.conf:ro,Z
-    tmpfs:
-      - /tmp:size=16m
 
   # One-off: create the config directory and set the passphrase.
   #   podman compose run --rm setup
@@ -98,10 +84,7 @@ services:
 
 networks:
   # No gateway and no outbound traffic: the shell cannot reach the internet.
-  backend:
+  # UNVERIFIED: if Podman refuses to forward a published port into an internal
+  # network, see "Network isolation" in README.md for the fallback.
+  isolated:
     internal: true
-    ipam:
-      config:
-        - subnet: 10.89.77.0/24
-  # Reachable from the host (for the published loopback port) only.
-  frontend: {}

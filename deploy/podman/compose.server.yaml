@@ -13,6 +13,9 @@ services:
   matterm:
     command:
       - --listen=0.0.0.0:8080
-      - --trusted-proxy=10.89.77.2
-      - --trusted-proxy-hops=2
+      - --allow-plain-http
+      # Only the host's nginx can reach the loopback-published port, so its
+      # X-Forwarded-For is trusted regardless of the peer address Podman shows.
+      - --trusted-proxy=any
+      - --trusted-proxy-hops=1
       - --allowed-origin=https://${MATTERM_DOMAIN:?set MATTERM_DOMAIN}
