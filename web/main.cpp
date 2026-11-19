@@ -1,9 +1,10 @@
 // Browser front end: the terminal model, VT parser and SDL renderer on a
 // canvas, connected to matterm-server through ClientSession (WebSocket). With
-// no server URL it shows a built-in VT demo instead.
+// no server URL it runs an interactive terminal simulator (ScriptedLink).
 #include "clientsession.h"
 #include "inputencoder.h"
 #include "palette.h"
+#include "scriptedlink.h"
 #include "sdlbackend.h"
 #include "sdlinput.h"
 #include "terminalmodel.h"
@@ -33,6 +34,8 @@ struct App {
     std::unique_ptr<VtParser> parser;
     std::unique_ptr<WebSocketChannel> channel;
     std::unique_ptr<ClientSession> session;
+    std::unique_ptr<ScriptedLink> demo; // Simulator when there is no server.
+    TerminalLink *link = nullptr;       // session or demo.
     const Palette defaultPalette;
     Palette palette;
     Uint64 last = 0;
@@ -82,10 +85,10 @@ void copyToClipboard(const std::string &text) {
 }
 
 void send(App &app, const std::string &bytes) {
-    if (bytes.empty() || !app.session) {
+    if (bytes.empty() || !app.link) {
         return;
     }
-    if (app.session->sendInput(bytes)) {
+    if (app.link->sendInput(bytes)) {
         app.model->followTail();
     }
 }
@@ -306,19 +309,22 @@ void frame(void *data) {
     auto &app = *static_cast<App *>(data);
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-        if (app.session) {
+        if (app.link) {
             handleEvent(app, event);
         }
     }
     if (app.session) {
         app.session->tick();
     }
+    if (app.demo) {
+        app.demo->tick();
+    }
     const auto columns = std::size_t(std::max(1, app.backend->columns(true)));
     const auto rows = std::size_t(std::max(1, app.backend->rows()));
     if (columns != app.model->columns() || rows != app.model->rows()) {
         app.model->resize(columns, rows);
-        if (app.session) {
-            app.session->resize(int(columns), int(rows));
+        if (app.link) {
+            app.link->resize(int(columns), int(rows));
         }
     }
     const auto now = SDL_GetTicks64();
@@ -385,8 +391,8 @@ int main() {
         1000);
     VtEvents vtEvents;
     vtEvents.reply = [](std::string_view bytes) {
-        if (gApp->session) {
-            gApp->session->sendInput(bytes);
+        if (gApp->link) {
+            gApp->link->sendInput(bytes);
         }
     };
     vtEvents.title = [](std::string_view title) {
@@ -434,21 +440,31 @@ int main() {
                                    "]\r\n[Press Enter to log in again]\r\n");
             };
             app.session->setEvents(std::move(events));
+            app.link = app.session.get();
         }
         catch (const std::exception &error) {
             std::fprintf(stderr, "link failed: %s\n", error.what());
         }
     }
-    if (!app.session) {
-        app.parser->feed(
-            "\x1b[1;32mmatterm\x1b[0m in the browser \x1b[38;5;208m(Emscripten "
-            "+ SDL2)\x1b[0m\r\n\r\n"
-            "\x1b[31mred\x1b[0m \x1b[32mgreen\x1b[0m \x1b[33myellow\x1b[0m "
-            "\x1b[34mblue\x1b[0m \x1b[7minverse\x1b[0m "
-            "\x1b[4munderline\x1b[0m\r\n"
-            "\x1b[48;2;40;80;160m  truecolor background  \x1b[0m\r\n"
-            "\x1b(0lqqqqqqqqqqqqqqqk\r\nx\x1b(B Line graphics \x1b(0x\r\n"
-            "mqqqqqqqqqqqqqqqj\x1b(B\r\n\r\n$ ");
+    if (!app.link) {
+        // No server: an interactive terminal simulator (docs/SIMULATOR.md).
+        ScriptedLink::Config config;
+        config.clock = [] {
+            return protocol::Time(std::chrono::milliseconds(SDL_GetTicks64()));
+        };
+        config.columns = int(app.model->columns());
+        config.rows = int(app.model->rows());
+        app.demo = ScriptedLink::simulator(config);
+        app.link = app.demo.get();
+        TerminalLink::Events events;
+        events.output = [](std::string_view bytes) {
+            gApp->parser->feed(bytes);
+        };
+        events.exited = [](int code, int) {
+            gApp->parser->feed("\r\n[process exited: " + std::to_string(code) +
+                               "]\r\n");
+        };
+        app.demo->setEvents(std::move(events));
     }
     SDL_StartTextInput();
     app.last = SDL_GetTicks64();

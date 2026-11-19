@@ -38,6 +38,7 @@ add_library(matterm-web-core STATIC
     ${root}/src/render/sdlbackend.cpp
     ${root}/src/protocol/message.cpp
     ${root}/src/transport/clientsession.cpp
+    ${root}/src/transport/scriptedlink.cpp
 )
 target_include_directories(matterm-web-core PUBLIC
     ${root}/src ${root}/src/core ${root}/src/render ${root}/src/terminal
