@@ -106,6 +106,14 @@ if(BUILD_TESTING)
     target_include_directories(windowsnap_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
     add_test(NAME window_snap COMMAND windowsnap_test)
 
+    file(GLOB FAKEOS_TESTS CONFIGURE_DEPENDS fakeos_*_test.cpp)
+    add_executable(fakeos_test ${FAKEOS_TESTS} mls-unit-test/test_main.cpp)
+    target_link_libraries(fakeos_test PRIVATE matterm::fakeos matterm::vt matterm::transport)
+    add_test(NAME fakeos COMMAND fakeos_test)
+    add_test(NAME fakeos_includes
+        COMMAND ${CMAKE_COMMAND} -DFAKEOS_DIR=${PROJECT_SOURCE_DIR}/src/fakeos
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/check_fakeos_includes.cmake)
+
     add_executable(touchgesture_test touchgesture_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(touchgesture_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
     add_test(NAME touch_gesture COMMAND touchgesture_test)

@@ -50,6 +50,15 @@ target_compile_features(ttytransport PUBLIC cxx_std_17)
 target_include_directories(ttytransport PUBLIC src/transport)
 target_link_libraries(ttytransport PUBLIC matterm::protocol)
 
+# fakeos: a pretend Unix system with ASCII animations. Pure C++17 with no I/O,
+# clock or process access (enforced by test/check_fakeos_includes.cmake), so the
+# same core runs in the browser, in the native window and in a plain terminal.
+file(GLOB FAKEOS_SOURCES CONFIGURE_DEPENDS src/fakeos/*.cpp)
+add_library(fakeos ${FAKEOS_SOURCES})
+add_library(matterm::fakeos ALIAS fakeos)
+target_compile_features(fakeos PUBLIC cxx_std_17)
+target_include_directories(fakeos PUBLIC src/fakeos)
+
 add_library(utf8decoder src/terminal/vt/utf8decoder.cpp)
 add_library(matterm::utf8 ALIAS utf8decoder)
 target_compile_features(utf8decoder PUBLIC cxx_std_17)
