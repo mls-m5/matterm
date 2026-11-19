@@ -2,6 +2,7 @@
 // window, or with --tty in the terminal it was started from. Both run the same
 // core; the window uses the terminal model and the SDL renderer like the other
 // frontends.
+#include "beeper.h"
 #include "cursorglide.h"
 #include "fontpath.h"
 #include "inputencoder.h"
@@ -49,6 +50,8 @@ void usage(std::ostream &out, const char *program) {
            "pace.\n"
            "  --no-smooth-cursor   Jump the cursor between cells (default: it "
            "glides).\n"
+           "  --sound              Film-terminal pips for revealed and typed "
+           "text.\n"
 #ifdef MATTERM_DEMO_TTY
            "  --tty                Run in this terminal instead of a window.\n"
 #endif
@@ -79,7 +82,8 @@ int runWindow(const char *font,
               int fontSize,
               fakeos::Config pretend,
               bool smokeTest,
-              bool smoothCursor) {
+              bool smoothCursor,
+              bool sound) {
     SdlRuntime runtime;
     std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(
         SDL_CreateWindow("matterm demo",
@@ -138,6 +142,22 @@ int runWindow(const char *font,
     };
     config.columns = pretend.columns;
     config.rows = pretend.rows;
+    // The pips of revealed and typed text, through SDL audio when asked for.
+    std::unique_ptr<Beeper> beeper;
+    int pips = 0;
+    if (sound) {
+        beeper = std::make_unique<Beeper>();
+        if (beeper->ok()) {
+            pretend.sound = true;
+            pretend.onBeep = [&beeper, &pips](const fakeos::Beep &beep) {
+                ++pips;
+                beeper->play(beep);
+            };
+        }
+        else {
+            std::cerr << "No audio device: continuing silently\n";
+        }
+    }
     link = std::make_unique<ScriptedLink>(
         config, Script(), std::make_unique<fakeos::ScriptedProgram>(pretend));
     TerminalLink::Events events;
@@ -183,15 +203,25 @@ int runWindow(const char *font,
             SDL_Delay(10);
         }
         link->sendInput("echo smoke\r");
-        link->tick();
-        bool found = false;
-        for (std::size_t y = 0; y < model.rows() && !found; ++y) {
-            std::string row;
-            for (std::size_t x = 0; x < model.columns(); ++x) {
-                row.push_back(char(model.cell(x, y).codePoint));
+        // The output is revealed at a pace: wait for it.
+        const auto outputShown = [&] {
+            for (std::size_t y = 0; y < model.rows(); ++y) {
+                std::string row;
+                for (std::size_t x = 0; x < model.columns(); ++x) {
+                    row.push_back(char(model.cell(x, y).codePoint));
+                }
+                if (row.rfind("smoke", 0) == 0) {
+                    return true;
+                }
             }
-            found = row.rfind("smoke", 0) == 0;
+            return false;
+        };
+        const auto outputDeadline = SDL_GetTicks64() + 4000;
+        while (!outputShown() && SDL_GetTicks64() < outputDeadline) {
+            link->tick();
+            SDL_Delay(10);
         }
+        const bool found = outputShown();
         auto frame = model.frame(backend.cellHeight());
         frame.palette = &palette;
         backend.render(frame);
@@ -200,7 +230,15 @@ int runWindow(const char *font,
             throw std::runtime_error(
                 "demo smoke: the command output is missing");
         }
-        std::cout << "matterm-demo smoke test passed\n";
+        if (sound && beeper->ok() && pips == 0) {
+            throw std::runtime_error(
+                "demo smoke: sound is on but no pips were played");
+        }
+        std::cout << "matterm-demo smoke test passed"
+                  << (sound && beeper->ok()
+                          ? " (" + std::to_string(pips) + " pips)"
+                          : "")
+                  << "\n";
         return 0;
     }
 
@@ -534,7 +572,7 @@ int runWindow(const char *font,
 int main(int argc, char **argv) {
     const char *fontOverride = nullptr;
     int fontSize = 18;
-    bool smokeTest = false, tty = false, smoothCursor = true;
+    bool smokeTest = false, tty = false, smoothCursor = true, sound = false;
     fakeos::Config pretend;
     pretend.seed =
         std::uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -544,7 +582,7 @@ int main(int argc, char **argv) {
         std::int64_t(std::chrono::duration_cast<std::chrono::seconds>(
                          std::chrono::system_clock::now().time_since_epoch())
                          .count());
-    pretend.revealCharsPerSecond = 2500; // About 25 lines a second.
+    pretend.revealCharsPerSecond = 1250; // About 13 lines a second.
     int firstOption = 1;
     if (argc > 1 && std::string_view(argv[1]) != "-h" &&
         std::string_view(argv[1]).substr(0, 2) != "--") {
@@ -576,6 +614,12 @@ int main(int argc, char **argv) {
         }
         else if (arg == "--no-smooth-cursor") {
             smoothCursor = false;
+        }
+        else if (arg == "--sound") {
+            sound = true;
+        }
+        else if (arg == "--mute") {
+            sound = false;
         }
         else if (arg == "--seed" && i + 1 < argc) {
             const std::string_view value = argv[++i];
@@ -613,7 +657,7 @@ int main(int argc, char **argv) {
     try {
         const auto font = applicationFontPath(fontOverride);
         return runWindow(
-            font.c_str(), fontSize, pretend, smokeTest, smoothCursor);
+            font.c_str(), fontSize, pretend, smokeTest, smoothCursor, sound);
     }
     catch (const std::exception &error) {
         std::cerr << error.what() << '\n';

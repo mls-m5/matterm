@@ -35,7 +35,7 @@ packaging follow in later milestones.
    false` (builtins) and, as files in `/bin`, `ls cat mkdir touch rm cp mv head
    tail wc grep sort uniq seq yes find tree uname whoami id hostname date env ps
    uptime colors which man cal fortune cowsay rev tac nl tr cut sed printf basename
-   dirname sleep df free less top neofetch sysinfo about`. Errors and exit codes follow the real tools;
+   dirname sleep df free nproc less top neofetch sysinfo about`. Errors and exit codes follow the real tools;
    permissions apply (`/etc` belongs to root, `rm /etc/passwd` is refused). `less`
    and `top` are full-screen programs: `less FILE` (or a pipe) pages with
    j/k/Space/b/g/G and the mouse wheel; `top` shows drifting numbers.
@@ -99,15 +99,47 @@ author's name too. Like all output it appears at a pace when the host asks for i
 
 ### Pace of the output
 
-`Config::revealCharsPerSecond` (the demos use 2500, about 25 lines a second; the
-default 0 prints at once, which is what the tests use) makes the output of
+`Config::revealCharsPerSecond` (the demos use 1250, about 13 lines a second; the
+default 0 prints at once, which is what most tests use) makes the output of
 commands, `help` and the welcome text appear at a pace: a character costs one
-unit, a new line twelve, escape sequences nothing, so colors never split. Short
-texts (a line or two and the prompt) are not held back, a long text is shown within
-four seconds whatever the rate, and programs wait until the text is out. Space,
+unit, a new line twelve, escape sequences nothing, so colors never split. Even a
+one-line text and the first prompt are revealed, over at least about a third of a
+second, so the effect is always seen and never sluggish; a long text is shown
+within four seconds whatever the rate, and programs wait until the text is out. A
+bare prompt (an empty line, a command with no output) is never held back. Space,
 Enter, Escape or Ctrl-C show the rest at once; any other key does too and is then
-typed, like type-ahead. Mouse reports are ignored meanwhile. Typing, echo and
-prompts are never delayed. `--no-reveal` and `?noreveal` turn it off.
+typed, like type-ahead. Mouse reports are ignored meanwhile. Typing and echo are
+never delayed. `--no-reveal` and `?noreveal` turn it off.
+
+### Pips
+
+`Config::sound` and `Config::onBeep` make the core report short electronic pips
+(`Beep`: frequency, length, volume, time), the sound of a film computer typing: one
+for the last character shown about every 45 ms while text is revealed (the pitch
+follows the character), a lower, longer one when a line is completed, and one per
+typed letter in the intro and the Matrix sequence. The core only reports them
+(and nothing at all unless `sound` is set); the host plays them, so no audio code
+is in `src/fakeos`. Sound changes nothing about the text (a test compares the
+streams) and is deterministic.
+
+- **Browser** (`login.js`): WebAudio, synthesized (a square wave through a low-pass
+  filter with a short envelope; nothing to download). Browsers allow sound only after
+  a user gesture, so the audio context is created at the first key press or click
+  (until then the pips are silently dropped). On in the demo page, off in an embedded
+  one; `?sound=1` turns it on anywhere, `?mute` or `?sound=0` off.
+- **Native window** (`app/demo/beeper.cpp`, `pipsynth.h`): SDL audio, opt-in with
+  `--sound` (`--mute`), no sound card means silence. The synthesizer is a plain class
+  and is tested without a device (`test/pipsynth_test.cpp`).
+- **`--tty`**: no sound.
+
+### The imaginary machine
+
+One header, `src/fakeos/hardware.h`, describes the computer Mattrix OS runs on, so
+that `neofetch`, `free`, `df`, `top`, `nproc` and `/proc/cpuinfo` and
+`/proc/meminfo` all agree: a 128-core Mattrix Quantum Threadripper 9999X at 6.20 GHz,
+512 GiB of RAM (38 GiB used, 61 GiB cache), a Mattrix Photon-X 9090 Ti Mega Hyper
+with 96 GB of HBM9, a 64 TB Mattrix HyperNVMe disk (8 TiB used, plus the visitor's
+own files) and a 21-inch CRT at 2048x1536.
 
 ### Hosts
 

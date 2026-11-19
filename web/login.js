@@ -19,6 +19,68 @@
     document.body.classList.add("embed");
   }
 
+  // Film-terminal pips for revealed and typed text (the demo only), made with
+  // WebAudio: nothing to download. Browsers allow sound only after a user
+  // gesture, so the audio context is created at the first key or click. On by
+  // default in the demo page, off in an embedded one; ?sound=1 turns it on
+  // anywhere, ?mute or ?sound=0 off.
+  window.mattermSoundWanted = (function () {
+    const p = pageParams;
+    if (p.has("mute") || p.get("sound") === "0") {
+      return false;
+    }
+    return p.has("sound") || !embed;
+  })();
+  (function setupSound() {
+    let ctx = null;
+    let playing = 0;
+    const unlock = function () {
+      if (!ctx) {
+        const Audio = window.AudioContext || window.webkitAudioContext;
+        if (!Audio) {
+          return;
+        }
+        try {
+          ctx = new Audio();
+        } catch (e) {
+          return;
+        }
+      }
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(function () {});
+      }
+    };
+    ["pointerdown", "keydown", "touchstart"].forEach(function (name) {
+      window.addEventListener(name, unlock, { passive: true });
+    });
+    window.mattermBeep = function (frequency, ms, volume) {
+      if (!window.mattermSoundWanted || !ctx || ctx.state !== "running" || playing > 24) {
+        return;
+      }
+      const t = ctx.currentTime;
+      const seconds = Math.max(0.008, ms / 1000);
+      const osc = ctx.createOscillator();
+      const filter = ctx.createBiquadFilter();
+      const gain = ctx.createGain();
+      osc.type = "square";
+      osc.frequency.setValueAtTime(frequency, t);
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(3200, t);
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(Math.min(1, volume) * 0.12, t + 0.003);
+      gain.gain.linearRampToValueAtTime(0, t + seconds);
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      ++playing;
+      osc.onended = function () {
+        --playing;
+      };
+      osc.start(t);
+      osc.stop(t + seconds + 0.01);
+    };
+  })();
+
   function start(demo) {
     form.hidden = true;
     terminalWindow.hidden = false;
