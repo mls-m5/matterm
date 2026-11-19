@@ -43,8 +43,10 @@ const args = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swif
     const m = text.match(/^(\d+) (\d+)$/m);
     if (!m) return { ok: false, detail: JSON.stringify(text.slice(0, 80)) };
     const rows = Number(m[1]), cols = Number(m[2]);
-    const cw = 10.8, ch = 23.8;
-    const ok = Math.abs(b.width - cols * cw) <= cw * 1.5 && Math.abs(b.height - rows * ch) <= ch * 1.5;
+    // Cells are whole device pixels (about 11 x 24 at 18 px), and the scrollbar
+    // strip takes 12 px of the width.
+    const cw = 11, ch = 24, strip = 12;
+    const ok = Math.abs(cols - Math.floor((b.width - strip) / cw)) <= 1 && Math.abs(rows - Math.floor(b.height / ch)) <= 1;
     return { ok, detail: `${rows}x${cols} in ${b.width}x${b.height}` };
   };
 
