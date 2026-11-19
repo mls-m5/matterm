@@ -204,3 +204,10 @@ These describe much more functionality than matterm currently implements.
   `http://localhost:8080` on the phone. Untested.
 - [ ] `trusted_proxy`: count login failures per client IP behind nginx (see
   docs/SECURITY_REVIEW.md); a disabled test exists in `test/serversecurity_test.cpp`.
+- [ ] Inline images in the terminal (Sixel, iTerm2 `OSC 1337 File=`, and the Kitty
+  graphics protocol are the existing choices). Needs image cells in the model, a
+  memory/size policy and a security decision (decoding untrusted images,
+  scrollback cost); decide which protocol(s) first.
+- [ ] Web demo as a platform: static apps written against a small program interface,
+  optional relay for chat/multi-user later (see docs/tasks/fakeos-demo.md).
+  Consider merging the fakeos demo with `matterm-terminal-demo`.
