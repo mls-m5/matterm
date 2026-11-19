@@ -10,8 +10,9 @@ bottom. ScrollViewport now provides smooth fractional-row navigation and scrollb
 proportions; SdlBackend clips shifted text and draws a right-hand scrollbar.
 CellBuffer remains available as a CPU-only scratch surface. A separate
 matterm-terminal-demo now uses TerminalModel for writing, cursor/erase operations,
-primary history, and an isolated alternate screen. VT parsing, a PTY, and text
-clusters are not implemented yet.
+primary history, and an isolated alternate screen. A separate matterm application
+now consumes the initial VT parser through built-in/file streams. PTY integration
+and text clusters are not implemented yet.
 
 ## Library and Application Boundaries
 
@@ -22,9 +23,10 @@ rendering library interface. Keep it usable independently of terminal emulation.
   generated rows, and demo controls live under demo/, outside the renderer.
 - matterm::terminal provides the CPU-only TerminalModel. matterm-terminal-demo
   exercises its direct API and renders through matterm::renderer. It has no shell.
-- The future matterm terminal application will use these same libraries, adding
-  a streaming UTF-8/VT parser, input encoding, and PTY ownership. The parser will
-  call model operations rather than duplicating terminal behavior.
+- matterm::vt provides the incremental UTF-8/VT subset; the separate matterm
+  frontend uses it without changing either demo. It calls model operations,
+  rather than duplicating terminal behavior. PTY ownership and input encoding
+  are later application/adapter stages.
 - A future standalone memory viewer can use a separate adapter to feed cells to
   the renderer without using the terminal emulator. Current CellGridView borrows
   same-process storage. Shared-memory/IPC support needs a defined layout, lifetime,
@@ -39,19 +41,36 @@ See ROADMAP.md for the checked implementation plan. Common cells/storage live in
 src/core/, graphical backends in src/render/, screen semantics in src/terminal/,
 and byte-stream decoding/parsing in src/terminal/vt/. The decoder is separately
 linkable as matterm::utf8; the model does not require it. Both existing demos must
-retain their behavior; a separate matterm application will host VT/PTY integration.
+retain their behavior; the separate matterm application hosts VT integration and
+will later connect PTY/process adapters. docs/VT.md defines the supported subset.
 
 A deferred reverse-direction backend could turn the same drawing/cell API into
 ANSI/VT output for an existing terminal, potentially replacing ncurses for clients.
 This is an output encoder/backend, not the input parser, and is not implemented.
+
+## Future Browser Execution and Transport
+
+ROADMAP.md records Emscripten/browser support as deferred work. Entry points should
+ultimately separate initialization, one input/update/render tick, scheduling, and
+cleanup, with explicit session ownership across callbacks. Dirty-state redraws,
+scroll animation frames, and cursor blink timers should replace unconditional
+idle rendering. Current blocking native loops are not Emscripten-ready yet.
+
+A remote browser terminal will need a portable transport interface for terminal
+bytes, input, resize, and lifecycle events; the server, not browser code, owns the
+PTY and native ioctls. Authentication, TLS, authorization, isolation, backpressure,
+and cleanup are prerequisites for exposing a remote shell. A separate local-only
+adapter can feed simulated/timed VT streams for browser-based company promotional
+content, without a PTY or backend service. The model/parser/renderer should support
+both clients without acquiring transport-specific responsibilities.
 
 ## Responsibilities and Ownership
 
 - The GUI loop owns the rendering backend and keeps its window and context alive.
   Graphics resources must be destroyed before their context, on the right thread.
 - TerminalModel handles screen state, text placement, cursor, erasure, and
-  scrolling. Text placement uses cells, not pixels. A future separate parser
-  decodes UTF-8/ANSI/VT streams into operations on this same model.
+  scrolling. Text placement uses cells, not pixels. The separate VtParser
+  decodes a UTF-8/ANSI/VT subset into operations on this same model.
 - Terminal memory owns cell rows, scrollback, and eventually the text cluster table.
 - RenderBackend reads a frame description, draws it, and can present the image.
   Each concrete backend owns its atlases and other graphics resources.
@@ -189,14 +208,15 @@ TerminalModel now owns screen switching, independently of rendering or a parser:
   The direct setAlternateScreen(true) API clears/homes the alternate screen on
   transition; repeated requests for the active mode are no-ops. The alternate
   buffer uses its own ring with capacity equal to screen height.
-- This direct policy is not full DEC mode handling. Different VT sequences
-  (including private mode 1049) require distinct save/restore and clearing rules
-  in the future parser, with explicit tests.
+- This direct policy is not full DEC mode handling. VtParser currently maps only
+  mode 1049 to this policy; modes 47/1047/1048 remain ignored. Broader compatibility
+  needs distinct save/restore/clearing rules and explicit tests.
 
 RenderFrame stays mode-independent: submit the active cell view and cursor,
 zero pixel offset for a fixed alternate screen, and optionally hide its scrollbar.
 Do not conflate this mode with the keyboard's Alt modifier. Storage and direct
-switching are implemented; VT parsing is not.
+switching are implemented. The separate parser implements the limited subset in
+docs/VT.md, not complete VT/xterm behavior.
 
 write() accepts UTF-32, handles CR/LF/BS/tab, defers wrapping at the last column,
 and ignores unsupported controls. LF alone preserves the column. Erasure uses
@@ -207,8 +227,8 @@ when widening a line whose wrap was pending. Screen sizes must be positive.
 matterm-terminal-demo converts SDL text input to UTF-32 at its client boundary
 using the shared incremental Utf8Decoder, not platform-dependent iconv formats.
 The decoder buffers split characters, replaces malformed UTF-8, and flushes
-truncated input on finish(). It can later be reused by the VT parser but does not
-interpret terminal escape sequences.
+truncated input on finish(). VtParser now reuses this decoder for text runs;
+the decoder itself still does not interpret terminal escape sequences.
 F2 toggles screens, F3 generates lines, F4 erases the screen, and F5 resets the
 model. Input controls demonstrate the API; they are not shell input encoding.
 CPU tests cover model semantics and headless framebuffer tests compare primary
@@ -288,9 +308,12 @@ measurements justify them; no performance target has been verified yet.
 7. Basic terminal screen semantics and independent primary/alternate state are
    implemented in matterm::terminal and demonstrated by matterm-terminal-demo.
    Tests cover wrapping, controls, erasure, history, resize, and screen isolation.
-8. Incremental UTF-8 decoding is implemented and tested independently, including
-   split characters and invalid sequences. Next, design and implement a VT parser
-   feeding the same model, with partial escape sequences and explicit DEC mode
-   semantics.
-   Add PTY/input encoding later; neither demo should be replaced. Measure,
-   extend Unicode support, and optimize where justified.
+8. The initial VT parser now handles fragmented text/CSI/OSC input, colors,
+   cursor/erase operations, saved cursor, narrow alternate mode, and explicit
+   title/reply events. Tests include every split point, byte feeds, bounded
+   recovery, and deterministic arbitrary input. The matterm frontend renders
+   built-in or file streams and has its own headless integration test.
+9. Continue broader terminal compatibility and the isolated POSIX PTY/session
+   adapter using ROADMAP.md. No shell or program input transport exists yet.
+   Keep both demos unchanged. Browser loop/remote/simulation and reverse terminal
+   output backends are documented future directions, not current implementations.

@@ -30,6 +30,11 @@ public:
     void setCursor(CursorState cursor);
     void moveCursor(int column, int row);
     void setColors(Rgb8 foreground, Rgb8 background);
+    void setCursorVisible(bool visible);
+    // Per-screen save slot: cursor, colors, and pending wrap. Restore clamps
+    // coordinates after resize. Calling restore before save is a no-op.
+    void saveCursor();
+    void restoreCursor();
 
     // UTF-32, not UTF-8/ANSI. Handles CR, LF, BS and horizontal tab (8-cell
     // stops). LF preserves the column; use CR LF for a new line at column zero.

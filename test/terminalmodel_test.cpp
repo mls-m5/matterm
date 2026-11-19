@@ -212,4 +212,35 @@ TEST_CASE("Invalid sizes fail without changing either screen") {
                  std::invalid_argument);
 }
 
+TEST_CASE("Saved cursor is per screen and safely clamps after resizing") {
+    TerminalModel model(5, 3, 3);
+    model.moveCursor(4, 2);
+    model.setColors({1, 2, 3}, {4, 5, 6});
+    model.saveCursor();
+    model.setAlternateScreen(true);
+    model.moveCursor(1, 1);
+    model.saveCursor();
+    model.moveCursor(0, 0);
+    model.restoreCursor();
+    EXPECT_EQ(model.cursor().column, 1);
+    EXPECT_EQ(model.cursor().row, 1);
+    model.setAlternateScreen(false);
+    model.resize(2, 1);
+    model.restoreCursor();
+    EXPECT_EQ(model.cursor().column, 1);
+    EXPECT_EQ(model.cursor().row, 0);
+    model.write(U"X");
+    EXPECT_EQ(model.cell(1, 0).foreground.g, 2);
+    EXPECT_EQ(model.cell(1, 0).background.b, 6);
+}
+
+TEST_CASE("Changing cursor visibility does not cancel pending wrap") {
+    TerminalModel model(2, 2);
+    model.write(U"ab");
+    model.setCursorVisible(false);
+    model.write(U"c");
+    EXPECT(model.cell(0, 1).codePoint == U'c');
+    EXPECT_FALSE(model.cursor().visible);
+}
+
 TEST_SUIT_END

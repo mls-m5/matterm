@@ -41,6 +41,23 @@ The demo retains up to 256 rows in reusable 16-row blocks. Controls:
 - Wheel / Page Up/Down scroll; Ctrl+Home/End selects oldest history/live output.
 - Escape exits. This is not a shell or a complete editor/terminal emulator.
 
+## VT Frontend (Separate `matterm` Program)
+
+The existing demos keep their behavior. A third program, `matterm`, uses the
+incremental VT parser and shows a built-in VT stream, or reads a regular UTF-8/VT
+file in bounded chunks. It is the start of the emulator application, **not yet a
+shell/PTY terminal**. Keyboard input is not sent to a child program yet.
+
+```sh
+printf '\033[31mHello from VT\033[0m\r\n' > /tmp/matterm.vt
+./build/matterm /path/to/font.ttf --input /tmp/matterm.vt
+```
+
+Wheel/Page Up/Down and Home/End navigate history; Space pauses file playback;
+Escape exits. Without `--input`, it displays a parsed startup showcase. Supported
+commands, bounds, callbacks, and limitations are documented in [docs/VT.md](docs/VT.md).
+PTY/ioctl/session work remains unchecked in [ROADMAP.md](ROADMAP.md).
+
 ## Build and Run
 
 Requires CMake 3.23+, a C++17 compiler, SDL2 2.0.18+, SDL2_ttf 2.0.18+, and a
@@ -55,10 +72,11 @@ cmake -S . -B build
 cmake --build build
 ./build/matterm-demo /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
 ./build/matterm-terminal-demo /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
+./build/matterm /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
 ```
 
 The project is named `matterm`; both demos remain separate clients of the library.
-The future terminal executable will not replace either demo.
+The separate `matterm` frontend does not replace either demo.
 
 The demo requests an accelerated SDL renderer with VSync and prints the selected
 backend. It no longer creates its own OpenGL context. The atlas has fixed capacity
@@ -78,8 +96,8 @@ ctest --test-dir build --output-on-failure
 ```
 
 Without `TEST_FONT_FILE`, CTest runs the font-independent cell view, cell buffer,
-terminal memory, terminal model, UTF-8 decoder, scroll viewport, and demo content
-tests. History tests cover
+terminal memory, terminal model, UTF-8 decoder, VT parser, scroll viewport, and
+demo content tests. History tests cover
 exact-capacity eviction, block and
 ring boundaries, aliased input, resize, clear, and repeated wraps against a
 reference queue. Viewport tests cover fractional offsets, animation convergence,
@@ -90,12 +108,16 @@ Model tests cover wrapping, controls, erasure, bounded history, resize, and scre
 isolation. Smoke tests use SDL's dummy video driver and software renderer; the
 terminal demo verifies rendered primary/alternate separation and restoration.
 They do not validate accelerated GPU performance or visual quality on a real
-display. Terminal text-input regression checks also exercise ASCII and Swedish
-UTF-8 through the demo's actual input helper. They can also be run directly:
+display. VT tests compare whole streams with every split point, one-byte chunks,
+and deterministic arbitrary bytes. The separate frontend smoke test renders
+fragmented VT input and checks alternate-screen pixel restoration. Terminal
+text-input regression checks also exercise ASCII and Swedish UTF-8 through the
+demo's actual input helper. They can also be run directly:
 
 ```sh
 SDL_VIDEODRIVER=dummy ./build/matterm-demo /path/to/font.ttf --smoke-test
 SDL_VIDEODRIVER=dummy ./build/matterm-terminal-demo /path/to/font.ttf --smoke-test
+SDL_VIDEODRIVER=dummy ./build/matterm /path/to/font.ttf --smoke-test
 ```
 
 ## Library and Applications
@@ -113,19 +135,19 @@ target_link_libraries(my-app PRIVATE matterm::renderer)
 borrowed cell memory. Demo-specific artwork and generated output live under
 `demo/`, not in the reusable renderer. `demo/terminalmain.cpp` adds the CPU-only
 `matterm::terminal` target and demonstrates the same rendering API with a terminal
-model. Clients may use either level; ANSI/VT parsing will be an optional layer
-feeding the same model, not a requirement for direct cell drawing. There is no
+model. Clients may use either level. `matterm::vt` is an optional incremental
+UTF-8/VT subset feeding the same model, not a requirement for direct cell drawing. There is no
 installed CMake package yet.
 
 For a library-only build, disable the demo and tests:
 
 ```sh
-cmake -S . -B build/lib-only -DMATTERM_BUILD_DEMO=OFF -DBUILD_TESTING=OFF
+cmake -S . -B build/lib-only -DMATTERM_BUILD_DEMO=OFF -DMATTERM_BUILD_APP=OFF -DBUILD_TESTING=OFF
 cmake --build build/lib-only
 ```
 
-The future terminal application will use the same library model plus a streaming
-UTF-8/VT parser and PTY adapter. A standalone memory viewer could also
+The new `matterm` frontend uses the model/parser libraries; the future PTY and
+input-encoding adapters will connect it to child programs. A standalone memory viewer could also
 feed cell views into it. Currently views borrow memory in the same process;
 attaching to shared memory or another process will need an explicit adapter and
 synchronization protocol, not raw cross-process pointers.
@@ -184,7 +206,8 @@ and replaces malformed input with U+FFFD. `finish()` flushes a truncated prefix.
 The terminal demo uses it instead of platform-dependent SDL/iconv conversions.
 It is Unicode decoding only, not a VT parser.
 
-No VT parsing or PTY exists yet. Do not pass ANSI byte streams to `write()`.
+Use the separate `VtParser` for ANSI/VT byte streams, not UTF-32 `write()`.
+The supported VT subset is limited; no PTY exists yet.
 Wide characters, combining clusters, scrolling margins, and full DEC mode rules
 are not implemented; currently one code point occupies one cell.
 
@@ -212,12 +235,14 @@ The alternate screen is available to library clients as well as the terminal
 demo. The renderer has no terminal mode logic: the model supplies the active view
 and hides the alternate screen's scrollbar. The demo keeps equal column counts
 in both modes so hiding the sidebar does not itself resize the primary screen.
-Actual Vim support still requires the future VT parser, input encoding, and PTY.
+Actual Vim support still requires broader VT compatibility, input encoding, and
+PTY integration.
 
 ## Design and Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for the implementation checklist, parser/PTY stages,
-and the deferred terminal-output backend idea. Source layers are `src/core/`
+and deferred terminal-output, Emscripten, remote-browser, and simulated-browser
+client ideas. Source layers are `src/core/`
 (cells/storage), `src/render/` (graphics), and `src/terminal/` with `vt/` for stream
 parsing. Both existing demos remain independent of the future `matterm` app.
 
