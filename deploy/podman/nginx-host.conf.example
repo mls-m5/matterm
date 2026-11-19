@@ -7,9 +7,9 @@ map $http_upgrade $connection_upgrade {
     ''      close;
 }
 
-# One bucket per client address for the login endpoint. The server cannot see
-# client addresses behind this proxy (no trusted_proxy yet), so this is the
-# only per-client limit; the server's own lockout is shared by everybody.
+# Independent per-client defence in front of the server's own limiter.
+# Configure trusted_proxy for this peer; nginx overwrites X-Forwarded-For
+# with exactly $remote_addr, so trusted_proxy_hops is 0 (not 1).
 limit_req_zone $binary_remote_addr zone=matterm_login:1m rate=6r/m;
 
 # Requests for any other name (or a bare IP) never reach the server.

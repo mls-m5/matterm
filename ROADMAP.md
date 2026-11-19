@@ -202,5 +202,8 @@ These describe much more functionality than matterm currently implements.
 - [ ] Try running `matterm-server` in Termux on Android (Linux userland with PTYs;
   needs Boost and libsodium packages). The browser then connects to
   `http://localhost:8080` on the phone. Untested.
-- [ ] `trusted_proxy`: count login failures per client IP behind nginx (see
-  docs/SECURITY_REVIEW.md); a disabled test exists in `test/serversecurity_test.cpp`.
+- [x] `trusted_proxy`: explicit peer trust and right-counted X-Forwarded-For
+  hops, IPv6 /64 source keys and forwarded-client budget classification. The
+  shared-lockout regression is enabled; spoofing/malformed/config tests pass.
+  nginx/container runtime isolation still needs deployment verification (see
+  docs/SECURITY_REVIEW.md and docs/SERVER_CONFIG.md).

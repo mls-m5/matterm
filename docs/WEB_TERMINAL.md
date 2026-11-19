@@ -202,13 +202,16 @@ clipboard and OSC 8 hyperlinks stay disabled in the parser (VT.md).
   the Podman setup, to the container's loopback-published port). This keeps
   certificate handling out of this code base and avoids a second web server
   competing for ports 80/443. Native TLS in the server is optional later.
-- `trusted_proxy` takes the proxy's address (default: loopback only). The
-  server accepts connections only from that peer address, and only then may the
-  client address come from `X-Forwarded-For`, and only the last hop appended by
-  that proxy. When several proxies are chained, `trusted_proxy_hops` says how many entries
-  to skip from the right. `trusted_proxy = any` is accepted only when the
-  listening port is reachable by the proxy alone, as with a loopback-published
-  container port.
+- `trusted_proxy` takes the proxy's exact address (implemented default: `none`,
+  forwarding disabled). Only that peer may supply a client address through
+  `X-Forwarded-For`, selecting the last hop appended by that proxy by default.
+  Other peers retain their actual address; this is header trust, not an inbound
+  connection ACL. Missing headers also use the peer; malformed or duplicate
+  headers from trusted peers are rejected before authentication. When several proxies are chained, `trusted_proxy_hops` says how many entries
+  to skip from the right (default 0, allowed 0..16). `trusted_proxy = any` is
+  safe only when the listening port is reachable by the proxy alone, as with a
+  loopback-published isolated container port. It prints a warning: network
+  isolation is the operator's explicit assertion, not verifiable by the server.
   This also lets the server listen on a private container network
   address without being reachable by anything but the proxy.
 - `localhost` is a secure context in browsers, so the `Secure` cookie flag and

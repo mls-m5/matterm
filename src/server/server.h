@@ -13,6 +13,8 @@ struct ServerConfig {
     std::string allowedOrigin = "http://localhost:8080";
     bool allowPlainHttp = false;
     std::string passwordHash;
+    std::string trustedProxy = "none";
+    unsigned trustedProxyHops = 0;
     RateLimitConfig rateLimit;
     AuthConfig auth;
     ProcessConfig process;

@@ -26,31 +26,32 @@ Tests: "Deploy: compose commands are accepted by the real flag parser" and "the
 compose files use no flag the server lacks" run the compose `command:` lists
 through `parseCommandLine` and `validateSettings`.
 
-### 2. High (availability), design decision pending: one attacker locks the owner out behind the proxy
+### 2. High (availability): shared lockout behind a proxy (resolved with explicit proxy trust)
 
-The server has no `trusted_proxy`, so behind nginx every client has the proxy's
-address (or the container gateway's). The per-source lockout is therefore one
-shared lockout. After `maxFailures` (5) wrong passwords, the source is locked
-for 30 s, doubling to 15 min. A failure after each expiry re-arms the maximum,
-so one wrong request per 15 minutes keeps the owner out indefinitely. If the
-peer is not loopback, 30 failures per hour also exhaust the global budget for
-every login. If the peer is loopback (native nginx), the global budget is
-exempt, so the per-source lock is the only control. Guessing is not made
-easier: a 24+ byte Argon2id password stays out of reach; only availability
-suffers. docs/SERVER.md already records this as residual risk.
-Mitigation shipped: the nginx example now limits `/login` to 6 requests per
-minute per client address (burst 3), which does not stop a patient attacker
-from holding the shared lockout open but makes the budget per client rather
-than global once the server can key on it.
-Options (not chosen here): (a) implement `trusted_proxy` as specified in
-docs/WEB_TERMINAL.md section 5 and key limiter and lockout on the last
-`X-Forwarded-For` hop; (b) fail2ban or `limit_req` at the proxy only, and run
-the server with the limiter set to lockouts that do not escalate for the
-loopback peer; (c) a documented recovery (a `--reset-lockout` command or a
-SIGHUP that clears the limiter). (a) is the intended design and needs no
-protocol change.
-Test: "disabled Lockout of one source does not lock out another" is written
-and disabled until (a) exists.
+Previously every proxied client shared the proxy/gateway source key; a patient
+attacker could re-arm its lockout and exclude the owner. `trusted_proxy` now
+opts an exact peer IP into strict X-Forwarded-For parsing; `trusted_proxy_hops`
+skips a configured number of entries from the right (default zero). Source
+normalization, IPv6 /64 grouping, loopback budget exemption and keyed-hash audit
+logging use the selected client address, not the gateway.
+
+Forwarding is disabled by default (`none`). Untrusted headers are ignored;
+malformed/duplicate trusted headers fail before hashing. The formerly disabled
+lockout test is enabled; `serverproxysecurity_test` covers spoofed prefixes,
+untrusted peers, hops, malformed lists, IPv6 /64 grouping, global-budget
+classification, and configuration validation. The public compose override uses
+`any` ONLY under its documented proxy-only network-isolation assumption; exact
+proxy IPs are preferred. nginx overwrites the header, so its hop count is zero.
+
+Residual risks: `any` on a directly reachable backend lets attackers forge source
+identities and loopback exemption. A trusted chain configured with too many hops
+can select attacker input. The server cannot prove external firewall isolation.
+A missing header falls back to the peer and therefore shares its lockout;
+configure/test the proxy, rather than relying on this fallback for remote users.
+The global budget deliberately still permits distributed login denial of service;
+nginx's independent per-client login limit remains defence in depth. Lockout
+persistence and reset remain deferred. Container/nginx runtime topology was not
+verified in the sandbox; only the server's loopback tests and flag parser ran.
 
 ### 3. Low: no cross-origin isolation headers (fixed)
 

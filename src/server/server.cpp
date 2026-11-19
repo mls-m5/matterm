@@ -1,5 +1,7 @@
 #include "server.h"
+#include "proxysource.h"
 #include <algorithm>
+#include <array>
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
 #include <boost/beast/websocket.hpp>
@@ -76,15 +78,30 @@ struct Shared {
     ServerConfig config;
     std::map<std::string, StaticFile> files;
     PasswordVerifier password;
+    ProxySource proxy;
     RateLimiter limiter;
     SessionStore sessions;
     unsigned connections = 0, unauthenticated = 0;
+    std::array<unsigned char, crypto_shorthash_KEYBYTES> auditKey{};
+    std::string auditSource(const std::string &source) const {
+        std::array<unsigned char, crypto_shorthash_BYTES> digest{};
+        crypto_shorthash(digest.data(),
+                         reinterpret_cast<const unsigned char *>(source.data()),
+                         source.size(),
+                         auditKey.data());
+        std::array<char, crypto_shorthash_BYTES * 2 + 1> text{};
+        sodium_bin2hex(text.data(), text.size(), digest.data(), digest.size());
+        return text.data();
+    }
     explicit Shared(ServerConfig cfg)
         : config(std::move(cfg))
         , files(loadStatic(config.staticDir))
         , password(config.passwordHash)
+        , proxy(config.trustedProxy, config.trustedProxyHops)
         , limiter(config.rateLimit)
-        , sessions(config.auth) {}
+        , sessions(config.auth) {
+        randombytes_buf(auditKey.data(), auditKey.size());
+    }
 };
 class Connection : public std::enable_shared_from_this<Connection> {
 public:
@@ -101,6 +118,7 @@ public:
                                  .socket()
                                  .remote_endpoint()
                                  .address();
+        peer_ = address;
         source_ = sourceKey(address);
         loopback_ = peerIsLoopback(address);
         parser_.header_limit(8192);
@@ -215,6 +233,19 @@ private:
             response(http::status::forbidden, "Forbidden\n");
             return;
         }
+        const auto forwarded = request.count("X-Forwarded-For");
+        const auto client = shared_->proxy.resolve(
+            peer_,
+            forwarded ? std::optional<std::string_view>(
+                            view(request["X-Forwarded-For"]))
+                      : std::nullopt,
+            forwarded > 1);
+        if (!client) {
+            response(http::status::bad_request, "Bad request\n");
+            return;
+        }
+        source_ = sourceKey(*client);
+        loopback_ = peerIsLoopback(*client);
         if (request.method() == http::verb::post &&
             request.target() == "/login") {
             const auto retry = shared_->limiter.attempt(source_, loopback_);
@@ -234,12 +265,14 @@ private:
             request.body().clear();
             if (!matched || !password) {
                 shared_->limiter.failure(source_);
-                std::clog << "Authentication failed\n";
+                std::clog << "Authentication failed source="
+                          << shared_->auditSource(source_) << '\n';
                 response(http::status::unauthorized, "Login failed\n");
             }
             else {
                 shared_->limiter.success(source_);
-                std::clog << "Authentication succeeded\n";
+                std::clog << "Authentication succeeded source="
+                          << shared_->auditSource(source_) << '\n';
                 const auto token = shared_->sessions.issue();
                 response(http::status::ok,
                          "Logged in\n",
@@ -427,6 +460,7 @@ private:
     std::deque<std::string> queue_;
     std::size_t queuedBytes_ = 0;
     std::string source_;
+    net::ip::address peer_;
     bool loopback_ = false, authenticated_ = false, closing_ = false,
          dead_ = false;
     int closeCode_ = 1000;
@@ -457,6 +491,9 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
                 std::string::npos ||
             !config.maxConnections || !config.maxUnauthenticated)
             throw std::invalid_argument("Invalid server configuration/origin");
+        if (config.trustedProxy == "any")
+            std::clog << "WARNING: trusted_proxy=any requires network "
+                         "isolation; only the proxy may reach this port\n";
         shared = std::make_shared<Shared>(std::move(config));
         acceptor.open(address.is_v4() ? tcp::v4() : tcp::v6());
         acceptor.set_option(net::socket_base::reuse_address(true));

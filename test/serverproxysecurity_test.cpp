@@ -1,5 +1,6 @@
 #include "config.h"
 #include "mls-unit-test/unittest.h"
+#include "proxysource.h"
 #include "serverfixture.h"
 
 namespace {
@@ -43,6 +44,26 @@ bool rejected(const std::string &json) {
 }
 } // namespace
 TEST_SUIT_BEGIN(ServerProxySecurity)
+TEST_CASE(
+    "Forwarding is opt-in and hop selection fails closed on a short chain") {
+    const auto loopback = net::ip::make_address("127.0.0.1");
+    server::ProxySource disabled;
+    EXPECT(disabled.resolve(loopback, "203.0.113.8").value() == loopback);
+    server::ProxySource proxy("127.0.0.1", 1);
+    EXPECT_FALSE(proxy.resolve(loopback, "203.0.113.8").has_value());
+    EXPECT(proxy.resolve(loopback, std::nullopt).value() == loopback);
+    EXPECT(proxy.trusts(net::ip::make_address("::ffff:127.0.0.1")));
+    EXPECT_FALSE(proxy.trusts(net::ip::make_address("127.0.0.2")));
+    EXPECT(proxy.resolve(loopback, " \t203.0.113.8\t, 192.0.2.2 ").value() ==
+           net::ip::make_address("203.0.113.8"));
+    std::string many = "203.0.113.8";
+    for (unsigned i = 1; i < 33; ++i)
+        many += ",192.0.2.2";
+    EXPECT_FALSE(proxy.resolve(loopback, many).has_value());
+    server::ProxySource any("any");
+    EXPECT(any.resolve(net::ip::make_address("192.0.2.2"), "203.0.113.8")
+               .value() == net::ip::make_address("203.0.113.8"));
+}
 TEST_CASE("Untrusted peers cannot rotate lockout keys with spoofed or "
           "duplicate headers") {
     Fixture fixture({"/bin/sh"}, [](server::ServerConfig &config) {

@@ -22,6 +22,11 @@ services:
       - https://${MATTERM_DOMAIN:?set MATTERM_DOMAIN}
       - --static-dir
       - /usr/share/matterm/web
-      # There is no trusted-proxy support yet: the server sees the proxy's
-      # address for every client. Rate limit /login in nginx (see the example)
-      # and read docs/SECURITY_REVIEW.md, finding 2.
+      # Safe ONLY while this port is published on host loopback, the container
+      # network is isolated, and nginx is the only caller. Prefer an exact
+      # proxy IP if the container gateway address is known and stable.
+      - --trusted-proxy
+      - any
+      - --trusted-proxy-hops
+      - "0"
+      # nginx overwrites X-Forwarded-For with $remote_addr (one address).

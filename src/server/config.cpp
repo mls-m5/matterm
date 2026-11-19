@@ -1,5 +1,6 @@
 #include "config.h"
 #include "message.h"
+#include "proxysource.h"
 #include <algorithm>
 #include <boost/asio/ip/address.hpp>
 #include <cctype>
@@ -383,6 +384,8 @@ std::vector<Field> topLevelFields(Settings &s) {
          }},
         {"password_hash", passwordHashPlaceholder()},
         {"static_dir", text(c.staticDir)},
+        {"trusted_proxy", text(c.trustedProxy)},
+        {"trusted_proxy_hops", integer(c.trustedProxyHops, 0, 16)},
         {"max_connections", integer(c.maxConnections, 1, 65535)},
         {"max_unauthenticated", integer(c.maxUnauthenticated, 1, 65535)},
         {"rate_limit", section([&c] { return rateLimitFields(c.rateLimit); })},
@@ -520,6 +523,12 @@ void validateSettings(const Settings &settings) {
     boost::asio::ip::make_address(c.address, ec);
     if (ec)
         throw ConfigError("listen_address: must be an IPv4 or IPv6 address");
+    try {
+        ProxySource proxy(c.trustedProxy, c.trustedProxyHops);
+    }
+    catch (const std::invalid_argument &error) {
+        throw ConfigError(error.what());
+    }
     if (!validOrigin(c.allowedOrigin))
         throw ConfigError("allowed_origin: must be http:// or https:// "
                           "followed by host[:port], without a path");
@@ -629,6 +638,8 @@ std::string printConfig(const Settings &settings) {
     w.member("port", c.port);
     w.member("allowed_origin", c.allowedOrigin);
     w.member("allow_plain_http", c.allowPlainHttp);
+    w.member("trusted_proxy", c.trustedProxy);
+    w.member("trusted_proxy_hops", c.trustedProxyHops);
     if (!settings.credentialsPath.empty())
         w.member("credentials", settings.credentialsPath);
     w.member("password_hash", c.passwordHash.empty() ? hashUnset : hashSet);
@@ -716,6 +727,20 @@ CommandLine parseCommandLine(const std::vector<std::string> &arguments) {
         else if (option == "--origin") {
             result.origin = value();
         }
+        else if (option == "--trusted-proxy") {
+            result.trustedProxy = value();
+        }
+        else if (option == "--trusted-proxy-hops") {
+            const auto &text = value();
+            unsigned hops = 0;
+            const auto parsed =
+                std::from_chars(text.data(), text.data() + text.size(), hops);
+            if (parsed.ec != std::errc{} ||
+                parsed.ptr != text.data() + text.size() || hops > 16)
+                throw ConfigError(
+                    "--trusted-proxy-hops: must be an integer in 0..16");
+            result.trustedProxyHops = hops;
+        }
         else if (option == "--credentials") {
             result.credentials = value();
         }
@@ -757,6 +782,10 @@ void applyCommandLine(const CommandLine &commandLine, Settings &settings) {
         c.port = *commandLine.port;
     if (commandLine.origin)
         c.allowedOrigin = *commandLine.origin;
+    if (commandLine.trustedProxy)
+        c.trustedProxy = *commandLine.trustedProxy;
+    if (commandLine.trustedProxyHops)
+        c.trustedProxyHops = *commandLine.trustedProxyHops;
     if (commandLine.credentials) {
         settings.credentialsPath = *commandLine.credentials;
         settings.credentialsDefaulted = false;
