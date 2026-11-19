@@ -40,3 +40,36 @@ reports a smaller model named `luna-6`; verify available agents/model configurat
 before using it rather than assuming that this identifier is configured. Read the
 pi-subagents skill before delegation. The main agent reviews delegated changes
 and runs integration tests before committing.
+
+## How we work (integrator and agents)
+
+- One integrator (the session that owns `main` and `web/` integration) and any
+  number of agents. Each agent has its own git worktree under `.tmp/agentN` and
+  its own branch from the current `main`. Agents commit on their branch only and
+  never push; the integrator merges, runs the full suite and pushes.
+- Every task has a contract in `docs/tasks/<name>.md` (goal, scope, out of scope,
+  owned and shared paths, acceptance) and an entry under Active Tasks in
+  `docs/PARALLEL_WORK.md`. Agents stay inside their owned paths and report edits
+  to shared files. Tell the integrator plainly what could not be run.
+- Tests first: a bug fix starts with a test that fails, in its own commit, then
+  the fix. Keep commits small and coherent. Run clang-format before committing.
+- Tools differ per sandbox. The integrator's sandbox has Emscripten (`~/emsdk`)
+  and headless Chromium with Playwright (`~/pw`, run with
+  `NODE_PATH=$HOME/pw/node_modules`). Agents may lack them, so browser
+  behavior must be verified by the integrator with `web/tools/run-e2e.sh`.
+- Agents communicate through the MCP message tools (`list_peers`,
+  `send_message`, `receive_messages`), not through subagents. Messages are short
+  and concrete; no acknowledgements.
+- Build directories: `build/` (default, with a separate `build/server` configured
+  with `-DMATTERM_BUILD_SERVER=ON`) and `build-web/` (Emscripten; not committed).
+  `matterm-server` reads its static files at startup, so restart it after
+  rebuilding the web client.
+- Submodule worktrees are separate clones. If `git status` shows `M lib/...` in a
+  worktree, check whether it is only an older checkout (`git submodule status`);
+  fetch the pointed commit from the main repo's submodule with
+  `git -c protocol.file.allow=always fetch <main>/lib/<name>` instead of editing
+  files there. Never commit a submodule pointer by accident.
+- Pushes go through the host approval tool with a full commit SHA, one push per
+  approval. Use `pkill -x name`, never `pkill -f`.
+- `ROADMAP.md` tracks progress; designs for larger features are written in
+  `docs/` and agreed before implementation (see "Later" in the roadmap).
