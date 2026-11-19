@@ -103,6 +103,34 @@ struct Fixture {
 } // namespace
 
 TEST_SUIT_BEGIN(ServerSession)
+TEST_CASE(
+    "Registry-selected resume starts its ACK window at an absolute offset") {
+    SessionConfig config;
+    config.sessionId = "00112233445566778899aabbccddeeff";
+    config.startOffset = 100;
+    config.resume = true;
+    config.features = featureReplay;
+    config.welcomeFlags = welcomeResumed;
+    Fixture f(config);
+    f.send(Hello{1, 80, 24, 100, config.sessionId, featureReplay});
+    EXPECT_EQ(f.session.sentOffset(), std::uint64_t(100));
+    EXPECT_EQ(f.session.ackedOffset(), std::uint64_t(100));
+    EXPECT_EQ(std::get<Welcome>(f.host.messages().front()).startOffset,
+              std::uint64_t(100));
+    f.session.onProcessOutput("tail", f.now);
+    EXPECT_EQ(f.session.sentOffset(), std::uint64_t(104));
+    f.send(Ack{104});
+    EXPECT_EQ(f.session.outputBudget(), config.outputWindow);
+}
+TEST_CASE("Absolute output counters fail closed rather than wrapping") {
+    SessionConfig config;
+    config.startOffset = ~std::uint64_t(0);
+    Fixture f(config);
+    f.hello();
+    f.session.onProcessOutput("x", f.now);
+    EXPECT(f.host.lastIsError(ErrorCode::LimitExceeded));
+    EXPECT_EQ(f.session.sentOffset(), config.startOffset);
+}
 
 TEST_CASE("Hello starts the program and is answered with Welcome") {
     Fixture f;
