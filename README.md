@@ -322,10 +322,24 @@ client ideas. Source layers are `src/core/`
 (cells/storage), `src/render/` (graphics), and `src/terminal/` with `vt/` for stream
 parsing. Both existing demos remain independent of the future `matterm` app.
 
-A browser-based terminal with a server is being designed: see
-[docs/WEB_TERMINAL.md](docs/WEB_TERMINAL.md) (architecture, security, deployment)
-and [docs/PROTOCOL.md](docs/PROTOCOL.md) (wire format). Nothing of it is implemented yet.
-`lib/fast-json` is a git submodule (`git submodule update --init`) reserved for it.
+## Terminal in the Browser
+
+The same terminal model, parser and renderer also run in a browser, talking to a
+server that owns the PTY:
+
+- [web/README.md](web/README.md): the WebAssembly client (Emscripten), login page,
+  input, HiDPI, and headless-browser checks.
+- [docs/SERVER.md](docs/SERVER.md) and [docs/SERVER_CONFIG.md](docs/SERVER_CONFIG.md):
+  `matterm-server` (Boost.Beast + libsodium, `-DMATTERM_BUILD_SERVER=ON`), its
+  login, rate limiting, lifecycle, and JSON configuration.
+- [docs/PROTOCOL.md](docs/PROTOCOL.md): the wire format;
+  [docs/SIMULATOR.md](docs/SIMULATOR.md): the in-browser simulator
+  (`index.html?demo`); [docs/WEB_TERMINAL.md](docs/WEB_TERMINAL.md): the design,
+  threat model and deployment plan. Keep the server on loopback until TLS is set
+  up; the Podman files in `deploy/` are provisional and untested.
+
+`lib/fast-json` is a git submodule (`git submodule update --init`) used by the
+server's configuration loader.
 
 See [DESIGN.md](DESIGN.md) for ownership, cell layout, scrollback storage, backend
 boundaries, and planned milestones. The current atlas is deliberately SDL-specific;
