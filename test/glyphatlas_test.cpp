@@ -126,4 +126,25 @@ TEST_CASE("Invalid dimensions and missing fonts fail cleanly") {
         std::runtime_error);
 }
 
+TEST_CASE("Font style variants have distinct stable atlas slots but "
+          "decorations do not") {
+    Fixture fixture;
+    GlyphAtlas atlas(*fixture.renderer, fixture.font(), 24);
+    const auto regular = atlas.getOrInsert(U'A');
+    const auto bold = atlas.getOrInsert(U'A', CellAttribute::Bold);
+    const auto italic = atlas.getOrInsert(U'A', CellAttribute::Italic);
+    EXPECT(regular.source.x != bold.source.x ||
+           regular.source.y != bold.source.y);
+    EXPECT(italic.source.x != bold.source.x ||
+           italic.source.y != bold.source.y);
+    const auto decorated = atlas.getOrInsert(
+        U'A', CellAttribute::Underline | CellAttribute::Faint);
+    EXPECT_EQ(decorated.source.x, regular.source.x);
+    EXPECT_EQ(decorated.source.y, regular.source.y);
+    const auto again =
+        atlas.getOrInsert(U'A', CellAttribute::Bold | CellAttribute::Underline);
+    EXPECT_EQ(again.source.x, bold.source.x);
+    EXPECT_EQ(again.source.y, bold.source.y);
+}
+
 TEST_SUIT_END

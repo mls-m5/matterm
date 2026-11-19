@@ -9,5 +9,6 @@ struct CursorState {
     int row = 0;
     Shape shape = Shape::Underline;
     bool visible = false;
+    bool blink = true;
     Rgb8 color{255, 255, 255};
 };

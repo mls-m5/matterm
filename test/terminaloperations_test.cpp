@@ -195,4 +195,65 @@ TEST_CASE("RIS resets modes buffers margins style and device identification "
     EXPECT_EQ(reply, std::string("\x1b[?1;0c"));
 }
 
+TEST_CASE("SGR text attributes are compact saved and restored independently") {
+    TerminalModel model(10, 2);
+    VtParser parser(model);
+    parser.feed("\x1b[1;2;3;4;5;9mA\x1b[22;23;24;25;29mB\x1b[1;4mC\x1b"
+                "7\x1b[0m!\x1b"
+                "8D");
+    const auto flags = model.cell(0, 0).attributes;
+    EXPECT(hasAttribute(flags, CellAttribute::Bold));
+    EXPECT(hasAttribute(flags, CellAttribute::Faint));
+    EXPECT(hasAttribute(flags, CellAttribute::Italic));
+    EXPECT(hasAttribute(flags, CellAttribute::Underline));
+    EXPECT(hasAttribute(flags, CellAttribute::Strike));
+    EXPECT(hasAttribute(flags, CellAttribute::Blink));
+    EXPECT(model.cell(1, 0).attributes == CellAttribute::None);
+    EXPECT(model.cell(3, 0).codePoint == U'D');
+    EXPECT(hasAttribute(model.cell(3, 0).attributes, CellAttribute::Bold));
+    EXPECT(hasAttribute(model.cell(3, 0).attributes, CellAttribute::Underline));
+    parser.feed("\x1b[?1049hX\x1b[0m\x1b[?1049lY");
+    EXPECT(hasAttribute(model.cell(4, 0).attributes, CellAttribute::Bold));
+    model.moveCursor(0, 1);
+    model.eraseLine(TerminalModel::EraseMode::All);
+    EXPECT(model.cell(0, 1).attributes == CellAttribute::None);
+    EXPECT_EQ(sizeof(FChar), std::size_t(12));
+}
+
+TEST_CASE("HTS TBC forward and backward tabs use terminal-wide custom stops") {
+    TerminalModel model(20, 2);
+    VtParser parser(model);
+    parser.feed("\x1b[4G\x1bH\x1b[H\t");
+    EXPECT_EQ(model.cursor().column, 3);
+    parser.feed("\x1b[g\x1b[H\t");
+    EXPECT_EQ(model.cursor().column, 8);
+    parser.feed("\x1b[3g\x1b[H\t");
+    EXPECT_EQ(model.cursor().column, 19);
+    parser.feed("\x1b[Z");
+    EXPECT_EQ(model.cursor().column, 0);
+    parser.feed("\x1b[6G\x1bH\x1b[14G\x1bH\x1b[H\x1b[2I");
+    EXPECT_EQ(model.cursor().column, 13);
+    parser.feed("\x1b[Z");
+    EXPECT_EQ(model.cursor().column, 5);
+    parser.feed("\x1b[?1049h");
+    model.tabForward();
+    EXPECT_EQ(model.cursor().column, 5);
+}
+
+TEST_CASE("Cursor shape steady and blink controls do not cancel pending wrap") {
+    TerminalModel model(3, 2);
+    VtParser parser(model);
+    parser.feed("abc\x1b[6 q\x1b[?25lD");
+    EXPECT(model.cursor().shape == CursorState::Shape::Bar);
+    EXPECT_FALSE(model.cursor().blink);
+    EXPECT_FALSE(model.cursor().visible);
+    EXPECT(model.cell(0, 1).codePoint == U'D');
+    parser.feed("\x1b[?12h\x1b[?25h\x1b[4 q");
+    EXPECT(model.cursor().shape == CursorState::Shape::Underline);
+    EXPECT_FALSE(model.cursor().blink);
+    parser.feed("\x1b[1 q");
+    EXPECT(model.cursor().shape == CursorState::Shape::Block);
+    EXPECT(model.cursor().blink);
+}
+
 TEST_SUIT_END

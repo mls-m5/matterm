@@ -46,6 +46,8 @@ margins/origin to the full screen; applications can re-establish them on SIGWINC
 | `CSI L`, `CSI M` | Insert/delete lines within the cursor-to-bottom margin |
 | `CSI S`, `CSI T`, `CSI r` | Scroll region up/down and set inclusive margins |
 | `CSI 4 h/l`, `CSI ? 6 h/l`, `CSI ? 7 h/l` | Insert, origin, and autowrap modes |
+| `ESC H`, `CSI g`, `CSI I/Z` | Set/clear tab stops, forward/backward tabs |
+| `CSI Ps SP q`, `CSI ? 12 h/l` | Cursor shape/steady/blinking style and blink mode |
 | `CSI m` | SGR subset below |
 | `ESC 7` / `8`, `CSI s` / `u` | Shared per-screen saved cursor/rendition slot, including pending wrap |
 | `CSI ? 1 h/l`, `CSI ? 2004 h/l` | Application cursor and bracketed paste input modes |
@@ -71,8 +73,11 @@ grayscale ramp. Defaults are independently configurable. Invalid known color
 groups are consumed without changing that color. An unknown extended-color format
 stops the remaining SGR parameters to avoid reinterpreting its payload.
 
-Bold, italic, underline, blinking text, and other attributes are ignored, not
-implemented. Colon-separated SGR is unsupported and the entire CSI is discarded.
+SGR 1/2/3/4/9 enable bold/faint/italic/underline/strike; 22/23/24/29 disable
+them. SGR 5/6 enable a shared blink attribute and 25 disables it. Bold/italic
+use separate atlas entries; underline/strike are geometry, faint blends the ink
+with the background, and RenderFrame.textBlinkVisible is driven by the caller.
+Double underline and other unsupported attributes are ignored. Colon-separated SGR is unsupported and the entire CSI is discarded.
 
 ### Initial Alternate-Screen Policy
 
@@ -105,7 +110,7 @@ The future compatibility layer may need finer-grained DEC/ANSI state handling.
   and retains completed rendition/model state. `resetInput()` drops pending input
   without inserting a replacement and also retains completed state.
 - Raw eight-bit C1 control forms, secondary/extended device attributes, erase
-  history mode 3, custom tab stops, application keypad, and mouse reporting are
+  history mode 3, application keypad, and mouse reporting are
   not supported yet. Primary DA does not imply full VT100 conformance.
 Do not advertise full VT100/xterm compatibility or Vim support.
 

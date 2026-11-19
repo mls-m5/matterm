@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/cellattributes.h"
 #include "glyph.h"
 
 #include <memory>
@@ -28,12 +29,14 @@ public:
 
     // Returns cached metrics or rasterizes and uploads a white coverage glyph.
     // Foreground color is applied by the draw code, not baked into the cache.
-    // Cache key: Unicode scalar value; the font and size are fixed for this
-    // atlas. Rejects invalid scalars; missing characters use a cached
-    // replacement glyph. Throws on rasterization/upload failure or when the
-    // fixed atlas is full. Collect glyphs before submitting geometry to avoid
-    // mid-batch uploads.
-    Glyph getOrInsert(char32_t codePoint);
+    // Cache key: Unicode scalar plus bold/italic variant. Other attributes use
+    // renderer decorations/colors; the font and size are fixed for this atlas.
+    // Rejects invalid scalars; missing characters use a cached replacement
+    // glyph. Throws on rasterization/upload failure or when the fixed atlas is
+    // full. Collect glyphs before submitting geometry to avoid mid-batch
+    // uploads.
+    Glyph getOrInsert(char32_t codePoint,
+                      CellAttribute attributes = CellAttribute::None);
 
     // Borrowed texture; callers must not destroy it or modify its contents.
     // Use alpha blending and vertex colors when drawing atlas geometry.

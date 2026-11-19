@@ -221,4 +221,43 @@ TEST_CASE(
     EXPECT_GT(fixture.backend->rows(), 0);
 }
 
+TEST_CASE("Underline strike and faint render even on space cells") {
+    Fixture fixture;
+    CellBuffer cells(2, 1);
+    cells.at(0, 0) = FChar{U' ',
+                           {20, 200, 40},
+                           {0, 0, 0},
+                           CellAttribute::Underline | CellAttribute::Faint};
+    cells.at(1, 0) =
+        FChar{U' ', {200, 40, 20}, {0, 0, 0}, CellAttribute::Strike};
+    fixture.backend->render({cells.view(), {}});
+    const int w = fixture.backend->cellWidth();
+    const int h = fixture.backend->cellHeight();
+    EXPECT_EQ(fixture.pixel(1, h - 2), Uint32(0x0a6414));
+    EXPECT_EQ(fixture.pixel(w + 1, h / 2), Uint32(0xc82814));
+    EXPECT_EQ(fixture.pixel(1, 0), Uint32(0));
+}
+
+TEST_CASE(
+    "Text blink hides ink and decorations but preserves cell backgrounds") {
+    Fixture fixture;
+    CellBuffer cells(1, 1);
+    cells.at(0, 0) = FChar{U'M',
+                           {20, 200, 40},
+                           {10, 20, 30},
+                           CellAttribute::Blink | CellAttribute::Underline};
+    RenderFrame frame{cells.view(), {}};
+    frame.textBlinkVisible = false;
+    fixture.backend->render(frame);
+    for (int y = 0; y < fixture.backend->cellHeight(); ++y) {
+        for (int x = 0; x < fixture.backend->cellWidth(); ++x) {
+            EXPECT_EQ(fixture.pixel(x, y), Uint32(0x0a141e));
+        }
+    }
+    frame.textBlinkVisible = true;
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(1, fixture.backend->cellHeight() - 2),
+              Uint32(0x14c828));
+}
+
 TEST_SUIT_END
