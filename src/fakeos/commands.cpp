@@ -1681,13 +1681,13 @@ std::string pad(const std::string &text, std::size_t width) {
 
 // Used space on the root disk: what the system itself takes, and the visitor's
 // own files.
-long diskUsedKiB(const World &w) {
-    return hardware::kDiskBaseUsedKiB + long(w.fs.totalBytes() / 1024);
+long long diskUsedKiB(const World &w) {
+    return hardware::kDiskBaseUsedKiB + (long long)(w.fs.totalBytes() / 1024);
 }
 
 int cmdDf(World &w, const Args &, CommandIo &io) {
-    const long total = hardware::kDiskTotalKiB, used = diskUsedKiB(w);
-    const long tmp = hardware::kTmpTotalKiB;
+    const long long total = hardware::kDiskTotalKiB, used = diskUsedKiB(w);
+    const long long tmp = hardware::kTmpTotalKiB;
     io.out += "Filesystem         1K-blocks        Used   Available Use% "
               "Mounted on\n";
     io.out += "/dev/nvme0n1p2 " + pad(std::to_string(total), 13) + " " +
