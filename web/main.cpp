@@ -792,6 +792,7 @@ int main() {
         std::fprintf(stderr, "backend failed: %s\n", error.what());
         return 1;
     }
+    app.backend->setReserveScrollbarStrip(true);
     publishCellSize(app);
     app.model = std::make_unique<TerminalModel>(
         std::size_t(std::max(1, app.backend->columns(true))),
