@@ -142,3 +142,23 @@ cleanup after the leader ends, connection counter leak) are fixed and covered
 by `test/serverintegration_test.cpp`. Still worth a second look: shutdown while
 connections are active, bounded write/close deadlines, and credential-parser
 edge cases. Usage is in [../SERVER.md](../SERVER.md).
+
+## Status after the hardening task (branch agent2-hardening)
+
+The four review follow-ups are done; details and reasoning are in
+[../SERVER.md](../SERVER.md) ("Rate limiting", "Deadlines and shutdown").
+
+1. Source table pruned (idle expiry, once-per-second scan, eviction of unlocked
+   sources at saturation, locked sources never evicted).
+2. Global budget counts failures only (configurable); residual risk documented.
+3. `sourceKey()` (IPv6 /64, IPv4-mapped unwrapped) is used by `server.cpp`;
+   `peerIsLoopback()` also recognizes `::ffff:127.0.0.1`.
+4. Threading contract in the headers plus a debug assertion (`ThreadAffinity`).
+
+Reviewed with tests (`serverlifecycle_test`, `serverauth_test`): shutdown with
+active, flooding, HUP-ignoring and half-open connections; the closing-handshake
+and request deadlines; the send queue bound; credential parser edge cases (no
+parser bug found, behavior pinned). Added to `ServerConfig` with unchanged
+defaults: `session`, `requestTimeout`, `webSocketHandshakeTimeout`,
+`webSocketIdleTimeout`. Not done: persisted lockout state, `--reset-lockout`,
+`trusted_proxy`, a graceful stop that sends a protocol Close to clients.
