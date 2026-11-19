@@ -176,17 +176,27 @@ Decided by the owner:
   cell is mapped to the text that was drawn there. Not needed for milestone 1,
   but keep the `Program` interface able to receive mouse reports (they arrive as
   input bytes).
-- **Naming and the native demo window** (decided in principle; do the renames in
-  the native-host milestone, as a separate commit):
-  - the new showcase becomes `matterm-demo`: an SDL window that runs the fakeos
-    core through the matterm model/renderer (the "native app" host);
-  - the current renderer-only `matterm-demo` is renamed `matterm-lib-demo`;
-  - `matterm-terminal-demo` (the model's direct API, no escape sequences) stays as
-    it is. Agents.md, README.md, docs/FONTS.md and CMake mention the old names and
-    must be updated together with the rename (the owner authorizes this change to
-    the earlier "keep matterm-demo standalone" rule).
-  - `matterm-fakeos` (the raw-tty program that runs inside any terminal) stays a
-    separate target.
+- **Naming and one demo program** (decided by the owner; do the renames in the
+  native-host milestone, as a separate commit, updating Agents.md, README.md,
+  docs/FONTS.md, CMake and any scripts together; the owner authorizes changing the
+  earlier "keep matterm-demo standalone" rule):
+  - current `matterm-demo` (renderer only) is renamed **`matterm-render-demo`**;
+  - current `matterm-terminal-demo` (the model's direct API) is renamed
+    **`matterm-lib-demo`**;
+  - **`matterm-demo`** becomes the new showcase: fakeos is merged into it, so there
+    is one concept, not two. It shows the intro animation, runs the pretend OS
+    (virtual files, shell, programs) and the ASCII animations, and has the easter
+    eggs below. Hosts: the SDL window through the matterm model/renderer (default)
+    and the web build; the raw-tty variant (formerly `matterm-fakeos`, runs inside
+    any terminal) is kept as a mode of the same program if it stays cheap
+    (`matterm-demo --tty`; confirm in milestone 2, otherwise drop it and say so).
+- **Easter eggs** are a first-class feature of the core: hidden content that is found
+  by exploring: typing certain words or commands, finding the right files or
+  programs in the virtual file system (hidden files, odd directories, a program
+  that only appears after another is run), and clicking the right spots through
+  mouse reporting. Design them as data (a table of triggers and effects) so more
+  can be added without touching the shell; keep them deterministic (seeded) for
+  tests; list them in a spoiler-marked document, not in `--help`.
 - **Intro animation**: opening the demo (web and native window) plays a short intro
   animation (title/logo reveal in the ASCII style of the other animations) before
   the shell prompt appears. Any key or click skips it; `?nointro` (web) and
@@ -206,8 +216,8 @@ Decided by the owner:
 
 Still open:
 
-- Name and place of the native executable (`matterm-fakeos` assumed) and whether
-  it ships in the default build or behind an option.
+- Whether `matterm-demo` ships in the default build or behind an option (the
+  `matterm-lib-demo` and `matterm-render-demo` renames are decided).
 
 Future direction (not part of this task): chatting with other visitors in the web
 demo. That needs a relay server, so it conflicts with pure static hosting. The
