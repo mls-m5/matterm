@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <iostream>
 #include <sodium.h>
+#include <termios.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -16,14 +17,51 @@ void usage() {
            "  [--origin URL] [--credentials PATH] [--static-dir DIR] "
            "[--allow-plain-http]\n"
            "  [-- PROGRAM ARG...]\n"
-           "matterm-server --set-password [--config PATH] [--credentials PATH] "
-           "< password-file\n"
+           "matterm-server --setup-credentials (alias --set-password) [--config PATH]\n"
+           "  [--credentials PATH]   prompts twice on a terminal, else reads "
+           "stdin\n"
            "Settings come from built-in defaults, then the config file "
            "(default\n"
            "$XDG_CONFIG_HOME/matterm/server.json), then these flags. See "
            "docs/SERVER_CONFIG.md.\n";
 }
+std::string readLine(const char *prompt, bool hide) {
+    termios saved{};
+    const bool changed =
+        hide && ::tcgetattr(0, &saved) == 0 &&
+        [&] {
+            auto quiet = saved;
+            quiet.c_lflag &= ~tcflag_t(ECHO);
+            return ::tcsetattr(0, TCSAFLUSH, &quiet) == 0;
+        }();
+    std::cerr << prompt << std::flush;
+    std::string line;
+    char c;
+    while (std::cin.get(c) && c != '\n') {
+        if (line.size() == 256)
+            break;
+        line += c;
+    }
+    if (changed)
+        ::tcsetattr(0, TCSAFLUSH, &saved);
+    if (hide)
+        std::cerr << '\n';
+    return line;
+}
+// Interactive: ask twice without echo. Piped: one line from stdin.
 std::string readPassword() {
+    if (::isatty(0)) {
+        auto first = readLine(
+            "Password (24-256 characters, a long passphrase is best): ", true);
+        auto second = readLine("Again: ", true);
+        const bool same = first == second;
+        sodium_memzero(second.data(), second.size());
+        if (!same) {
+            sodium_memzero(first.data(), first.size());
+            throw std::invalid_argument("The passwords differ");
+        }
+        return first;
+    }
     std::string password;
     // Bounded stdin, never argv. Stop on LF; CR is a password byte.
     char c;
@@ -33,6 +71,28 @@ std::string readPassword() {
         password += c;
     }
     return password;
+}
+// Without static_dir, look for the web client built next to the server or in
+// a repository build tree: <exe dir>/site, then build-web/site in the exe
+// directory and up to five parents.
+std::string findStaticDir() {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const auto exe = fs::read_symlink("/proc/self/exe", ec);
+    if (ec)
+        return {};
+    auto dir = exe.parent_path();
+    for (int level = 0; level < 6 && !dir.empty(); ++level) {
+        for (const char *name : {"site", "build-web/site"}) {
+            const auto candidate = dir / name;
+            if (fs::exists(candidate / "index.html", ec))
+                return candidate.string();
+        }
+        if (dir == dir.parent_path())
+            break;
+        dir = dir.parent_path();
+    }
+    return {};
 }
 bool exists(const std::string &path) {
     struct stat st {};
@@ -80,6 +140,12 @@ int main(int argc, char **argv) {
             else
                 settings.server.passwordHash =
                     server::loadPasswordHash(settings.credentialsPath);
+        }
+        if (settings.server.staticDir.empty()) {
+            settings.server.staticDir = findStaticDir();
+            if (!settings.server.staticDir.empty())
+                std::clog << "matterm-server: serving the web client from "
+                          << settings.server.staticDir << '\n';
         }
         if (commandLine.printConfig) {
             std::cout << server::printConfig(settings);

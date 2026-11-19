@@ -126,7 +126,7 @@ TLS files and scrollback sizes.
 | `--credentials PATH` | `credentials` |
 | `--allow-plain-http` | sets `allow_plain_http` to true (it cannot unset it) |
 | `-- PROGRAM ARG...` | `process.arguments` |
-| `--set-password` | reads a password from stdin and writes the credentials file; honors `--config` and `--credentials` |
+| `--setup-credentials` (alias `--set-password`) | on a terminal asks for the password twice without echo, otherwise reads one line from stdin; writes the credentials file; honors `--config` and `--credentials` |
 
 ## Examples
 
@@ -138,3 +138,10 @@ TLS-terminating reverse proxy on the same machine. Three failures, lockouts
 from one minute to an hour, ten attempts per hour globally, loopback *not*
 exempt (the proxy connects from loopback), short sessions and tighter
 transport timeouts. Both files are loaded by the test suite.
+
+## Static directory default
+
+Without `static_dir`/`--static-dir`, the server looks for `site/index.html` and
+`build-web/site/index.html` in its own directory and up to five parents (so
+`build/server/src/server/matterm-server` finds `build-web/site` in the repository
+root) and logs which one it uses.

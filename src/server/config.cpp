@@ -725,7 +725,8 @@ CommandLine parseCommandLine(const std::vector<std::string> &arguments) {
         else if (option == "--allow-plain-http") {
             result.allowPlainHttp = true;
         }
-        else if (option == "--set-password") {
+        else if (option == "--set-password" ||
+                 option == "--setup-credentials") {
             result.setPassword = true;
         }
         else if (option == "--print-config") {
