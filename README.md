@@ -1,8 +1,8 @@
 # matterm
 
 A reusable cell-grid renderer, working toward a terminal emulator. The standalone
-`matterm-demo` demonstrates the library and will remain available independently
-of the future terminal application. `matterm-terminal-demo` separately demonstrates
+`matterm-render-demo` demonstrates the library and will remain available independently
+of the future terminal application. `matterm-lib-demo` separately demonstrates
 the CPU-only terminal model, including primary/alternate screens.
 `TerminalMemory` supplies a borrowed row view through `RenderFrame` to
 `SdlBackend`, which draws cell backgrounds and atlas glyphs in separate indexed
@@ -31,7 +31,7 @@ The demo retains up to 256 rows in reusable 16-row blocks. Controls:
 
 ## Terminal Model Demo
 
-`matterm-terminal-demo` uses the model's direct API, not escape sequences:
+`matterm-lib-demo` uses the model's direct API, not escape sequences:
 
 - Type text (SDL UTF-8 input is converted to UTF-32 in the demo).
 - Enter writes CR LF; arrows move the cursor; Home/End move within the row.
@@ -120,8 +120,8 @@ Braille). See [docs/FONTS.md](docs/FONTS.md).
 git submodule update --init
 cmake -S . -B build
 cmake --build build
-./build/matterm-demo
-./build/matterm-terminal-demo
+./build/matterm-render-demo
+./build/matterm-lib-demo
 ./build/matterm
 ```
 
@@ -178,8 +178,8 @@ text-input regression checks also exercise ASCII and Swedish UTF-8 through the
 demo's actual input helper. They can also be run directly:
 
 ```sh
-SDL_VIDEODRIVER=dummy ./build/matterm-demo /path/to/font.ttf --smoke-test
-SDL_VIDEODRIVER=dummy ./build/matterm-terminal-demo /path/to/font.ttf --smoke-test
+SDL_VIDEODRIVER=dummy ./build/matterm-render-demo /path/to/font.ttf --smoke-test
+SDL_VIDEODRIVER=dummy ./build/matterm-lib-demo /path/to/font.ttf --smoke-test
 SDL_VIDEODRIVER=dummy ./build/matterm /path/to/font.ttf --smoke-test
 ```
 
