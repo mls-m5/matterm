@@ -81,6 +81,31 @@ TEST_CASE("Golden vectors encode and decode exactly as documented") {
            hex("85 0001 0002 6e 6f"));
 }
 
+TEST_CASE(
+    "Reserved resume fields preserve the proposed extension's wire layout") {
+    const std::string id = "00112233445566778899aabbccddeeff";
+    const auto idBytes =
+        hex("3030313132323333343435353636373738383939616162626363646465656666");
+    const auto helloBytes = hex("01 0001 0050 0018 00000000000004d2 0020") +
+                            idBytes + hex("00000001");
+    EXPECT(encoded(Hello{1, 80, 24, 1234, id, 1}) == helloBytes);
+    const auto hello = decodeClient(helloBytes);
+    EXPECT(hello);
+    EXPECT_EQ(as<Hello>(*hello.message).resumeOffset, std::uint64_t(1234));
+    EXPECT_EQ(as<Hello>(*hello.message).features, std::uint32_t(1));
+    const auto welcomeBytes =
+        hex("81 0001 0020") + idBytes + hex("0000000000000800 03 00000001");
+    EXPECT(encoded(Welcome{1, id, 2048, 3, 1}) == welcomeBytes);
+    const auto welcome = decodeServer(welcomeBytes);
+    EXPECT(welcome);
+    EXPECT_EQ(as<Welcome>(*welcome.message).startOffset, std::uint64_t(2048));
+    EXPECT_EQ(as<Welcome>(*welcome.message).flags, std::uint8_t(3));
+    EXPECT(encoded(Error{ErrorCode::Replaced, "session taken over"}) ==
+           hex("85 0006 0012 73657373696f6e2074616b656e206f766572"));
+    // These are codec vectors, not an assertion that ServerSession currently
+    // negotiates resume. Semantic support requires the registry design gate.
+}
+
 TEST_CASE("Every message round-trips through its decoder") {
     Hello hello;
     hello.version = 7;
