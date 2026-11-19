@@ -7,6 +7,10 @@
 namespace fakeos {
 namespace hardware {
 
+// Mattrix OS "booted" on 1987-02-27 00:00:00 UTC and has not been restarted
+// since.
+constexpr long long kBootUnix = 541382400;
+
 constexpr const char *kCpuModel = "Mattrix Quantum Threadripper 9999X";
 constexpr int kCpuCores = 128;
 constexpr const char *kCpuClock = "6.20GHz";
@@ -15,7 +19,7 @@ constexpr const char *kGpu = "Mattrix Photon-X 9090 Ti Mega Hyper, 96 GB HBM9";
 constexpr const char *kDisplay = "2048x1536 @ 85Hz, 21-inch CRT";
 constexpr const char *kDiskModel = "Mattrix HyperNVMe 64 TB";
 
-constexpr long long kGiB = 1024LL * 1024L;      // In KiB.
+constexpr long long kGiB = 1024LL * 1024L;     // In KiB.
 constexpr long long kRamTotalKiB = 512 * kGiB; // 512 GiB.
 constexpr long long kRamUsedKiB = 38 * kGiB;   // 38 GiB.
 constexpr long long kRamCacheKiB = 61 * kGiB;  // 61 GiB buffers and cache.

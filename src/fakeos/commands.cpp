@@ -1116,16 +1116,91 @@ int cmdPs(World &w, const Args &, CommandIo &io) {
     return 0;
 }
 
-int cmdUptime(World &w, const Args &, CommandIo &io) {
-    const auto up =
-        std::chrono::duration_cast<std::chrono::seconds>(w.now).count() +
-        3 * 86400 + 4 * 3600 + 17 * 60;
+// The calendar span from the boot to now: "38 years, 10 months, 5 days".
+std::string spanSinceBoot(const World &w) {
+    const auto from = civil(hardware::kBootUnix), to = civil(w.unixNow());
+    int years = to.year - from.year, months = to.month - from.month,
+        days = to.day - from.day;
+    if (days < 0) {
+        --months;
+        // Days in the month before `to`.
+        static const int lengths[] = {
+            31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        const int previous = to.month == 1 ? 12 : to.month - 1;
+        const int year = to.month == 1 ? to.year - 1 : to.year;
+        const bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+        days += lengths[previous - 1] + (previous == 2 && leap);
+    }
+    if (months < 0) {
+        --years;
+        months += 12;
+    }
+    const auto seconds = w.uptimeSeconds();
+    return std::to_string(years) + " years, " + std::to_string(months) +
+           " months, " + std::to_string(days) + " days, " +
+           std::to_string(seconds % 86400 / 3600) + " hours, " +
+           std::to_string(seconds % 3600 / 60) + " mins";
+}
+
+int cmdUptime(World &w, const Args &args, CommandIo &io) {
+    const auto up = w.uptimeSeconds();
+    const auto o = parse(args, "ps");
+    if (!o.bad.empty()) {
+        return badOption(args, o, io);
+    }
+    if (o.has('s')) {
+        io.out += unixDate(hardware::kBootUnix, "%F %T") + "\n";
+        return 0;
+    }
+    if (o.has('p')) {
+        io.out += "up " + std::to_string(up / 604800) + " weeks, " +
+                  std::to_string(up % 604800 / 86400) + " days, " +
+                  std::to_string(up % 86400 / 3600) + " hours, " +
+                  std::to_string(up % 3600 / 60) + " minutes\n";
+        return 0;
+    }
     const auto c = civil(w.unixNow());
+    const auto hours = std::to_string(up % 86400 / 3600);
     io.out += " " + two(c.hour) + ":" + two(c.minute) + ":" + two(c.second) +
               " up " + std::to_string(up / 86400) + " days, " +
-              std::to_string(up % 86400 / 3600) + ":" +
+              std::string(hours.size() < 2 ? " " : "") + hours + ":" +
               two(int(up % 3600 / 60)) +
               ",  1 user,  load average: 0.00, 0.01, 0.00\n";
+    return 0;
+}
+
+// who: who is logged in, and when the system booted.
+int cmdWho(World &w, const Args &args, CommandIo &io) {
+    const auto o = parse(args, "b");
+    if (!o.bad.empty()) {
+        return badOption(args, o, io);
+    }
+    if (o.has('b')) {
+        io.out += "         system boot  " +
+                  unixDate(hardware::kBootUnix, "%F %H:%M") + "\n";
+        return 0;
+    }
+    io.out += w.user + "    pts/0        " + unixDate(w.bootUnix, "%F %H:%M") +
+              " (:0)\n";
+    return 0;
+}
+
+// last [reboot]: the logins and the one reboot, long ago.
+int cmdLast(World &w, const Args &args, CommandIo &io) {
+    const bool onlyReboot = args.size() > 1 && args[1] == "reboot";
+    if (args.size() > 1 && !onlyReboot) {
+        io.err += "last: no such user: " + args[1] + "\n";
+        return 1;
+    }
+    if (!onlyReboot) {
+        io.out += w.user + "    pts/0        :0               " +
+                  unixDate(w.bootUnix, "%a %b %e %H:%M") +
+                  "   still logged in\n";
+    }
+    io.out += "reboot   system boot  6.8.0-mattrix " +
+              unixDate(hardware::kBootUnix, "%a %b %e %H:%M") +
+              "   still running\n\nwtmp begins " +
+              unixDate(hardware::kBootUnix, "%a %b %e %H:%M:%S %Y") + "\n";
     return 0;
 }
 
@@ -1161,6 +1236,22 @@ int cmdTrue(World &, const Args &, CommandIo &) {
 }
 int cmdFalse(World &, const Args &, CommandIo &) {
     return 1;
+}
+
+int cmdSlow(World &w, const Args &args, CommandIo &io) {
+    if (args.size() > 2 ||
+        (args.size() == 2 && args[1] != "on" && args[1] != "off")) {
+        io.err += "usage: slow on|off\n";
+        return 2;
+    }
+    if (args.size() == 2) {
+        w.slow = args[1] == "on";
+        w.slowAsked = w.slowAsked || w.slow;
+        w.fs.put("/etc/motd", motdText(w.slow), "root", 0644, w.unixNow());
+    }
+    io.out += std::string("Dramatic typing speed: ") +
+              (w.slow ? "enabled" : "disabled") + " (slow on|off)\n";
+    return 0;
 }
 
 int cmdHistory(World &w, const Args &, CommandIo &io) {
@@ -1235,6 +1326,8 @@ int cmdHelp(World &, const Args &, CommandIo &io) {
     io.out +=
         "Try: fire, gradient, neofetch, about, cal, cowsay hello, cat README,\n"
         "     echo hi | wc, grep -n the /usr/share/dict/words\n"
+        "Dramatic typing speed: 'slow off' turns it off, 'slow on' back on "
+        "(Space skips).\n"
         "Use Tab to complete, Up for history. There is more to find than "
         "what is in your PATH.\n";
     return 0;
@@ -2050,9 +2143,6 @@ const char *const kTv[] = {
 };
 
 int cmdNeofetch(World &w, const Args &, CommandIo &io) {
-    const auto up =
-        std::chrono::duration_cast<std::chrono::seconds>(w.now).count() +
-        3 * 86400 + 4 * 3600 + 17 * 60;
     const std::string account = w.user + "@" + w.hostname;
     struct Line {
         std::string label, value;
@@ -2061,10 +2151,7 @@ int cmdNeofetch(World &w, const Args &, CommandIo &io) {
         {"OS", "Mattrix OS 6.0 Professional Edition x86_64"},
         {"Host", w.hostname + " (a simulated machine)"},
         {"Kernel", "6.8.0-mattrix"},
-        {"Uptime",
-         std::to_string(up / 86400) + " days, " +
-             std::to_string(up % 86400 / 3600) + " hours, " +
-             std::to_string(up % 3600 / 60) + " mins"},
+        {"Uptime", spanSinceBoot(w)},
         {"Packages", "42 (mattrix)"},
         {"Shell", "mattrix-sh 1.0"},
         {"Display", hardware::kDisplay},
@@ -2383,6 +2470,7 @@ const std::vector<CommandInfo> &commands() {
         {"pwd", cmdPwd, true, "print the working directory"},
         {"export", cmdExport, true, "set environment variables"},
         {"unset", cmdUnset, true, "remove environment variables"},
+        {"slow", cmdSlow, true, "turn the dramatic typing speed on or off"},
         {"history", cmdHistory, true, "show the command history"},
         {"clear", cmdClear, true, "clear the screen"},
         {"reset",
@@ -2418,6 +2506,8 @@ const std::vector<CommandInfo> &commands() {
         {"env", cmdEnv, false, "print the environment"},
         {"ps", cmdPs, false, "list processes"},
         {"uptime", cmdUptime, false, "show how long the system has run"},
+        {"who", cmdWho, false, "show who is logged in, and the boot time"},
+        {"last", cmdLast, false, "show logins and reboots"},
         {"colors", cmdColors, false, "show the terminal's colors"},
         {"which", cmdWhich, false, "locate a command"},
         {"man", cmdMan, false, "show a manual entry"},

@@ -149,7 +149,7 @@ For the static demo (`demo.html`, or `index.html?demo`; see docs/DEMO.md):
 | `?embed` | Edge to edge for a page inside an `<iframe>`; no layout toggle. |
 | `?nointro` | Skip the intro animation. |
 | `?noreveal` | Print program output at once, not at a pace. |
-| `?cmd=...` | Type and run a command at the first prompt (text only, 200 characters). |
+| `?cmd=...` | Type and run a command at the first prompt, letter by letter after the intro (text only, 200 characters; nothing runs by itself without it). |
 | `?theme=light\|dark` | Page colors around the terminal (not the terminal palette). |
 | `?sound=1` / `?mute` | Pips for revealed and typed text (WebAudio, after the first key or click): on in the demo page, off when embedded, `?sound=1` on anywhere, `?mute` off. |
 | `?smooth=N` | Cursor glide in milliseconds; on (80) in the demo, `?smooth=0` turns it off. |

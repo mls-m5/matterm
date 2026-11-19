@@ -863,7 +863,7 @@ int main() {
                 return $0 ? 80 : 0;
             }
             const v = parseInt(p.get("smooth"), 10);
-            return v === 0 ? 0 : (v > 0 ? v : 80);
+            return v == = 0 ? 0 : (v > 0 ? v : 80);
         },
         url.empty() ? 1 : 0);
     glide.enabled = smoothMs > 0;

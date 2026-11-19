@@ -43,7 +43,12 @@ void usage(std::ostream &out, const char *program) {
            "  --help, -h           Show this help.\n"
            "  --font-size PIXELS   Font size, 1..128 renderer pixels (default: "
            "18).\n"
-           "  --no-intro           Skip the intro animation.\n"
+           "  --no-intro           Skip the intro animation (and the neofetch "
+           "after "
+           "it).\n"
+           "  --cmd TEXT           Type and run TEXT at the first prompt "
+           "instead of "
+           "neofetch.\n"
            "  --seed N             Seed for the animations (default: from the "
            "clock).\n"
            "  --no-reveal          Print program output at once, not at a "
@@ -608,6 +613,9 @@ int main(int argc, char **argv) {
         }
         else if (arg == "--no-intro") {
             pretend.intro = false;
+        }
+        else if (arg == "--cmd" && i + 1 < argc) {
+            pretend.startCommand = argv[++i];
         }
         else if (arg == "--no-reveal") {
             pretend.revealCharsPerSecond = 0;

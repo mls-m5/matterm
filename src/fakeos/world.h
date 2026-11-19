@@ -1,5 +1,6 @@
 #pragma once
 
+#include "hardware.h"
 #include "keys.h"
 #include "types.h"
 #include "virtualfs.h"
@@ -36,9 +37,13 @@ struct World {
     // Pips reported by programs (typed text) are collected here and handed to
     // Config::onBeep by the System; nothing is collected when sound is off.
     bool sound = false;
+    // The dramatic typing speed (revealed text and its pips): `slow on|off`.
+    bool slow = false;
+    bool slowAsked =
+        false; // `slow on` was typed: reveal even if the host set no pace.
     std::vector<Beep> beeps;
     void beep(double frequency, int durationMs, double volume = 0.3) {
-        if (sound) {
+        if (sound && slow) {
             beeps.push_back({frequency, durationMs, volume, Time{0}});
         }
     }
@@ -58,6 +63,11 @@ struct World {
         return bootUnix +
                std::chrono::duration_cast<std::chrono::seconds>(now).count();
     }
+    // Seconds since the system booted (see hardware::kBootUnix), by the host's
+    // clock plus the session's time: it only ever counts up.
+    std::int64_t uptimeSeconds() const {
+        return std::max<std::int64_t>(0, unixNow() - hardware::kBootUnix);
+    }
     std::string home() const {
         const auto it = env.find("HOME");
         return it == env.end() ? "/" : it->second;
@@ -69,5 +79,7 @@ struct World {
 
 // Fills `world` with the initial virtual system for its user and clock.
 void seedWorld(World &world);
+// The welcome text for the current typing-speed setting (also /etc/motd).
+std::string motdText(bool slow);
 
 } // namespace fakeos
