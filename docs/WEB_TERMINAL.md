@@ -64,7 +64,7 @@ Consequences of that choice:
 | `src/protocol/` | Message types, binary encode/decode, limits. Pure C++17, no I/O, no SDL. | nothing |
 | `src/transport/` | `Transport` interface (below) and the WebSocket client for WASM; scripted transport for the simulator. | protocol |
 | `src/platform/posix/ptyprocess.*` | Already exists; the server reuses it unchanged. | - |
-| `src/server/` | `matterm-server`: HTTP/WebSocket listener (Boost.Beast on Boost.Asio), auth, rate limiting, session manager, configuration. Linux only, off unless `MATTERM_BUILD_SERVER=ON`. | protocol, ptyprocess, Boost, libsodium |
+| `src/server/` | `matterm-server`: HTTP/WebSocket listener (Boost.Beast on Boost.Asio), auth, rate limiting, session manager, configuration. Linux only, off unless `MATTERM_BUILD_SERVER=ON`. | protocol, ptyprocess, Boost, libsodium, fast-json |
 | `web/` | HTML shell, JS glue (WebSocket, clipboard, resize observer), CSP. | - |
 | `app/web/` | Emscripten entry point: init / tick / shutdown, no blocking loop. | terminal, vt, renderer, transport |
 
@@ -226,14 +226,17 @@ clipboard and OSC 8 hyperlinks stay disabled in the parser (VT.md).
 - The server refuses to bind a non-loopback address unless TLS is configured,
   or it is explicitly told it sits behind a trusted reverse proxy that
   terminates TLS (`trusted_proxy`, below).
-- Recommended public deployment: Caddy or nginx terminates TLS (HTTP/2,
-  automatic certificates, HSTS) and forwards to the server on a unix socket or
-  loopback. This keeps certificate handling out of this code base. Native TLS
-  in the server is optional later.
+- Recommended public deployment: the host's existing nginx terminates TLS
+  (HTTP/2, certificates, HSTS) and forwards to the server on loopback (or, with
+  the Podman setup, to the `edge` container's loopback port). This keeps
+  certificate handling out of this code base and avoids a second web server
+  competing for ports 80/443. Native TLS in the server is optional later.
 - `trusted_proxy` takes the proxy's address (default: loopback only). The
   server accepts connections only from that peer address, and only then may the
   client address come from `X-Forwarded-For`, and only the last hop appended by
-  that proxy. This also lets the server listen on a private container network
+  that proxy. When several proxies are chained (host nginx, then the `edge`
+  container), `trusted_proxy_hops` says how many entries to skip from the right.
+  This also lets the server listen on a private container network
   address without being reachable by anything but the proxy.
 - `localhost` is a secure context in browsers, so the `Secure` cookie flag and
   WASM work on the laptop without TLS.
@@ -360,15 +363,25 @@ configuration directory, so they can be saved and reused:
   files, session and idle timeouts, the program and arguments to run, all rate
   limiting values in 5.3, protocol limits (4.2, 4.4), and scrollback/ring buffer
   sizes.
-- *File format:* TOML, parsed with the header-only toml++ library. The same directory is meant to hold the
+- *File format:* JSON, read with the project's own `lib/fast-json` library
+  (header-only, a git submodule). Properties that matter for configuration:
+  - JSON has no comments. Proposal: members whose name starts with `_` (for
+    example `"_note"`) are ignored by the loader, and `--print-config` prints the
+    effective configuration. The meaning of each setting is documented in a
+    separate reference rather than inside the file.
+  - "Unknown keys are an error" needs the loader to enumerate an object's
+    members; `JsonNode` can iterate children, so this is feasible.
+  - Writing the configuration back (settings saved from a GUI) uses `JsonOut`. The same directory is meant to hold the
   desktop terminal's future settings (see SETTINGS_AND_PERFORMANCE.md), which
   would live in a separate `terminal.conf`.
 
 ### 5.7 Build dependencies
 
 Kept deliberately small: Boost (Beast/Asio are header-only; only
-`boost_system` may be needed at link time), libsodium, and toml++ (header-only).
-On Debian/Ubuntu these are `libboost-dev libsodium-dev libtomlplusplus-dev`.
+`boost_system` may be needed at link time), libsodium, and fast-json (header-only,
+in `lib/fast-json`, no installation needed). On Debian/Ubuntu the system packages
+are `libboost-dev libsodium-dev`. fast-json requires C++20 (it uses concepts) while
+the rest of the repository builds as C++17; see the open question below.
 The server build must not require SDL2, SDL2_ttf, fonts, or Fontconfig: the root
 `CMakeLists.txt` currently runs `find_package(SDL2 REQUIRED)` unconditionally,
 so phase 2 must make graphics dependencies conditional (`MATTERM_BUILD_APP`,
@@ -460,9 +473,9 @@ Each phase is independently useful and ends with tests and documentation.
 The first deployments run in Podman, with the same compose files on the laptop
 and on the public server (`deploy/podman/`, provisional until the server
 exists). Two containers: the server with its shell on an `internal` network with
-no outbound access, and a reverse proxy as the only published port (loopback
-only on the laptop, TLS on the server). Root filesystems are read-only, all
-capabilities are dropped, and resources are limited. Inside the container the
+no outbound access, and an nginx `edge` container as the only published port (loopback only;
+the host's own nginx terminates TLS on the server). Root filesystems are
+read-only, all capabilities are dropped, and resources are limited. Inside the container the
 shell can only see what is mounted, which also answers most of the account
 question in 5.4: the container, not the host account, is the isolation boundary.
 The host's config and state directories are mounted in, so native and container
@@ -475,8 +488,9 @@ Made:
 1. **Server language and libraries:** C++17 in this repository, reusing
    `PtyProcess`. Boost.Beast/Asio for HTTP and WebSocket; libsodium only for
    Argon2id, random bytes, and constant-time comparison.
-2. **TLS:** a reverse proxy terminates TLS for the public server. Native TLS is
-   optional later. Loopback needs none.
+2. **TLS:** a reverse proxy terminates TLS for the public server; the host's
+   existing nginx is used rather than a second proxy on ports 80/443. Native TLS
+   is optional later. Loopback needs none.
 3. **Account:** a dedicated restricted user on the public server; administration
    through a separate channel (SSH, then sudo), not the web terminal. The normal
    account is acceptable on the laptop while loopback-only.
@@ -491,14 +505,23 @@ Made:
 8. **Configuration:** everything configurable, stored under
    `~/.config/matterm/` (state under `~/.local/state/matterm/`).
 
-9. **Configuration format:** TOML via toml++ (header-only). Exact key names are
-   chosen during phase 2, when the settings exist.
-10. **Containers:** Podman first, with a no-egress server network and a reverse
-    proxy (section 10). The container starts out using the host's config and
+9. **Configuration format:** JSON via the project's own `lib/fast-json` (replaces the
+    earlier TOML suggestion). Exact key names are chosen during phase 2, when the
+    settings exist.
+10. **Containers:** Podman first, with a no-egress server network and an nginx
+    `edge` container (section 10). The container starts out using the host's config and
     state directories.
 
 Open:
 
+- C++ standard: fast-json needs C++20, the repository uses C++17. Either the
+  server target builds as C++20 (simplest; the protocol library can stay C++17 so
+  the WASM client is unaffected), or fast-json gains a C++17 mode.
+- fast-json housekeeping: its CMake file defines a standalone project
+  (executable, tests), so the server should use only the `FastJson::FastJson`
+  interface target; its README is a single line and needs usage documentation
+  (parsing, typed access, `JsonOut`, error handling), which we plan to write.
+  Also decide whether to track a pinned commit in this repository.
 - Whether the container should keep sharing the host's config directory.
   Sharing is convenient, but the shell can then read the credentials file (the
   Argon2id hash) and the state directory. A separate, container-owned config and

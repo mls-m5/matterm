@@ -7,9 +7,10 @@ FROM docker.io/library/debian:bookworm-slim AS build
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         build-essential cmake ninja-build git ca-certificates \
-        libboost-dev libboost-system-dev libsodium-dev libtomlplusplus-dev \
+        libboost-dev libboost-system-dev libsodium-dev \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
+# lib/fast-json is a git submodule: run `git submodule update --init` first.
 COPY . .
 # The server must not need SDL2, fonts, or Fontconfig (phase 2 makes the
 # root CMakeLists.txt skip them when only the server is built).
@@ -24,7 +25,7 @@ FROM docker.io/library/debian:bookworm-slim
 # small: whatever is installed here is what a logged-in user can use.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-        libsodium23 libboost-system1.74.0 libtomlplusplus3 bash coreutils \
+        libsodium23 libboost-system1.74.0 bash coreutils \
         less nano ncurses-term \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --uid 10001 --create-home --shell /bin/bash matterm
