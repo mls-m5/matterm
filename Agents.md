@@ -26,6 +26,13 @@ Common types/storage belong in `src/core/`, graphical backends in `src/render/`,
 and terminal emulation/stream parsing in `src/terminal/` and its `vt/` subdirectory.
 The reverse-direction ANSI output backend idea is deferred, not current work.
 
+Before parallel implementation, use `docs/PARALLEL_WORK.md` for task ownership,
+base commits, separate clones/worktrees, and handoff/review requirements. Candidate
+independent tasks are listed there. Settings, profiling/benchmark boundaries, and
+future staged pipelines are recorded in `docs/SETTINGS_AND_PERFORMANCE.md`.
+Do not modify user-staged submodule additions incidentally. Documentation changes
+inside matperf are authorized; commit those separately and report their SHA.
+
 The operator authorizes subagents for small, well-scoped tasks such as independent
 tests, documentation updates, or focused reviews. Prefer direct execution for
 simple changes; delegate only independent work with clear boundaries. The operator
