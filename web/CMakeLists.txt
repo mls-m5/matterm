@@ -71,3 +71,15 @@ target_link_options(matterm-web PRIVATE
     -sEXPORTED_RUNTIME_METHODS=ccall
     -lwebsocket.js
     "--preload-file=${MATTERM_FONT}@/assets/font.ttf")
+
+# The POST_BUILD copy above only runs when index.js is relinked. This target
+# refreshes the plain files (page, script, style) on every build, so editing
+# login.js, style.css or shell.html needs no relink.
+add_custom_target(matterm-web-site ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/login.js ${CMAKE_CURRENT_SOURCE_DIR}/style.css
+        $<TARGET_FILE_DIR:matterm-web>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/shell.html
+        $<TARGET_FILE_DIR:matterm-web>/index.html)
+add_dependencies(matterm-web-site matterm-web)
