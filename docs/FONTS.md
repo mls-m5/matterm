@@ -62,6 +62,10 @@ scaling. The desktop scale and font choice can affect how big the text looks;
 there is no universal 2:1 conversion. For benchmark comparisons, match the
 terminal grid dimensions and record font sizes and display scaling separately.
 
+The bundled font lacks Braille Patterns (U+2800–U+28FF). The atlas draws these
+patterns in one cell when the selected font has no glyph, including the patterns
+used in terminal spinners. This is not general fallback font selection.
+
 Current bundled assets contain only Regular. Bold/italic are SDL_ttf synthetic
 variants, not separately bundled face files. Browser asset preloading, native
 platform app bundles, fallback fonts, and distro-specific shared-data installation
