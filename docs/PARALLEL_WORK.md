@@ -63,11 +63,12 @@ Agents work in separate worktrees with non-overlapping owned paths. Finished and
 integrated: server skeleton, hardening, configuration, ScriptedLink, fast-json
 fixes, resize duplication, zero-width glyph.
 
-- `docs/tasks/security-review.md`: security review of the server and browser
-  client, with tests and fixes. Worktree `.tmp/agent2`, branch `agent2-security`.
-  (The fuzz task is integrated.)
-- `docs/tasks/url-open.md`: Ctrl+click opens links. Worktree `.tmp/agent3`,
-  branch `agent3-url`. (The selection task is integrated.)
+- `docs/tasks/touch-gestures.md`: touch scrolling and pinch zoom in the browser
+  client. Worktree `.tmp/agent3`, branch `agent3-touch`.
+- `docs/tasks/empty-scroll-and-reflow.md`: empty content must not scroll, blank
+  area above the first row, grow pulls scrollback, optional reflow. Worktree
+  `.tmp/agent2`, branch `agent2-scroll`.
+  (Integrated: security review, URL opening.)
 
 Agents can be reached through the MCP message tools (`list_peers`,
 `send_message`, `receive_messages`); the integrator is the project named by
