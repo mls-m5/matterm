@@ -4,7 +4,10 @@
 #include <boost/beast.hpp>
 #include <boost/beast/websocket.hpp>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <map>
 #include <sodium.h>
 #include <unistd.h>
 
@@ -22,14 +25,63 @@ protocol::Time timeNow() {
 std::string_view view(beast::string_view value) {
     return {value.data(), value.size()};
 }
+struct StaticFile {
+    std::string body;
+    std::string type;
+};
+std::string contentType(const std::string &name) {
+    static const std::map<std::string, std::string> types{
+        {".html", "text/html; charset=utf-8"},
+        {".js", "text/javascript; charset=utf-8"},
+        {".css", "text/css; charset=utf-8"},
+        {".wasm", "application/wasm"},
+        {".data", "application/octet-stream"},
+        {".ttf", "font/ttf"},
+        {".png", "image/png"},
+        {".svg", "image/svg+xml"},
+        {".ico", "image/x-icon"},
+        {".txt", "text/plain; charset=utf-8"}};
+    const auto found =
+        types.find(std::filesystem::path(name).extension().string());
+    return found == types.end() ? "application/octet-stream" : found->second;
+}
+// Reads the regular files directly inside `directory` (no recursion, no
+// symlinks), so a request can only ever name something listed here.
+std::map<std::string, StaticFile> loadStatic(const std::string &directory) {
+    namespace fs = std::filesystem;
+    std::map<std::string, StaticFile> files;
+    if (directory.empty())
+        return files;
+    constexpr std::uintmax_t totalLimit = 64u << 20;
+    std::uintmax_t total = 0;
+    for (const auto &entry : fs::directory_iterator(directory)) {
+        if (entry.is_symlink() || !entry.is_regular_file())
+            continue;
+        const auto name = entry.path().filename().string();
+        if (name.empty() || name[0] == '.')
+            continue;
+        total += entry.file_size();
+        if (total > totalLimit)
+            throw std::runtime_error("Static files exceed 64 MiB");
+        std::ifstream in(entry.path(), std::ios::binary);
+        std::string body((std::istreambuf_iterator<char>(in)),
+                         std::istreambuf_iterator<char>());
+        files[name] = {std::move(body), contentType(name)};
+    }
+    if (!files.count("index.html"))
+        throw std::runtime_error("Static directory has no index.html");
+    return files;
+}
 struct Shared {
     ServerConfig config;
+    std::map<std::string, StaticFile> files;
     PasswordVerifier password;
     RateLimiter limiter;
     SessionStore sessions;
     unsigned connections = 0, unauthenticated = 0;
     explicit Shared(ServerConfig cfg)
         : config(std::move(cfg))
+        , files(loadStatic(config.staticDir))
         , password(config.passwordHash)
         , limiter(config.rateLimit)
         , sessions(config.auth) {}
@@ -91,13 +143,23 @@ private:
     void response(http::status status,
                   std::string body,
                   std::string cookie = {},
-                  unsigned retry = 0) {
+                  unsigned retry = 0,
+                  const std::string &type = "text/html; charset=utf-8",
+                  bool page = false) {
         response_.emplace(status, 11);
-        response_->set(http::field::content_type, "text/html; charset=utf-8");
+        response_->set(http::field::content_type, type);
         response_->set(http::field::cache_control, "no-store");
+        // The client is same-origin scripts only (no inline script or style);
+        // WebAssembly needs 'wasm-unsafe-eval'. Everything else is denied.
         response_->set(
             "Content-Security-Policy",
-            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+            page ? "default-src 'none'; script-src 'self' "
+                   "'wasm-unsafe-eval'; style-src 'self'; connect-src 'self'; "
+                   "img-src 'self'; font-src 'self'; frame-ancestors 'none'; "
+                   "base-uri 'none'; form-action 'none'"
+                 : "default-src 'none'; frame-ancestors 'none'; base-uri "
+                   "'none'");
+        response_->set("Referrer-Policy", "no-referrer");
         response_->set("X-Content-Type-Options", "nosniff");
         if (!cookie.empty())
             response_->set(http::field::set_cookie, cookie);
@@ -106,6 +168,8 @@ private:
         response_->keep_alive(false);
         response_->body() = std::move(body);
         response_->prepare_payload();
+        beast::get_lowest_layer(socket_).expires_after(
+            std::chrono::seconds(30));
         http::async_write(
             socket_.next_layer(),
             *response_,
@@ -118,6 +182,24 @@ private:
     }
     void request() {
         auto &request = parser_.get();
+        if (request.method() == http::verb::get && !shared_->files.empty()) {
+            // Exact names only; a query string is ignored, nothing is joined
+            // to a path.
+            std::string name(view(request.target()));
+            name = name.substr(0, name.find('?'));
+            name =
+                name == "/" ? "index.html" : name.substr(name.empty() ? 0 : 1);
+            const auto found = shared_->files.find(name);
+            if (found != shared_->files.end()) {
+                response(http::status::ok,
+                         found->second.body,
+                         {},
+                         0,
+                         found->second.type,
+                         true);
+                return;
+            }
+        }
         if (request.method() == http::verb::get && request.target() == "/") {
             response(http::status::ok,
                      "<!doctype html><title>matterm</title><p>matterm server. "

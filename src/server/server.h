@@ -18,6 +18,10 @@ struct ServerConfig {
     ProcessConfig process;
     unsigned maxUnauthenticated = 16;
     unsigned maxConnections = 32;
+    // Directory of the browser client (the web/ build output). Its regular
+    // files, read once at startup, are served by exact name; "/" is
+    // index.html. Empty: only a placeholder page is served.
+    std::string staticDir;
 };
 // A single io_context thread owns every connection and the authentication
 // state. Construct/start as an unprivileged user; destroy after io_context.run

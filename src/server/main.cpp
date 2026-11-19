@@ -40,6 +40,8 @@ int main(int argc, char **argv) {
                 config.allowedOrigin = value();
             else if (option == "--credentials")
                 credentials = value();
+            else if (option == "--static-dir")
+                config.staticDir = value();
             else if (option == "--allow-plain-http")
                 config.allowPlainHttp = true;
             else if (option == "--set-password")
@@ -55,7 +57,8 @@ int main(int argc, char **argv) {
             else if (option == "--help") {
                 std::cout << "matterm-server [--listen 127.0.0.1] [--port "
                              "8080] [--origin http://localhost:8080]\n"
-                             "  [--credentials PATH] [--allow-plain-http] [-- "
+                             "  [--credentials PATH] [--allow-plain-http] "
+                             "[--static-dir DIR] [-- "
                              "PROGRAM ARG...]\n"
                              "matterm-server --set-password --credentials PATH "
                              "< password-file\n";
