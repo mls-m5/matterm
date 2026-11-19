@@ -74,11 +74,12 @@ exposes the settings added by the hardening task (`global_counts_failures_only`,
 `password_hash` is output-only: `--print-config` writes a placeholder and the
 loader accepts only that placeholder, so the hash stays in the credentials file.
 
-fast-json findings, handled in `config.cpp` (the submodule is untouched): its
-tokenizer loops forever on a negative number, accepts truncated documents,
-missing commas and trailing text, reads `1.5` as `1`, cannot decode `\u`
-escapes and does not detect duplicate keys. The loader therefore runs its own
-strict syntax check (with line and column) before handing the text to fast-json,
-rejects negative numbers, decodes strings itself and checks duplicates itself.
-`--print-config` uses a small writer instead of `JsonOut`, which cannot write an
-empty array. Not done: writing the config back, `trusted_proxy`, TLS.
+fast-json findings: its tokenizer looped forever on negative numbers, accepted
+truncated documents and missing commas, read `1.5` as `1` and threw
+`vector::_M_range_check` on valid arrays. They are fixed in the library (see
+docs/tasks/fast-json-fixes.md) and the loader's own syntax check was removed.
+What stays in `config.cpp` is policy: the document must be an object, the size
+limit, integer ranges, `\u` decoding of strings (fast-json's `str()` cannot) and
+the duplicate-key check. `--print-config` uses a small writer instead of
+`JsonOut`, which cannot write an empty array. Not done: writing the config
+back, `trusted_proxy`, TLS.
