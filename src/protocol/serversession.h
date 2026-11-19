@@ -14,6 +14,12 @@ namespace protocol {
 struct SessionConfig {
     using ms = std::chrono::milliseconds;
     std::string sessionId = "session"; // Reported in Welcome; chosen by host.
+    // Trusted registry-selected attachment state, never derived blindly from
+    // Hello. Defaults preserve feature-zero/new-session behavior.
+    std::uint64_t startOffset = 0;
+    std::uint32_t features = 0;
+    std::uint8_t welcomeFlags = 0;
+    bool resume = false;
     ms helloTimeout{5000};
     ms idleTimeout{60000};
     ms ackStallTimeout{30000};
