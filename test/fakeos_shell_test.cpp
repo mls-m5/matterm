@@ -14,7 +14,7 @@ TEST_SUIT_BEGIN(FakeosShell)
 
 TEST_CASE("Without the intro the system opens with the motd and a prompt") {
     Pc pc;
-    EXPECT(pc.shows("Welcome to matterm 1.0"));
+    EXPECT(pc.shows("Welcome to Mattrix OS 1.0"));
     EXPECT(pc.last() == kPrompt);
     EXPECT(!pc.sys.nextDeadline()); // Idle: nothing wakes the host.
 }

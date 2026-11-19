@@ -1,3 +1,4 @@
+#include "bigfont.h"
 #include "fakeos_harness.h"
 #include "mls-unit-test/unittest.h"
 #include "scriptedprogram.h"
@@ -232,9 +233,9 @@ TEST_CASE("The intro plays first, then the welcome and the prompt") {
     pc.advance(1200);
     EXPECT(pc.sys.inProgram());
     EXPECT(pc.shows("#")); // The banner is being drawn.
-    pc.advance(2500);
+    pc.advance(2600);
     EXPECT(!pc.sys.inProgram());
-    EXPECT(pc.shows("Welcome to matterm 1.0"));
+    EXPECT(pc.shows("Welcome to Mattrix OS 1.0"));
     EXPECT(pc.last() == kPrompt);
     EXPECT(!pc.sys.nextDeadline());
 }
@@ -243,15 +244,82 @@ TEST_CASE("Any key skips the intro") {
     Pc pc(true);
     pc.advance(300);
     pc.type("x");
+    EXPECT(pc.sys.inProgram()); // It fades out first, quickly.
+    pc.advance(150);
+    EXPECT(pc.sys.inProgram());
+    pc.advance(250);
     EXPECT(!pc.sys.inProgram());
-    EXPECT(pc.shows("Welcome to matterm 1.0"));
+    EXPECT(pc.shows("Welcome to Mattrix OS 1.0"));
     EXPECT(pc.last() == kPrompt);
     // The key that skipped it was not typed at the prompt.
     EXPECT(pc.last() == kPrompt);
     Pc click(true);
     click.advance(300);
     click.type("\x1b[<0;5;5M");
+    click.advance(400);
     EXPECT(!click.sys.inProgram());
+}
+
+TEST_CASE("The intro spells the name of the system in big letters") {
+    Pc pc(true, 80, 24);
+    pc.advance(2000); // Resolved, before the subtitle is done.
+    // Five rows of "MATTRIX", centered: left margin (80 - 41) / 2 = 19.
+    const std::string name = "MATTRIX";
+    const std::size_t top = 9;
+    for (int gy = 0; gy < 5; ++gy) {
+        std::string expected(19, ' ');
+        for (std::size_t i = 0; i < name.size(); ++i) {
+            expected += bigGlyph(name[i])[gy];
+            expected += i + 1 < name.size() ? " " : "";
+        }
+        while (!expected.empty() && expected.back() == ' ') {
+            expected.pop_back();
+        }
+        EXPECT(pc.row(top + std::size_t(gy)) == expected);
+    }
+}
+
+TEST_CASE("The intro fades into the terminal's background, not into black") {
+    Pc pc(true, 80, 24);
+    auto brightest = [&] {
+        int most = 0;
+        for (std::size_t y = 0; y < pc.model.rows(); ++y) {
+            for (std::size_t x = 0; x < pc.model.columns(); ++x) {
+                const auto &cell = pc.model.cell(x, y);
+                if (cell.codePoint != U' ') {
+                    most = std::max<int>(most,
+                                         std::max({cell.foreground.r,
+                                                   cell.foreground.g,
+                                                   cell.foreground.b}));
+                }
+            }
+        }
+        return most;
+    };
+    pc.advance(2400);
+    const int before = brightest();
+    EXPECT(before > 200);
+    // The whole canvas is the terminal's background color from the start.
+    for (std::size_t y = 0; y < pc.model.rows(); ++y) {
+        for (std::size_t x = 0; x < pc.model.columns(); ++x) {
+            const auto &bg = pc.model.cell(x, y).background;
+            EXPECT(bg.r == 30 && bg.g == 30 && bg.b == 30);
+        }
+    }
+    pc.advance(900); // Into the fade.
+    const int during = brightest();
+    EXPECT(during < before);
+    EXPECT(pc.sys.inProgram());
+    int last = during;
+    for (int i = 0; i < 6 && pc.sys.inProgram(); ++i) {
+        pc.advance(100);
+        const int now = brightest();
+        EXPECT(now <= last + 2); // Only ever dimmer.
+        last = now;
+    }
+    pc.advance(300);
+    EXPECT(!pc.sys.inProgram());
+    EXPECT(pc.last() == kPrompt);
 }
 
 TEST_CASE("A start command is typed at the first prompt, once") {
@@ -273,6 +341,7 @@ TEST_CASE("A start command can start a program after the intro") {
     Pc pc(config);
     pc.advance(300);
     pc.type("x"); // Skip the intro.
+    pc.advance(400);
     EXPECT(pc.sys.inProgram());
     EXPECT(pc.model.alternateScreen());
     pc.advance(200);
@@ -282,7 +351,7 @@ TEST_CASE("A start command can start a program after the intro") {
 TEST_CASE("The intro adapts to a small terminal") {
     Pc pc(true, 30, 8);
     pc.advance(1500);
-    EXPECT(pc.shows("m a t t e r m"));
+    EXPECT(pc.shows("M A T T R I X"));
     pc.advance(3000);
     EXPECT(!pc.sys.inProgram());
 }
@@ -351,8 +420,10 @@ TEST_CASE("The ScriptedLink adapter runs the system and wakes the host") {
     now = 1500;
     link.tick();
     EXPECT(model.alternateScreen());
-    link.sendInput("x"); // Skip.
+    link.sendInput("x"); // Skip: a short fade, then the prompt.
     now = 1510;
+    link.tick();
+    now = 1900;
     link.tick();
     EXPECT(!model.alternateScreen());
     EXPECT(!link.nextDeadline());

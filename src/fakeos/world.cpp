@@ -7,7 +7,7 @@ namespace fakeos {
 namespace {
 
 const char *kReadme =
-    "Welcome to matterm.\n"
+    "Welcome to Mattrix OS.\n"
     "\n"
     "This is a pretend Unix system. It lives entirely in your browser and\n"
     "nothing you do here can touch your real computer, so poke around:\n"
@@ -21,7 +21,7 @@ const char *kReadme =
     "PATH. A good explorer looks everywhere.\n";
 
 const char *kMotd =
-    "Welcome to matterm 1.0 (pretend GNU/Linux 6.8.0-matterm x86_64)\n"
+    "Welcome to Mattrix OS 1.0 (pretend GNU/Linux 6.8.0-mattrix x86_64)\n"
     "\n"
     " * Everything here is make-believe. Type 'help', or read README.\n"
     "\n";
@@ -38,7 +38,7 @@ const char *kWords =
     "prism\nquartz\nradiant\nsmolder\nspark\nspectrum\ntorch\nvortex\nwarmth\n";
 
 const char *kSyslog =
-    "Jan  1 00:00:01 matterm kernel: matterm 6.8.0 booting\n"
+    "Jan  1 00:00:01 matterm kernel: Mattrix OS 6.8.0 booting\n"
     "Jan  1 00:00:02 matterm init: starting system\n"
     "Jan  1 00:00:03 matterm sshd: not running (this is a pretend system)\n"
     "Jan  1 00:00:04 matterm cron: nothing scheduled\n"
@@ -76,19 +76,19 @@ void seedWorld(World &world) {
         "/etc/hostname", world.hostname + "\n", "root", 0644, base - 30 * day);
     fs.put("/etc/motd", kMotd, "root", 0644, base - 30 * day);
     fs.put("/etc/issue",
-           "matterm pretend GNU/Linux \\n \\l\n",
+           "Mattrix OS (pretend GNU/Linux) \\n \\l\n",
            "root",
            0644,
            base - 30 * day);
     fs.put("/etc/os-release",
-           "NAME=\"matterm\"\nVERSION=\"1.0\"\nID=matterm\nPRETTY_NAME="
-           "\"matterm 1.0 (pretend)\"\n",
+           "NAME=\"Mattrix OS\"\nVERSION=\"1.0\"\nID=mattrix\nPRETTY_NAME="
+           "\"Mattrix OS 1.0 (pretend)\"\n",
            "root",
            0644,
            base - 30 * day);
     fs.put("/etc/passwd",
            "root:x:0:0:root:/root:/bin/sh\nguest:x:1000:1000:Guest:/home/"
-           "guest:/bin/matterm-sh\n",
+           "guest:/bin/mattrix-sh\n",
            "root",
            0644,
            base - 30 * day);
@@ -98,7 +98,7 @@ void seedWorld(World &world) {
            0600,
            base - 30 * day);
     fs.put("/usr/share/dict/words", kWords, "root", 0644, base - 30 * day);
-    fs.put("/usr/share/doc/matterm/README",
+    fs.put("/usr/share/doc/mattrix/README",
            kReadme,
            "root",
            0644,
@@ -141,7 +141,7 @@ void seedWorld(World &world) {
                  {"LOGNAME", user},
                  {"HOSTNAME", world.hostname},
                  {"PATH", "/usr/local/bin:/usr/bin:/bin"},
-                 {"SHELL", "/bin/matterm-sh"},
+                 {"SHELL", "/bin/mattrix-sh"},
                  {"TERM", "xterm-256color"},
                  {"LANG", "en_US.UTF-8"},
                  {"PWD", "/home/" + user}};

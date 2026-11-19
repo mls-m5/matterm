@@ -29,7 +29,7 @@ public:
     void begin(World &, Time now) override {
         updated_ = now - Time(1000);
         rows_ = {{1, "root", "init", 0.0, 0.1},
-                 {42, "guest", "matterm-sh", 0.3, 0.4},
+                 {42, "guest", "mattrix-sh", 0.3, 0.4},
                  {57, "root", "cron", 0.0, 0.1},
                  {63, "root", "syslogd", 0.1, 0.2},
                  {88, "guest", "top", 0.7, 0.3},

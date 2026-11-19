@@ -28,7 +28,7 @@ public:
             word_ += (word_.empty() ? "" : " ") + arg;
         }
         if (word_.empty()) {
-            word_ = "MATTERM";
+            word_ = "MATTRIX";
         }
     }
 

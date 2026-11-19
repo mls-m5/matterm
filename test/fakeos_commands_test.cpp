@@ -137,12 +137,75 @@ TEST_CASE("top shows moving processes and q quits") {
     EXPECT(pc.sys.inProgram());
     pc.advance(50);
     EXPECT(pc.shows("PID"));
-    EXPECT(pc.shows("matterm-sh"));
+    EXPECT(pc.shows("mattrix-sh"));
     const auto first = pc.screen();
     pc.advance(1200);
     EXPECT(pc.screen() != first);
     pc.type("q");
     EXPECT(!pc.sys.inProgram());
+}
+
+TEST_CASE("The system is called Mattrix OS everywhere its name shows") {
+    Pc pc;
+    EXPECT(pc.shows("Welcome to Mattrix OS 1.0"));
+    pc.run("clear");
+    pc.run("cat /etc/os-release");
+    EXPECT(pc.shows("NAME=\"Mattrix OS\""));
+    EXPECT(pc.shows("ID=mattrix"));
+    pc.run("clear");
+    pc.run("uname -o; uname -r");
+    EXPECT(pc.shows("Mattrix OS\n6.8.0-mattrix"));
+    pc.run("uname -a");
+    EXPECT(pc.shows("Linux matterm 6.8.0-mattrix"));
+    EXPECT(pc.shows("Mattrix OS\n"));
+    pc.run("clear");
+    pc.run("help");
+    EXPECT(pc.shows("Mattrix OS, a pretend system"));
+    pc.run("clear");
+    pc.run("cat README | head -n 1; cat /etc/issue; ps");
+    EXPECT(pc.shows("Welcome to Mattrix OS."));
+    EXPECT(pc.shows("Mattrix OS (pretend GNU/Linux)"));
+    EXPECT(pc.shows("mattrix-sh"));
+    pc.run("clear");
+    pc.run("echo $SHELL; ls /usr/share/doc");
+    EXPECT(pc.shows("/bin/mattrix-sh\nmattrix"));
+    // The machine keeps its host name.
+    EXPECT(pc.last() == kPrompt);
+}
+
+TEST_CASE("neofetch draws a fat old TV next to the system information") {
+    Pc pc;
+    pc.run("neofetch");
+    EXPECT(pc.shows("guest@matterm"));
+    EXPECT(pc.shows("OS: Mattrix OS 1.0 x86_64"));
+    EXPECT(pc.shows("Kernel: 6.8.0-mattrix"));
+    EXPECT(pc.shows("Shell: mattrix-sh 1.0"));
+    EXPECT(pc.shows("Memory: "));
+    EXPECT(pc.shows("| |    MATTRIX    | |")); // On the TV's screen.
+    EXPECT(pc.shows(".-------V-------."));     // The antenna joins the case.
+    EXPECT(pc.shows("|__|      |__|"));        // Its feet.
+    // The picture is on the left, the information on the right of it.
+    for (std::size_t y = 0; y < pc.model.rows(); ++y) {
+        const auto row = pc.row(y);
+        const auto at = row.find("OS: Mattrix OS");
+        if (at != std::string::npos) {
+            EXPECT(at >= 24);
+        }
+    }
+    pc.run("clear");
+    pc.run("sysinfo");
+    EXPECT(pc.shows("OS: Mattrix OS 1.0 x86_64"));
+}
+
+TEST_CASE("neofetch in a pipe has no colors and is a clean block") {
+    Pc pc;
+    pc.run("neofetch | wc -l");
+    EXPECT(pc.shows("     14") || pc.shows("     16"));
+    pc.run("neofetch | grep -c ' '");
+    pc.run("clear");
+    pc.run("neofetch | head -n 5");
+    EXPECT(pc.raw.rfind("\x1b[33m") == std::string::npos ||
+           pc.raw.rfind("\x1b[33m") < pc.raw.rfind("neofetch | head"));
 }
 
 TEST_CASE("More eggs") {

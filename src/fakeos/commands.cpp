@@ -1004,7 +1004,7 @@ int cmdFind(World &w, const Args &args, CommandIo &io) {
 // ---- system and shell commands -------------------------------------------
 
 int cmdUname(World &w, const Args &args, CommandIo &io) {
-    const auto o = parse(args, "asnrvm");
+    const auto o = parse(args, "asnrvmo");
     if (!o.bad.empty()) {
         return badOption(args, o, io);
     }
@@ -1015,13 +1015,13 @@ int cmdUname(World &w, const Args &args, CommandIo &io) {
     if (all || o.has('n'))
         parts.push_back(w.hostname);
     if (all || o.has('r'))
-        parts.push_back("6.8.0-matterm");
+        parts.push_back("6.8.0-mattrix");
     if (all || o.has('v'))
         parts.push_back("#1 SMP PREEMPT_DYNAMIC");
     if (all || o.has('m'))
         parts.push_back("x86_64");
-    if (all)
-        parts.push_back("GNU/Linux");
+    if (all || o.has('o'))
+        parts.push_back("Mattrix OS");
     for (std::size_t i = 0; i < parts.size(); ++i) {
         io.out += (i ? " " : "") + parts[i];
     }
@@ -1102,7 +1102,7 @@ int cmdUnset(World &w, const Args &args, CommandIo &) {
 int cmdPs(World &w, const Args &, CommandIo &io) {
     io.out += "    PID TTY          TIME CMD\n";
     io.out += "      1 ?        00:00:01 init\n";
-    io.out += "     42 pts/0    00:00:00 matterm-sh\n";
+    io.out += "     42 pts/0    00:00:00 mattrix-sh\n";
     io.out += "    137 pts/0    00:00:00 ps\n";
     (void)w;
     return 0;
@@ -1210,10 +1210,10 @@ int cmdWhich(World &w, const Args &args, CommandIo &io) {
 }
 
 int cmdHelp(World &, const Args &, CommandIo &io) {
-    io.out +=
-        "matterm pretend system. A small Unix that lives in your browser.\n"
-        "Nothing here touches your real computer.\n\n"
-        "Commands:\n";
+    io.out += "Mattrix OS, a pretend system. A small Unix that lives in your "
+              "browser.\n"
+              "Nothing here touches your real computer.\n\n"
+              "Commands:\n";
     std::string line;
     for (const auto &c : commands()) {
         const std::string entry = std::string(c.name);
@@ -1771,6 +1771,284 @@ int cmdSed(World &w, const Args &args, CommandIo &io) {
     return ok ? 0 : 1;
 }
 
+// A fat old CRT television, drawn with markers: \x01 body, \x02 screen,
+// \x03 the name on the screen, \x04 knobs, \x05 back to plain.
+const char *const kTv[] = {
+    "       "
+    "\x01"
+    "\\"
+    "\x05"
+    "       "
+    "\x01"
+    "/"
+    "\x05"
+    "        "
+    "\x05"
+    "",
+    "        "
+    "\x01"
+    "\\"
+    "\x05"
+    "     "
+    "\x01"
+    "/"
+    "\x05"
+    "         "
+    "\x05"
+    "",
+    "         "
+    "\x01"
+    "\\"
+    "\x05"
+    "   "
+    "\x01"
+    "/"
+    "\x05"
+    "          "
+    "\x05"
+    "",
+    "          "
+    "\x01"
+    "\\"
+    "\x05"
+    " "
+    "\x01"
+    "/"
+    "\x05"
+    "           "
+    "\x05"
+    "",
+    "   "
+    "\x01"
+    ".-------V-------."
+    "\x05"
+    "    "
+    "\x05"
+    "",
+    "  "
+    "\x01"
+    "/"
+    "\x05"
+    "  "
+    "\x01"
+    ".-----------."
+    "\x05"
+    "  "
+    "\x01"
+    "\\"
+    "\x05"
+    "   "
+    "\x05"
+    "",
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    "  "
+    "\x01"
+    "/"
+    "\x02"
+    "             "
+    "\x01"
+    "\\"
+    "\x05"
+    "  "
+    "\x01"
+    "|"
+    "\x05"
+    "  "
+    "\x05"
+    "",
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x01"
+    "|"
+    "\x02"
+    "    "
+    "\x03"
+    "MATTRIX"
+    "\x02"
+    "    "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    "  "
+    "\x05"
+    "",
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x01"
+    "|"
+    "\x02"
+    "      "
+    "\x03"
+    "O S"
+    "\x02"
+    "      "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    "  "
+    "\x05"
+    "",
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x01"
+    "|"
+    "\x02"
+    "               "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    "  "
+    "\x05"
+    "",
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    "  "
+    "\x01"
+    "\\"
+    "\x02"
+    "_____________"
+    "\x01"
+    "/"
+    "\x05"
+    "  "
+    "\x01"
+    "|"
+    "\x05"
+    "  "
+    "\x05"
+    "",
+    "  "
+    "\x01"
+    "\\"
+    "\x05"
+    "  "
+    "\x04"
+    "o  o      "
+    "\x01"
+    "::::"
+    "\x05"
+    "  "
+    "\x01"
+    "/"
+    "\x05"
+    "  "
+    "\x05"
+    "",
+    "   "
+    "\x01"
+    "'---------------'"
+    "\x05"
+    "    "
+    "\x05"
+    "",
+    "     "
+    "\x01"
+    "|__|"
+    "\x05"
+    "      "
+    "\x01"
+    "|__|"
+    "\x05"
+    "     "
+    "\x05"
+    "",
+};
+
+int cmdNeofetch(World &w, const Args &, CommandIo &io) {
+    const auto up =
+        std::chrono::duration_cast<std::chrono::seconds>(w.now).count() +
+        3 * 86400 + 4 * 3600 + 17 * 60;
+    const std::string account = w.user + "@" + w.hostname;
+    struct Line {
+        std::string label, value;
+    };
+    const std::vector<Line> info = {
+        {"OS", "Mattrix OS 1.0 x86_64"},
+        {"Host", w.hostname + " (a pretend machine)"},
+        {"Kernel", "6.8.0-mattrix"},
+        {"Uptime",
+         std::to_string(up / 86400) + " days, " +
+             std::to_string(up % 86400 / 3600) + " hours, " +
+             std::to_string(up % 3600 / 60) + " mins"},
+        {"Packages", "42 (mattrix)"},
+        {"Shell", "mattrix-sh 1.0"},
+        {"Terminal",
+         std::to_string(w.columns) + "x" + std::to_string(w.rows) + " cells"},
+        {"CPU", "Imaginary i0-9000 (1) @ 3.00GHz"},
+        {"Memory", "214MiB / 1024MiB"},
+    };
+    std::vector<std::string> right;
+    right.push_back(io.tty ? "\x1b[1;32m" + w.user + "\x1b[0m@\x1b[1;32m" +
+                                 w.hostname + "\x1b[0m"
+                           : account);
+    right.push_back(std::string(account.size(), '-'));
+    for (const auto &l : info) {
+        right.push_back(io.tty ? "\x1b[1;36m" + l.label + "\x1b[0m: " + l.value
+                               : l.label + ": " + l.value);
+    }
+    right.push_back("");
+    std::string blocks, bright;
+    for (int i = 0; i < 8; ++i) {
+        blocks += "\x1b[4" + std::to_string(i) + "m   ";
+        bright += "\x1b[10" + std::to_string(i) + "m   ";
+    }
+    right.push_back(io.tty ? blocks + "\x1b[0m" : "");
+    right.push_back(io.tty ? bright + "\x1b[0m" : "");
+    const std::size_t rows = std::max(right.size(), sizeof kTv / sizeof kTv[0]);
+    for (std::size_t r = 0; r < rows; ++r) {
+        std::string left;
+        std::size_t width = 0;
+        if (r < sizeof kTv / sizeof kTv[0]) {
+            for (const char c : std::string(kTv[r])) {
+                if ((unsigned char)c <= 5) {
+                    if (io.tty) {
+                        static const char *colors[] = {"",
+                                                       "\x1b[33m",
+                                                       "\x1b[36m",
+                                                       "\x1b[1;92m",
+                                                       "\x1b[31m",
+                                                       "\x1b[0m"};
+                        left += colors[int(c)];
+                    }
+                }
+                else {
+                    left += c;
+                    ++width;
+                }
+            }
+        }
+        left += std::string(width < 27 ? 27 - width : 0, ' ');
+        io.out += left + (r < right.size() ? right[r] : "") + "\n";
+    }
+    return 0;
+}
+
 // Programs started from a command: `less FILE`, `top`, ... The program gets the
 // text through the World.
 int cmdLess(World &w, const Args &args, CommandIo &io) {
@@ -2004,6 +2282,8 @@ const std::vector<CommandInfo> &commands() {
         {"df", cmdDf, false, "show disk space"},
         {"free", cmdFree, false, "show memory"},
         {"less", cmdLess, false, "page through a file"},
+        {"neofetch", cmdNeofetch, false, "show the system with a picture"},
+        {"sysinfo", cmdNeofetch, false, "show the system with a picture"},
         {"top", cmdTop, false, "watch the processes"},
     };
     return table;

@@ -25,6 +25,9 @@ struct World {
     std::vector<std::string> history;
     int columns = 80, rows = 24;
     Capabilities caps;
+    // The terminal's default background: animations fade to it, so leaving the
+    // alternate screen shows no jump.
+    Rgb background{30, 30, 30};
     Rng rng;
     Time now{0};               // Time since the system started.
     std::int64_t bootUnix = 0; // Unix seconds at start; see unixNow().

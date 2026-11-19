@@ -40,6 +40,7 @@ void System::freshWorld() {
     fresh.columns = config_.columns;
     fresh.rows = config_.rows;
     fresh.caps = config_.capabilities;
+    fresh.background = config_.background;
     fresh.rng = Rng(config_.seed);
     fresh.bootUnix = config_.unixTime;
     fresh.now = world_.now;

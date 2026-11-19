@@ -22,6 +22,13 @@ struct Config {
     std::string hostname = "matterm";
     Capabilities capabilities;
     bool intro = true;
+    // The terminal's default background color (the matterm palette's is
+    // 30,30,30).
+    Rgb background{30, 30, 30};
+    // Program output (commands, help, the motd) appears at about this many
+    // characters per second, a new line costing a few more; any key shows the
+    // rest at once. Typing and prompts are never delayed. 0: all at once.
+    int revealCharsPerSecond = 0;
     // Typed and run at the first prompt, as if the visitor had entered it (for
     // embedding a demo that starts with something to look at). Empty: none.
     std::string startCommand;
