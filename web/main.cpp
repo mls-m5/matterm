@@ -62,6 +62,8 @@ struct App {
     // Idle throttling: full speed for a while after input or any visible
     // change (blink excluded), otherwise one full pass every idleMs.
     Uint64 activeUntil = 0;
+    bool paused = false; // The page is out of view; see frame().
+    Uint64 pauseChecked = 0;
     Uint64 lastFull = 0;
     // Touch: gesture state, scroll remainder in rows, and the font size in CSS
     // pixels (changed by pinch or Ctrl+wheel, applied between frames).
@@ -76,6 +78,24 @@ App *gApp = nullptr; // For matterm_paste.
 
 // The `ws` query parameter (?ws=ws://127.0.0.1:8080/ws) or window.mattermWs
 // (set by login.js). Empty: demo.
+// A query parameter as text (empty when absent); for ?cmd= in the demo.
+std::string queryParam(const char *name) {
+    char *value = static_cast<char *>(EM_ASM_PTR(
+        {
+            const v =
+                new URLSearchParams(location.search).get(UTF8ToString($0)) ||
+                "";
+            const n = lengthBytesUTF8(v) + 1;
+            const p = _malloc(n);
+            stringToUTF8(v, p, n);
+            return p;
+        },
+        name));
+    std::string text = value;
+    std::free(value);
+    return text;
+}
+
 std::string wsUrl() {
     char *value = static_cast<char *>(EM_ASM_PTR({
         const v = new URLSearchParams(location.search).get("ws") ||
@@ -551,8 +571,8 @@ void handleEvent(App &app, const SDL_Event &event) {
 
 // Rebuild the renderer with the pending font size; the next frame notices the
 // new cell size and resizes the model and the link as for a window resize.
-// Tell the page the cell size (device pixels) so it can size the window to whole
-// cells; see snapWindow() in login.js.
+// Tell the page the cell size (device pixels) so it can size the window to
+// whole cells; see snapWindow() in login.js.
 void publishCellSize(const App &app) {
     if (!app.backend) {
         return;
@@ -589,6 +609,16 @@ void frame(void *data) {
     SDL_Event event;
     constexpr Uint64 activeMs = 500, idleMs = 100;
     const auto start = SDL_GetTicks64();
+    // Out of view (scrolled away in an embedding page, or a hidden tab): no
+    // frames until the page says it is visible again. Asked a few times a
+    // second.
+    if (start - app.pauseChecked >= 200) {
+        app.pauseChecked = start;
+        app.paused = EM_ASM_INT({ return window.mattermPaused ? 1 : 0; }) != 0;
+    }
+    if (app.paused) {
+        return;
+    }
     while (SDL_PollEvent(&event)) {
         app.activeUntil = start + activeMs;
         if (app.link) {
@@ -821,21 +851,24 @@ int main() {
         }
     };
     app.parser = std::make_unique<VtParser>(*app.model, std::move(vtEvents));
-    // ?smooth glides the cursor between positions (off by default);
-    // ?smooth=300 sets the glide time in milliseconds (default 80).
+    // ?smooth glides the cursor between positions; ?smooth=300 sets the glide
+    // time in milliseconds (default 80). It is off for a real terminal session
+    // and on in the static demo (no server URL); ?smooth=0 turns it off there.
+    const auto url = wsUrl();
     CursorGlide::Config glide;
-    const int smoothMs = EM_ASM_INT({
-        const p = new URLSearchParams(location.search);
-        if (!p.has("smooth")) {
-            return 0;
-        }
-        const v = parseInt(p.get("smooth"), 10);
-        return v > 0 ? v : 80;
-    });
+    const int smoothMs = EM_ASM_INT(
+        {
+            const p = new URLSearchParams(location.search);
+            if (!p.has("smooth")) {
+                return $0 ? 80 : 0;
+            }
+            const v = parseInt(p.get("smooth"), 10);
+            return v == = 0 ? 0 : (v > 0 ? v : 80);
+        },
+        url.empty() ? 1 : 0);
     glide.enabled = smoothMs > 0;
     glide.durationSeconds = smoothMs / 1000.0;
     app.cursorGlide = CursorGlide(glide);
-    const auto url = wsUrl();
     if (!url.empty()) {
         try {
             app.channel = std::make_unique<WebSocketChannel>(url);
@@ -887,6 +920,18 @@ int main() {
                 return new URLSearchParams(location.search).has("nointro") ? 0
                                                                            : 1;
             }) != 0;
+        // ?cmd=... is typed at the first prompt (printable text only).
+        for (const char c : queryParam("cmd").substr(0, 200)) {
+            if ((unsigned char)c >= 0x20 && c != 0x7f) {
+                pretend.startCommand += c;
+            }
+        }
+        // Program output appears at a pace (any key shows the rest);
+        // ?noreveal prints it at once.
+        pretend.revealCharsPerSecond = EM_ASM_INT({
+            return new URLSearchParams(location.search).has("noreveal") ? 0
+                                                                        : 2500;
+        });
         pretend.seed = std::uint64_t(EM_ASM_DOUBLE({ return Date.now(); }));
         pretend.unixTime = std::int64_t(
             EM_ASM_DOUBLE({ return Math.floor(Date.now() / 1000); }));

@@ -97,8 +97,11 @@ public:
 private:
     // The offer: two words to click (or press b / r).
     static void drawPills(int w, int h, AsciiCanvas &canvas) {
-        const std::string title =
+        const std::string full =
             "This is your last chance. After this, there is no turning back.";
+        // A narrow terminal gets the short form instead of a cut-off line.
+        const std::string title =
+            int(full.size()) + 4 <= w ? full : "This is your last chance.";
         const std::string blue = "( blue )", red = "( red )";
         const std::string hint = "click a pill, or press b or r";
         const int width = std::min(w, int(title.size()) + 4);

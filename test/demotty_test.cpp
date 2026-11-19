@@ -11,20 +11,9 @@ namespace {
 struct Session {
     Session(const std::string &term,
             PtyProcess::ColorCapability color,
-            bool intro = false)
-        : link(intro ? std::vector<std::string>{DEMO_BINARY,
-                                                "--tty",
-                                                "--seed",
-                                                "3"}
-                     : std::vector<std::string>{DEMO_BINARY,
-                                                "--tty",
-                                                "--no-intro",
-                                                "--seed",
-                                                "3"},
-               80,
-               24,
-               term,
-               color) {
+            bool intro = false,
+            std::vector<std::string> extra = {})
+        : link(arguments(intro, std::move(extra)), 80, 24, term, color) {
         link.setEvents(
             {[this](std::string_view bytes) { output.append(bytes); },
              [this](int code, int) {
@@ -32,6 +21,15 @@ struct Session {
                  exitCode = code;
              },
              {}});
+    }
+    static std::vector<std::string> arguments(bool intro,
+                                              std::vector<std::string> extra) {
+        std::vector<std::string> args{DEMO_BINARY, "--tty", "--seed", "3"};
+        if (!intro) {
+            args.push_back("--no-intro");
+        }
+        args.insert(args.end(), extra.begin(), extra.end());
+        return args;
     }
     bool until(const std::string &needle, int ms = 5000) {
         const auto deadline =
@@ -69,7 +67,8 @@ TEST_SUIT_BEGIN(DemoTty)
 TEST_CASE("The shell works in a real terminal and exit restores it") {
     Session s("xterm-256color", PtyProcess::ColorCapability::TrueColor);
     EXPECT(s.until("guest@matterm"));
-    EXPECT(s.output.find("Welcome to matterm 1.0") != std::string::npos);
+    EXPECT(s.output.find("Welcome to Mattrix OS 6.0 Professional Edition") !=
+           std::string::npos);
     s.link.sendInput("echo tty works\r");
     EXPECT(s.until("tty works"));
     s.link.sendInput("exit 4\r");
@@ -124,10 +123,33 @@ TEST_CASE("The intro plays and any key skips it") {
     EXPECT(s.until("#")); // The banner.
     s.link.sendInput(" ");
     EXPECT(s.until("\x1b[?1049l"));
-    EXPECT(s.until("Welcome to matterm 1.0"));
+    EXPECT(s.until("Welcome to Mattrix OS 6.0 Professional Edition"));
     EXPECT(s.until("guest@matterm"));
     s.link.sendInput("exit\r");
     EXPECT(s.untilExit());
+}
+
+TEST_CASE("Program output appears at a pace, and --no-reveal prints at once") {
+    using Clock = std::chrono::steady_clock;
+    auto secondsToSee300 = [](std::vector<std::string> extra) {
+        Session s("xterm-256color",
+                  PtyProcess::ColorCapability::TrueColor,
+                  false,
+                  std::move(extra));
+        if (!s.until("guest@matterm")) {
+            return -1.0;
+        }
+        s.link.sendInput("seq 1 300\r");
+        const auto start = Clock::now();
+        if (!s.until("\r\n300\r\n", 12000)) {
+            return -1.0; // The mls-unit-test EXPECT cannot be used here.
+        }
+        return std::chrono::duration<double>(Clock::now() - start).count();
+    };
+    const double paced = secondsToSee300({});
+    const double instant = secondsToSee300({"--no-reveal"});
+    EXPECT(paced > 0.8); // About 300 lines at 25 a second.
+    EXPECT(instant >= 0 && instant < 0.8);
 }
 
 TEST_CASE("A resize reaches a running program") {

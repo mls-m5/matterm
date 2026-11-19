@@ -2,6 +2,7 @@
 // window, or with --tty in the terminal it was started from. Both run the same
 // core; the window uses the terminal model and the SDL renderer like the other
 // frontends.
+#include "cursorglide.h"
 #include "fontpath.h"
 #include "inputencoder.h"
 #include "palette.h"
@@ -43,6 +44,10 @@ void usage(std::ostream &out, const char *program) {
            "  --no-intro           Skip the intro animation.\n"
            "  --seed N             Seed for the animations (default: from the "
            "clock).\n"
+           "  --no-reveal          Print program output at once, not at a "
+           "pace.\n"
+           "  --no-smooth-cursor   Jump the cursor between cells (default: it "
+           "glides).\n"
 #ifdef MATTERM_DEMO_TTY
            "  --tty                Run in this terminal instead of a window.\n"
 #endif
@@ -72,7 +77,8 @@ struct SdlRuntime {
 int runWindow(const char *font,
               int fontSize,
               fakeos::Config pretend,
-              bool smokeTest) {
+              bool smokeTest,
+              bool smoothCursor) {
     SdlRuntime runtime;
     std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(
         SDL_CreateWindow("matterm demo",
@@ -151,13 +157,30 @@ int runWindow(const char *font,
         }
     };
     if (smokeTest) {
-        // Intro first frame, a skipped intro, a command, and a drawn frame.
+        // Intro first frames, a skipped intro (it fades out, about a second), a
+        // command, and a drawn frame.
         for (int i = 0; i < 4; ++i) {
             link->tick();
             SDL_Delay(20);
         }
         link->sendInput("x");
-        link->tick();
+        const auto deadline = SDL_GetTicks64() + 4000;
+        const auto promptShown = [&] {
+            for (std::size_t y = 0; y < model.rows(); ++y) {
+                std::string row;
+                for (std::size_t x = 0; x < model.columns(); ++x) {
+                    row.push_back(char(model.cell(x, y).codePoint));
+                }
+                if (row.rfind("guest@matterm", 0) == 0) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        while (!promptShown() && SDL_GetTicks64() < deadline) {
+            link->tick();
+            SDL_Delay(10);
+        }
         link->sendInput("echo smoke\r");
         link->tick();
         bool found = false;
@@ -227,6 +250,9 @@ int runWindow(const char *font,
             link->sendInput(bytes);
         }
     };
+    CursorGlide::Config glideConfig;
+    glideConfig.enabled = smoothCursor;
+    CursorGlide cursorGlide(glideConfig);
     Uint64 lastFrame = SDL_GetTicks64();
     while (running) {
         skipText = false;
@@ -476,6 +502,12 @@ int runWindow(const char *font,
             }
         }
         frame.textBlinkVisible = (now / 500) % 2 == 0;
+        // Before blink masking: the glide follows the true cell, not the blink.
+        cursorGlide.update(frame.cursor.column,
+                           frame.cursor.row,
+                           frame.cursor.visible,
+                           double(now) / 1000);
+        cursorGlide.apply(frame.cursor);
         frame.cursor.focused =
             (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_INPUT_FOCUS) != 0;
         frame.cursor.visible = frame.cursor.visible &&
@@ -501,7 +533,7 @@ int runWindow(const char *font,
 int main(int argc, char **argv) {
     const char *fontOverride = nullptr;
     int fontSize = 18;
-    bool smokeTest = false, tty = false;
+    bool smokeTest = false, tty = false, smoothCursor = true;
     fakeos::Config pretend;
     pretend.seed =
         std::uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -511,6 +543,7 @@ int main(int argc, char **argv) {
         std::int64_t(std::chrono::duration_cast<std::chrono::seconds>(
                          std::chrono::system_clock::now().time_since_epoch())
                          .count());
+    pretend.revealCharsPerSecond = 2500; // About 25 lines a second.
     int firstOption = 1;
     if (argc > 1 && std::string_view(argv[1]) != "-h" &&
         std::string_view(argv[1]).substr(0, 2) != "--") {
@@ -536,6 +569,12 @@ int main(int argc, char **argv) {
         }
         else if (arg == "--no-intro") {
             pretend.intro = false;
+        }
+        else if (arg == "--no-reveal") {
+            pretend.revealCharsPerSecond = 0;
+        }
+        else if (arg == "--no-smooth-cursor") {
+            smoothCursor = false;
         }
         else if (arg == "--seed" && i + 1 < argc) {
             const std::string_view value = argv[++i];
@@ -572,7 +611,8 @@ int main(int argc, char **argv) {
 #endif
     try {
         const auto font = applicationFontPath(fontOverride);
-        return runWindow(font.c_str(), fontSize, pretend, smokeTest);
+        return runWindow(
+            font.c_str(), fontSize, pretend, smokeTest, smoothCursor);
     }
     catch (const std::exception &error) {
         std::cerr << error.what() << '\n';
