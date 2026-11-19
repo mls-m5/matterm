@@ -1,8 +1,16 @@
 #include "auth.h"
 #include "mls-unit-test/unittest.h"
+#include <cctype>
 #include <sys/stat.h>
 #include <unistd.h>
 using namespace server;
+namespace {
+// A string literal with embedded NULs, sized from the literal itself.
+template <std::size_t N>
+std::string bytes(const char (&literal)[N]) {
+    return std::string(literal, N - 1);
+}
+} // namespace
 TEST_SUIT_BEGIN(ServerAuth)
 TEST_CASE("Argon2id verifies only the configured password") {
     const std::string password = "a long random test password 12345";
@@ -78,5 +86,146 @@ TEST_CASE("Credential file is owner-only and reloadable") {
                .verify("a long random test password 12345"));
     ::unlink(path.c_str());
     ::rmdir(directory);
+}
+TEST_CASE("Password JSON: escapes decode to exact UTF-8") {
+    const auto parse = [](const char *json) { return parsePassword(json); };
+    EXPECT(parse("{\"password\":\"\\u00e9\\u00E9\"}") ==
+           std::optional<std::string>("\xc3\xa9\xc3\xa9"));
+    EXPECT(parse("{\"password\":\"\\u20ac\"}") ==
+           std::optional<std::string>("\xe2\x82\xac"));
+    EXPECT(parse("{\"password\":\"\\uffff\"}") ==
+           std::optional<std::string>("\xef\xbf\xbf"));
+    EXPECT(parse("{\"password\":\"\\udbff\\udfff\"}") ==
+           std::optional<std::string>("\xf4\x8f\xbf\xbf"));
+    EXPECT(parse("{\"password\":\"\\ud800\\udc00\"}") ==
+           std::optional<std::string>("\xf0\x90\x80\x80"));
+    EXPECT(parse("{\"password\":\"\\/\\\\\\\"\\b\\f\\r\\t\"}") ==
+           std::optional<std::string>("/\\\"\b\f\r\t"));
+}
+TEST_CASE("Password JSON: surrogates, bad escapes and control bytes") {
+    for (const char *input : {
+             "{\"password\":\"\\udc00\"}",        // Lone low surrogate.
+             "{\"password\":\"\\ud800\"}",        // Lone high surrogate.
+             "{\"password\":\"\\ud800x\"}",       // High, then a plain char.
+             "{\"password\":\"\\ud800\\u0041\"}", // High, then not low.
+             "{\"password\":\"\\ud800\\ud800\"}", // High, then high.
+             "{\"password\":\"\\udc00\\ud800\"}", // Reversed pair.
+             "{\"password\":\"\\ud800\\u\"}",     // Truncated low.
+             "{\"password\":\"\\u12\"}",          // Short escape.
+             "{\"password\":\"\\u12g4\"}",        // Non-hex digit.
+             "{\"password\":\"\\x41\"}",          // Unknown escape.
+             "{\"password\":\"\\\"}",             // Escape at the end.
+             "{\"password\":\"abc}",              // Unterminated.
+             "{\"password\":\"a\tb\"}",           // Raw TAB.
+             "{\"password\":\"a\nb\"}",           // Raw LF.
+             "{\"password\":\"a\x01"
+             "b\"}", // Raw control byte.
+         })
+        EXPECT(!parsePassword(input));
+}
+TEST_CASE("Password JSON: NUL bytes") {
+    // A raw NUL is rejected; an escaped one is data. Verification is
+    // length-based, so a prefix of the password never authenticates.
+    EXPECT(!parsePassword(bytes("{\"password\":\"a\0b\"}")));
+    // The same document without the NUL is accepted: rejected for the NUL.
+    EXPECT(parsePassword(bytes("{\"password\":\"ab\"}")).has_value());
+    const auto parsed =
+        parsePassword("{\"password\":\"a long random test pass\\u0000word\"}");
+    EXPECT(parsed.has_value());
+    const auto password = bytes("a long random test pass\0word");
+    EXPECT(parsed == std::optional<std::string>(password));
+    PasswordVerifier verifier(hashPassword(password));
+    EXPECT(verifier.verify(*parsed));
+    EXPECT(!verifier.verify("a long random test pass"));
+    EXPECT(!verifier.verify(bytes("a long random test pass\0")));
+    EXPECT(!parsePassword(bytes("{\"pass\0word\":\"x\"}")));
+}
+TEST_CASE("Password JSON: structure, trailing bytes and sizes") {
+    EXPECT(parsePassword("{\"password\":\"x\"}\n\t ").has_value());
+    for (const auto &input : {std::string(""),
+                              std::string("{"),
+                              std::string("{\"password\":\"x\""),
+                              std::string("{\"password\":\"x\"}}"),
+                              std::string("{\"password\":\"x\"},"),
+                              std::string("{\"password\":\"x\",}"),
+                              bytes("{\"password\":\"x\"}\0"),
+                              std::string("\xef\xbb\xbf{\"password\":\"x\"}"),
+                              std::string("[{\"password\":\"x\"}]"),
+                              std::string("{\"Password\":\"x\"}"),
+                              std::string("{\"password\":null}"),
+                              std::string("{\"password\":{\"a\":\"x\"}}"),
+                              std::string("{\"password\" \"x\"}"),
+                              std::string("{password:\"x\"}"),
+                              std::string("{'password':'x'}")})
+        EXPECT(!parsePassword(input));
+    // The key may use an escape; it still has to decode to exactly "password".
+    EXPECT(parsePassword("{\"passw\\u006frd\":\"x\"}").has_value());
+    const auto frame = [](std::size_t password, std::size_t padding) {
+        return std::string(padding, ' ') + "{\"password\":\"" +
+               std::string(password, 'p') + "\"}";
+    };
+    EXPECT(parsePassword(frame(256, 0)).has_value());
+    EXPECT(!parsePassword(frame(257, 0)));
+    EXPECT(frame(1, 512 - frame(1, 0).size()).size() == 512);
+    EXPECT(parsePassword(frame(1, 512 - frame(1, 0).size())).has_value());
+    EXPECT(!parsePassword(frame(1, 513 - frame(1, 0).size())));
+    EXPECT(!parsePassword(std::string(100000, '{')));
+}
+TEST_CASE("Session cookie: duplicates, names, separators and size") {
+    const std::string token(64, 'a');
+    EXPECT(sessionCookie("matterm_session=" + token) ==
+           std::optional<std::string>(token));
+    EXPECT(sessionCookie("a=b; matterm_session=" + token + "; c=d") ==
+           std::optional<std::string>(token));
+    EXPECT(sessionCookie("a=b;matterm_session=" + token) ==
+           std::optional<std::string>(token));
+    EXPECT(sessionCookie("matterm_session=" + token + ";") ==
+           std::optional<std::string>(token));
+    EXPECT(sessionCookie("matterm_session=") == std::optional<std::string>(""));
+    // Duplicates are refused, even when one of them is empty or differs.
+    EXPECT(!sessionCookie("matterm_session=; matterm_session=" + token));
+    EXPECT(!sessionCookie("matterm_session=" + token +
+                          "; matterm_session=" + token));
+    EXPECT(!sessionCookie("matterm_session=a;matterm_session=b"));
+    // Other names, case and prefixes never match.
+    EXPECT(!sessionCookie(""));
+    EXPECT(!sessionCookie(";"));
+    EXPECT(!sessionCookie("MATTERM_SESSION=" + token));
+    EXPECT(!sessionCookie("xmatterm_session=" + token));
+    EXPECT(!sessionCookie("matterm_session_x=" + token));
+    EXPECT(!sessionCookie("matterm_session =" + token));
+    EXPECT(!sessionCookie("matterm_session" + token));
+    EXPECT(!sessionCookie("a=matterm_session=" + token));
+    EXPECT(!sessionCookie("a=b;\tmatterm_session=" + token));
+    // The value is whatever follows up to the separator; the store decides.
+    EXPECT(sessionCookie("matterm_session=" + token + " ") ==
+           std::optional<std::string>(token + " "));
+    EXPECT(sessionCookie("matterm_session=\"" + token + "\"") ==
+           std::optional<std::string>("\"" + token + "\""));
+    const std::string huge(8000, 'z');
+    EXPECT(sessionCookie("matterm_session=" + huge) ==
+           std::optional<std::string>(huge));
+}
+TEST_CASE("Session store refuses cookie values that are not its tokens") {
+    SessionStore store;
+    const auto token = store.issue();
+    for (const auto &candidate : {std::string(),
+                                  token + " ",
+                                  " " + token,
+                                  "\"" + token + "\"",
+                                  token.substr(1),
+                                  token + "0",
+                                  std::string(8000, 'z'),
+                                  std::string(64, '\0'),
+                                  std::string(64, 'A')})
+        EXPECT(!store.valid(candidate) && !store.claim(candidate));
+    // Uppercase hex is another string, not the same token.
+    std::string upper = token;
+    for (auto &c : upper)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    if (upper != token)
+        EXPECT(!store.valid(upper));
+    EXPECT(store.valid(token));
+    EXPECT(store.claim(token));
 }
 TEST_SUIT_END
