@@ -21,6 +21,7 @@ const { chromium } = require('playwright-core');
     .catch(() => {});
   console.log('hover title:', await page.title());
   await page.mouse.click(12 * 8 + 1, 12);
+  await page.waitForTimeout(200);   // let a frame see Control still held
   await page.keyboard.up('Control');
   await page.waitForTimeout(1500);
   console.log('window.open calls after ctrl+click:', JSON.stringify(await page.evaluate(() => window.__opens)));
@@ -29,6 +30,7 @@ const { chromium } = require('playwright-core');
   console.log('after plain click:', (await page.evaluate(() => window.__opens)).length);
   await page.keyboard.down('Control');
   await page.mouse.click(12 * 8, 36);              // the javascript: row
+  await page.waitForTimeout(200);
   await page.keyboard.up('Control');
   await page.waitForTimeout(500);
   console.log('after javascript: row:', (await page.evaluate(() => window.__opens)).length);
