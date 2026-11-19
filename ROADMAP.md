@@ -137,6 +137,14 @@ future goals, not implementation in the current parser slice.
 - [ ] Review matperf concurrency before enabling optional coarse tracing.
 - [ ] Trial one isolated parallel task after agreeing on a base commit/API.
 
+## Bundled Font
+
+- [x] Pin unmodified JetBrains Mono Regular v2.304 and OFL 1.1 license by revision/hash.
+- [x] Configure-time verified download, reusable cache, and explicit offline/opt-out options.
+- [x] Relocatable assets/fonts next to all three executables, including installed license.
+- [x] Optional font CLI override and default-font smoke tests from a different directory.
+- [ ] Browser preloading and platform/distribution-specific packaging if needed.
+
 ## References
 
 - Xterm control sequence reference: https://invisible-island.net/xterm/ctlseqs/ctlseqs.html

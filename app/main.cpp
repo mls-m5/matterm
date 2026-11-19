@@ -1,3 +1,4 @@
+#include "fontpath.h"
 #include "render/sdlbackend.h"
 #include "terminal/terminalmodel.h"
 #include "terminal/vt/vtparser.h"
@@ -252,8 +253,14 @@ int main(int argc, char **argv) {
     bool showcase = false;
     std::string term = "vt100";
     std::vector<std::string> command;
-    bool valid = argc >= 2;
-    for (int i = 2; i < argc && valid; ++i) {
+    const char *fontOverride = nullptr;
+    int firstOption = 1;
+    if (argc > 1 && std::string_view(argv[1]).substr(0, 2) != "--") {
+        fontOverride = argv[1];
+        firstOption = 2;
+    }
+    bool valid = true;
+    for (int i = firstOption; i < argc && valid; ++i) {
         const std::string_view arg = argv[i];
         if (arg == "--") {
             while (++i < argc) {
@@ -286,9 +293,9 @@ int main(int argc, char **argv) {
          (inputPath || smokeTest || showcase)) ||
         (ptySmokeTest && command.empty())) {
         std::cerr << "Usage: " << argv[0]
-                  << " /path/to/font.ttf [--term TERM] [-- COMMAND ARG...]\n"
+                  << " [font.ttf] [--term TERM] [-- COMMAND ARG...]\n"
                   << "       " << argv[0]
-                  << " /path/to/font.ttf [--input FILE | --showcase | "
+                  << " [font.ttf] [--input FILE | --showcase | "
                      "--smoke-test]\n";
         return 1;
     }
@@ -299,7 +306,8 @@ int main(int argc, char **argv) {
             command = {shell && *shell ? shell : "/bin/sh", "-i"};
         }
         try {
-            return runPtyFrontend(argv[1], command, term, ptySmokeTest);
+            const auto font = applicationFontPath(fontOverride);
+            return runPtyFrontend(font.c_str(), command, term, ptySmokeTest);
         }
         catch (const std::exception &error) {
             std::cerr << error.what() << '\n';
@@ -324,7 +332,8 @@ int main(int argc, char **argv) {
     }
     int result = 1;
     try {
-        result = run(argv[1], inputPath, smokeTest);
+        const auto font = applicationFontPath(fontOverride);
+        result = run(font.c_str(), inputPath, smokeTest);
     }
     catch (const std::exception &error) {
         std::cerr << error.what() << '\n';
