@@ -1,0 +1,181 @@
+# Several terminals in one window, persistent sessions and recording
+
+Status: plan, nothing implemented. Decisions are marked **Decided** (agreed with
+the owner), **Proposed** (recommended, confirm before building) or **Open**.
+This replaces the "Session Multiplexing" notes in ROADMAP.md as the place to
+refine the design; settings UI work comes after this (settings may be per window
+or per terminal).
+
+## 1. Goals and non-goals
+
+Goals:
+
+- Several independent terminals in one browser window (tabs first, split panes
+  later), and later in the native app.
+- Shells can survive a closed tab, a reload or a dropped network and be
+  reattached, **optionally**: with the feature off nothing extra is kept in memory
+  and a session ends with its connection, as today.
+- The same mechanism serves a later *timed recording and playback* feature.
+- One emulator pipeline: the server never parses VT output.
+
+Non-goals (for now): a tmux replacement, server-side screen state or diffs
+(mosh-style state sync), several viewers typing into one session, sharing a
+session between users, native TLS.
+
+## 2. Layers and what stays as it is
+
+```
+tty  ->  bytes  ->  [ transport ]  ->  parser  ->  model  ->  renderer
+```
+
+- **Decided:** the server relays raw PTY bytes; the client owns parser, model and
+  renderer. The native app already runs `PtyLink` in-process (no transport), the
+  browser runs `ClientSession` over a WebSocket. Both are `TerminalLink`s.
+- A screen-update protocol (server emulates, sends cell diffs, client sends
+  input events) would be a second transport implementing the same `TerminalLink`.
+  Not planned; the seam exists if it is ever needed.
+
+## 3. Sessions are owned by the server, independent of connections
+
+Today one login allows one WebSocket upgrade, and the PTY lives and dies with that
+connection (`PtySessionHost`). The change:
+
+- **Proposed:** a `SessionRegistry` in the server owns terminal sessions
+  (`sessionId`, PTY, child process group, optional replay buffer, state:
+  attached or detached, creation time, last activity). A connection attaches to a
+  session and detaches when it closes; closing the connection does not kill the
+  session unless persistence is off.
+- Session ids are random 128-bit values, only valid for the logged-in owner,
+  never derived from anything guessable, never put in logs.
+- **Proposed:** one WebSocket per terminal, with the session chosen in the
+  upgrade (`/ws?session=<id>` or `new`). The existing protocol is reused; each
+  login may then hold several upgrades (a limit, for example 16, is a setting).
+  A later protocol v2 with channel ids on one connection stays possible and is
+  not needed for tabs.
+- Limits: maximum sessions, maximum detached sessions, `detached_timeout`
+  (a detached session is killed after this long; `0` = never), and the existing
+  per-connection limits. A shell that exits ends its session; the client is told.
+- A session may have at most one attached connection at a time in v1. Attaching
+  a second one either takes over (the old one is closed with a reason) or is
+  refused; **Open:** which of the two (take-over is more convenient for "move
+  my terminal to another window").
+
+## 4. Replay buffer (resume without a server-side parser)
+
+- **Proposed:** each session keeps a bounded ring of the most recent raw output,
+  stored as chunks `(timestamp, bytes)`. On reattach the server sends the ring to
+  the client, whose parser rebuilds the screen, then continues live. The client
+  tells the server its size; the server resizes the PTY (which makes programs
+  receive `SIGWINCH` and redraw).
+- Off switch: `replay_buffer_bytes` = `0` disables the buffer and persistence
+  entirely (the session ends with its connection). A per-session cap and a total
+  cap bound memory; the oldest chunks are dropped first.
+- Known limits, accepted at first: the buffer may start inside an escape
+  sequence (align the start at a newline or drop bytes until a safe point);
+  modes set before the buffer starts (alternate screen, mouse reporting,
+  bracketed paste) are lost until the program sets them again; scrollback is only
+  as long as the buffer. **Open:** if this bites, the server keeps a tiny scanner
+  for private-mode set/reset sequences (`?1049`, `?2004`, `?1000..?1006`, `?25`)
+  and prefixes the replay with the current mode state. This is a string search,
+  not a parser.
+- Protocol: use the planned resume fields in docs/PROTOCOL.md (`sessionId`,
+  `resumeOffset`, `Welcome.flags`), negotiated through `features` bits. The
+  offset counts output bytes since session start so a client can resume from where
+  it stopped when the data is still in the ring, and otherwise gets a full replay.
+
+## 5. Client structure (browser, later native)
+
+- **Proposed:** the global `App` in `web/main.cpp` becomes a window containing a
+  list of `TerminalView`s, each with its own `TerminalModel`, `VtParser`,
+  `TerminalLink`/`ClientSession`, selection and cursor-glide state; only the
+  active view renders and receives input. Inactive views keep parsing so they do
+  not lose output, and show an activity/bell/exit marker on their tab.
+- Rendering stays one canvas; the active view draws into the pane rectangle. The
+  frame signature and idle throttling (web/main.cpp `frame()`) become per view,
+  and a view that is not visible costs no rendering.
+- Tab bar: HTML/CSS above the canvas (accessible, themable) rather than drawn in
+  the canvas; keys: new, close, next/previous, rename. **Open:** key bindings that
+  do not collide with terminal programs (a prefix chord, or only mouse/touch
+  controls plus a modifier chord).
+- Panes: a layout tree (split H/V with ratios) over views, focus movement and
+  per-pane resize. **Decided:** tabs first, panes only after tabs work.
+- Moving a terminal between windows: attach the same `sessionId` from another
+  window (follows from section 3, no extra mechanism).
+- The framed window layout (docs/tasks/window-frame.md) is the container for the
+  tab bar.
+
+## 6. Recording and playback (later)
+
+- Format (**Proposed**): the replay ring's chunks, so recording and replay share one
+  structure. A recording is a header (version, size, start time, optional title)
+  and a sequence of events `(delta ms, kind, bytes)` with kinds `output`,
+  `resize`, and optionally `input`. Text-based and easy to inspect, in the
+  spirit of asciinema's `.cast` (newline-delimited JSON), so existing players and
+  tools stay usable. **Open:** adopt asciicast v2 exactly, or a close variant.
+- Input is **not** recorded by default (passwords typed with echo off never appear
+  in output, but input would contain them). Recording is off by default, files are
+  created with mode 0600, and the owner chooses where they go.
+- Playback: a `TimedLink` (a `TerminalLink` that replays events at the original
+  pace, with speed control, pause and seek by replaying from the start or from a
+  stored checkpoint) feeding the normal parser, model and renderer. Related to the
+  existing `ScriptedLink`, which the browser simulator already uses.
+- Where recording happens: server side (works with any client, can record while
+  detached) or client side (no server change). **Open:** start with the server
+  because it already has the timed chunks.
+
+## 7. Configuration (names are proposals)
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `persistent_sessions` | `false` | keep sessions after the connection closes |
+| `replay_buffer_bytes` | `0` | per-session ring size; `0` = no buffer, no persistence |
+| `replay_total_bytes` | 64 MiB | cap over all sessions |
+| `max_sessions` | 16 | simultaneous sessions |
+| `detached_timeout_seconds` | 3600 | kill detached sessions after this; `0` = never |
+| `recording_dir` | empty | empty = no recording |
+
+Every number is configuration, none is a protocol constant, as for the existing
+limits (docs/SERVER_CONFIG.md).
+
+## 8. Security notes
+
+- Session ids and attach rights belong to the single owner login; attaching
+  requires a valid session cookie and the existing Origin/Host checks.
+- A detached session is a running shell with no one watching: make the timeout
+  visible in the UI and documented; "kill all my sessions" is a first-class action
+  (also on logout).
+- The replay buffer and recordings contain terminal output, which can include
+  secrets. They live in memory (buffer) or in 0600 files (recording), are never
+  logged, and are wiped on session end.
+- More connections per login change the rate-limit and `SessionStore` rules
+  (currently one upgrade per login); the security review's findings and the
+  pending `trusted_proxy` work apply here. Re-review after this feature.
+
+## 9. Phases
+
+1. **Server sessions and resume (no UI change).** `SessionRegistry`, detach/attach,
+   replay ring with the off switch, protocol resume negotiation, limits and
+   timeouts, tests (dropped connection, take-over, timeout, buffer wrap, memory
+   caps, shell exit while detached). Fuzz the new message fields.
+2. **Client: several views and tabs** in the browser: `TerminalView` refactor of
+   `App`, tab bar, background parsing, per-view throttling, e2e tests.
+3. **Recording and playback**: format, server-side recorder, `TimedLink` player
+   and a small player UI.
+4. **Panes** (splits, focus, resize).
+5. **Settings UI** on top of the per-window/per-terminal structure.
+6. **Native app** support for the same model (separate windows first, as in the
+   ROADMAP item about moving sessions between windows in one process).
+
+Phases 1 and 2 are independent enough to run in parallel once the protocol
+fields are fixed; phase 2 touches `web/main.cpp` heavily, so it should not overlap
+with other work in that file.
+
+## 10. Open questions to settle before phase 1
+
+1. Take over or refuse when a second client attaches to an attached session?
+2. Exact resume fields and the `features` bit in docs/PROTOCOL.md.
+3. Whether non-persistent mode (`replay_buffer_bytes = 0`) can still allow several
+   simultaneous terminals (yes in this plan: they just end with their
+   connection).
+4. Tab key bindings.
+5. asciicast v2 or a variant for recordings.
