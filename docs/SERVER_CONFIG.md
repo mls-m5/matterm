@@ -28,18 +28,20 @@ section 5.6; usage is in [SERVER.md](SERVER.md).
 
 ## Format
 
-Strict JSON with these rules:
+Strict JSON (parsed by `lib/fast-json`) with these rules:
 
 - The document is one object. Syntax errors (a truncated file, a missing or
-  trailing comma, text after the document) are errors with line and column.
+  doubled comma, mismatched brackets, text after the document) are errors with
+  line and column. A comma before a closing `]` or `}` is accepted.
 - Members whose name starts with `_` are ignored at any depth; use them for
   comments (`"_note": "..."`). They still have to be valid JSON.
 - Unknown keys, wrong types, out-of-range values and duplicate keys are errors
   that name the key path, for example
   `server.json:7:5: rate_limit.max_failurs: unknown key`. Messages never contain
   values.
-- Numbers are non-negative integers (everywhere, comments included): no
-  fractions, exponents or signs. Durations carry their unit in the key name.
+- Settings that are numbers take integers: a fraction or exponent is "must be an
+  integer" and a negative number fails the range. Durations carry their unit in
+  the key name.
 - Strings may use every JSON escape including `\uXXXX`; they must not contain
   NUL.
 
