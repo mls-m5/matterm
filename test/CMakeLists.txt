@@ -164,9 +164,13 @@ if(BUILD_TESTING)
                 COMMAND matterm "${TEST_FONT_FILE}" --smoke-test)
             set_tests_properties(vt_frontend_render_smoke PROPERTIES
                 ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+            add_test(NAME vt_frontend_font_size_12
+                COMMAND matterm "${TEST_FONT_FILE}" --font-size 12 --smoke-test)
+            set_tests_properties(vt_frontend_font_size_12 PROPERTIES
+                ENVIRONMENT "SDL_VIDEODRIVER=dummy")
             if(TARGET ptysession)
                 add_test(NAME pty_frontend_render_smoke
-                    COMMAND matterm "${TEST_FONT_FILE}" --pty-smoke-test -- $<TARGET_FILE:pty_test_child> vt)
+                    COMMAND matterm "${TEST_FONT_FILE}" --font-size 12 --pty-smoke-test -- $<TARGET_FILE:pty_test_child> vt)
                 set_tests_properties(pty_frontend_render_smoke PROPERTIES
                     ENVIRONMENT "SDL_VIDEODRIVER=dummy" TIMEOUT 15)
             endif()

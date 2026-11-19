@@ -139,6 +139,7 @@ void smoke(SDL_Window &window, SdlBackend &backend, PtySession &session) {
 } // namespace
 
 int runPtyFrontend(const char *font,
+                   int fontSize,
                    const std::vector<std::string> &arguments,
                    const std::string &term,
                    bool smokeTest) {
@@ -166,7 +167,7 @@ int runPtyFrontend(const char *font,
     if (!window) {
         throw std::runtime_error(SDL_GetError());
     }
-    SdlBackend backend(*window, font, 24, smokeTest);
+    SdlBackend backend(*window, font, fontSize, smokeTest);
     auto resize = [&] {
         const int columns = std::clamp(backend.columns(true), 1, 65535);
         const int rows = std::clamp(backend.rows(), 1, 65535);
