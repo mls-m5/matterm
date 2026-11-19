@@ -95,6 +95,22 @@ TEST_CASE("Missing glyphs use a cached replacement") {
     EXPECT_EQ(missing.source.y, again.source.y);
 }
 
+TEST_CASE("Braille patterns use distinct glyphs rather than a replacement") {
+    Fixture fixture;
+    GlyphAtlas atlas(*fixture.renderer, fixture.font(), 18);
+    const auto first = atlas.getOrInsert(U'\u2801');
+    const auto last = atlas.getOrInsert(U'\u2880');
+    const auto replacement = atlas.getOrInsert(char32_t(0x10ffff));
+    EXPECT_GT(first.source.w, 0);
+    EXPECT_GT(last.source.w, 0);
+    EXPECT(first.source.x != last.source.x || first.source.y != last.source.y);
+    EXPECT(first.source.x != replacement.source.x ||
+           first.source.y != replacement.source.y);
+    const auto again = atlas.getOrInsert(U'\u2801');
+    EXPECT_EQ(first.source.x, again.source.x);
+    EXPECT_EQ(first.source.y, again.source.y);
+}
+
 TEST_CASE("A full atlas fails without invalidating existing glyphs") {
     Fixture fixture;
     GlyphAtlas atlas(*fixture.renderer, fixture.font(), 24, 64, 64);

@@ -40,7 +40,8 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [ ] Distinct DEC private mode semantics (47/1047/1048/1049), beyond the initial subset.
 - [ ] Application keypad/mouse modes (application cursor and bracketed paste state/input encoding are implemented).
 - [ ] Golden transcripts from real programs, fuzz/property tests, and compatibility fixtures.
-- [ ] Wide cells, combining clusters, shaping, and font fallback.
+- [x] Draw Braille patterns in the atlas when the selected font lacks them.
+- [ ] Wide cells, combining clusters, shaping, and general font fallback.
 
 ## 4. POSIX PTY Adapter (Implemented on Linux)
 

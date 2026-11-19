@@ -136,6 +136,25 @@ TEST_CASE("Erasure uses current colors and does not remove history") {
     EXPECT_EQ(model.cursor().column, 1);
 }
 
+TEST_CASE(
+    "Split Braille UTF-8 retains the active background on spinner cells") {
+    TerminalModel model(8, 2);
+    VtParser parser(model);
+    parser.feed("\x1b[48;5;22m\xe2");
+    parser.feed("\xa0\x8b\x1b[48;2;12;90;35m\xe2\xa0");
+    parser.feed("\x99\x1b[0m ");
+    EXPECT_EQ(model.cell(0, 0).codePoint, U'\u280b');
+    EXPECT(model.cell(0, 0).backgroundColor().kind ==
+           ColorReference::Kind::Indexed);
+    EXPECT_EQ(model.cell(0, 0).backgroundColor().value.r, 22);
+    EXPECT_EQ(model.cell(1, 0).codePoint, U'\u2819');
+    EXPECT(model.cell(1, 0).backgroundColor().kind ==
+           ColorReference::Kind::Rgb);
+    EXPECT_EQ(model.cell(1, 0).backgroundColor().value.g, 90);
+    EXPECT(model.cell(2, 0).backgroundColor().kind ==
+           ColorReference::Kind::Default);
+}
+
 TEST_CASE("SGR supports basic bright indexed RGB and configurable defaults") {
     TerminalModel model(12, 2);
     VtParser parser(model, {}, {10, 20, 30}, {40, 50, 60});

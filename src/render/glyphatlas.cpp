@@ -14,6 +14,34 @@ void check(int result) {
         throw std::runtime_error(SDL_GetError());
     }
 }
+
+Surface brailleBitmap(unsigned mask, int width, int height) {
+    Surface pixels(SDL_CreateRGBSurfaceWithFormat(
+                       0, width, height, 32, SDL_PIXELFORMAT_RGBA32),
+                   SDL_FreeSurface);
+    if (!pixels) {
+        throw std::runtime_error(SDL_GetError());
+    }
+    check(SDL_FillRect(pixels.get(), nullptr, 0));
+    const auto ink = SDL_MapRGBA(pixels->format, 255, 255, 255, 255);
+    const int size = std::max(1, std::min(width / 4, height / 6));
+    // Unicode dot numbers: 1–3 down the left, 4–6 down the right,
+    // with dots 7 and 8 on the bottom row.
+    constexpr unsigned dots[4][2] = {{1, 8}, {2, 16}, {4, 32}, {64, 128}};
+    for (int row = 0; row < 4; ++row) {
+        for (int col = 0; col < 2; ++col) {
+            if (mask & dots[row][col]) {
+                const SDL_Rect dot{
+                    std::max(0, ((2 * col + 1) * width / 4) - size / 2),
+                    std::max(0, ((2 * row + 1) * height / 8) - size / 2),
+                    size,
+                    size};
+                check(SDL_FillRect(pixels.get(), &dot, ink));
+            }
+        }
+    }
+    return pixels;
+}
 } // namespace
 
 struct GlyphAtlas::Impl {
@@ -87,7 +115,10 @@ Glyph GlyphAtlas::getOrInsert(char32_t codePoint, CellAttribute attributes) {
         (hasAttribute(style, CellAttribute::Bold) ? TTF_STYLE_BOLD : 0) |
             (hasAttribute(style, CellAttribute::Italic) ? TTF_STYLE_ITALIC
                                                         : 0));
-    if (!TTF_GlyphIsProvided32(state.font.get(), codePoint)) {
+    const bool available = TTF_GlyphIsProvided32(state.font.get(), codePoint);
+    const bool drawBraille =
+        !available && codePoint >= U'\u2800' && codePoint <= U'\u28ff';
+    if (!available && !drawBraille) {
         for (const char32_t replacement : {U'\ufffd', U'?'}) {
             if (TTF_GlyphIsProvided32(state.font.get(), replacement)) {
                 const auto glyph = getOrInsert(replacement, attributes);
@@ -97,32 +128,57 @@ Glyph GlyphAtlas::getOrInsert(char32_t codePoint, CellAttribute attributes) {
         }
         throw std::runtime_error("Font has no replacement glyph");
     }
-    int minX, maxX, minY, maxY, advance;
-    check(TTF_GlyphMetrics32(
-        state.font.get(), codePoint, &minX, &maxX, &minY, &maxY, &advance));
     Glyph glyph;
-    glyph.advanceX = advance;
-    if (maxX <= minX || maxY <= minY) {
-        state.glyphs.emplace(key, glyph);
-        return glyph;
+    Surface pixels(nullptr, SDL_FreeSurface);
+    if (drawBraille) {
+        TTF_SetFontStyle(state.font.get(), TTF_STYLE_NORMAL);
+        check(TTF_GlyphMetrics32(state.font.get(),
+                                 U'M',
+                                 nullptr,
+                                 nullptr,
+                                 nullptr,
+                                 nullptr,
+                                 &glyph.advanceX));
+        glyph.advanceX = std::max(1, glyph.advanceX);
+        const unsigned mask = unsigned(codePoint - U'\u2800');
+        if (!mask) {
+            state.glyphs.emplace(key, glyph);
+            return glyph;
+        }
+        const int height = std::max(1, lineHeight());
+        glyph.bearingY = ascent();
+        pixels = brailleBitmap(mask, glyph.advanceX, height);
     }
-    Surface rendered(TTF_RenderGlyph32_Blended(state.font.get(),
-                                               codePoint,
-                                               SDL_Color{255, 255, 255, 255}),
-                     SDL_FreeSurface);
-    if (!rendered) {
-        throw std::runtime_error(TTF_GetError());
+    else {
+        int minX, maxX, minY, maxY;
+        check(TTF_GlyphMetrics32(state.font.get(),
+                                 codePoint,
+                                 &minX,
+                                 &maxX,
+                                 &minY,
+                                 &maxY,
+                                 &glyph.advanceX));
+        if (maxX <= minX || maxY <= minY) {
+            state.glyphs.emplace(key, glyph);
+            return glyph;
+        }
+        Surface rendered(
+            TTF_RenderGlyph32_Blended(
+                state.font.get(), codePoint, SDL_Color{255, 255, 255, 255}),
+            SDL_FreeSurface);
+        if (!rendered) {
+            throw std::runtime_error(TTF_GetError());
+        }
+        pixels.reset(SDL_ConvertSurfaceFormat(
+            rendered.get(), SDL_PIXELFORMAT_RGBA32, 0));
+        if (!pixels) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        // SDL_ttf renders a baseline-aligned surface, including top/left
+        // padding.
+        glyph.bearingX = std::min(0, minX);
+        glyph.bearingY = std::max(ascent(), maxY);
     }
-    Surface pixels(
-        SDL_ConvertSurfaceFormat(rendered.get(), SDL_PIXELFORMAT_RGBA32, 0),
-        SDL_FreeSurface);
-    if (!pixels) {
-        throw std::runtime_error(SDL_GetError());
-    }
-    // SDL_ttf renders a baseline-aligned surface, including its top/left
-    // padding.
-    glyph.bearingX = std::min(0, minX);
-    glyph.bearingY = std::max(ascent(), maxY);
     int x = state.x;
     int y = state.y;
     int shelfHeight = state.shelfHeight;
