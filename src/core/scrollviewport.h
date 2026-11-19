@@ -14,6 +14,11 @@ public:
     void followTail();
     void advance(double seconds);
     void rowsAppended(std::size_t count, std::size_t retainedRows);
+    // Height growth makes saved rows part of the live screen. Keep historical
+    // views anchored; offsets near the old tail become zero, not overscroll.
+    void rowsRevealed(std::size_t count,
+                      std::size_t retainedRows,
+                      std::size_t visibleRows);
 
     double offset() const noexcept {
         return displayed_;

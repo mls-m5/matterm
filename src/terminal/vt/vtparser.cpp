@@ -716,7 +716,10 @@ struct VtParser::Impl {
         case 'J':
         case 'K': {
             const int mode = value(0, 0, false);
-            if (mode <= 2) {
+            if (mode == 3 && final == 'J') {
+                model.eraseScrollback();
+            }
+            else if (mode <= 2) {
                 const auto erase = mode == 0 ? TerminalModel::EraseMode::ToEnd
                                    : mode == 1
                                        ? TerminalModel::EraseMode::ToStart

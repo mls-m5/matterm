@@ -160,10 +160,130 @@ TEST_CASE("Resize preserves both buffers clips width and keeps bottom rows on "
     EXPECT_EQ(model.cursor().row, 1);
     EXPECT_EQ(model.cursor().column, 2);
     model.resize(5, 4);
-    EXPECT(model.cell(0, 0).codePoint == U'b');
+    EXPECT(model.cell(0, 0).codePoint == U'a');
     EXPECT(model.cell(3, 0).codePoint == U' ');
     EXPECT(model.cell(0, 3).codePoint == U' ');
+    EXPECT_EQ(model.historySize(), std::size_t(0));
+}
+
+TEST_CASE("Height growth pulls saved primary rows back in exact order") {
+    TerminalModel model(4, 5, 10);
+    for (int row = 0; row < 5; ++row) {
+        model.moveCursor(0, row);
+        model.write(std::u32string(4, char32_t(U'A' + row)));
+    }
+    model.resize(4, 3);
+    EXPECT_EQ(model.historySize(), std::size_t(2));
+    EXPECT(model.cell(0, 0).codePoint == U'C');
+    EXPECT(model.cell(0, 2).codePoint == U'E');
+    EXPECT_EQ(model.cursor().row, 2);
+    model.resize(4, 5);
+    EXPECT_EQ(model.historySize(), std::size_t(0));
+    for (std::size_t row = 0; row < 5; ++row)
+        EXPECT(model.cell(0, row).codePoint == char32_t(U'A' + row));
+    EXPECT_EQ(model.cursor().row, 4);
+    model.write(U"Z"); // A pending full-width wrap still follows E.
     EXPECT_EQ(model.historySize(), std::size_t(1));
+    EXPECT(model.cell(0, 4).codePoint == U'Z');
+}
+
+TEST_CASE("Growth adds blanks only after saved lines run out and never pulls "
+          "alternate history") {
+    TerminalModel model(3, 2, 10);
+    model.write(U"A\r\nB\r\nC\r\nD");
+    EXPECT_EQ(model.historySize(), std::size_t(2));
+    model.setAlternateScreen(true);
+    model.write(U"X\r\nY");
+    model.resize(3, 5); // Resize the inactive primary as well.
+    EXPECT_EQ(model.historySize(), std::size_t(0));
+    EXPECT(model.cell(0, 0).codePoint == U'X');
+    EXPECT(model.cell(0, 1).codePoint == U'Y');
+    EXPECT(model.cell(0, 2).codePoint == U' ');
+    EXPECT_EQ(model.cursor().row, 1);
+    model.setAlternateScreen(false);
+    EXPECT_EQ(model.historySize(), std::size_t(0));
+    for (std::size_t row = 0; row < 4; ++row)
+        EXPECT(model.cell(0, row).codePoint == char32_t(U'A' + row));
+    EXPECT(model.cell(0, 4).codePoint == U' ');
+    EXPECT_EQ(model.cursor().row, 3);
+    EXPECT_FALSE(model.frame(17).scrollbar.visible);
+}
+
+TEST_CASE("Growing keeps a historical view anchored and shifts saved cursor "
+          "with revealed rows") {
+    TerminalModel model(3, 3, 20);
+    for (char32_t ch = U'A'; ch <= U'J'; ++ch) {
+        model.write(std::u32string_view(&ch, 1));
+        if (ch != U'J')
+            model.write(U"\r\n");
+    }
+    model.moveCursor(1, 1);
+    model.saveCursor();
+    model.scrollBy(4.5);
+    model.advanceViewport(10);
+    EXPECT(model.frame(18).cells.row(0).data()[0].codePoint == U'C');
+    EXPECT_EQ(model.frame(18).verticalOffsetPixels, -9.0f);
+    model.resize(3, 5);
+    EXPECT_EQ(model.historySize(), std::size_t(5));
+    EXPECT_EQ(model.viewport().offset(), 2.5);
+    EXPECT_EQ(model.viewport().targetOffset(), 2.5);
+    EXPECT(model.frame(18).cells.row(0).data()[0].codePoint == U'C');
+    EXPECT_EQ(model.frame(18).verticalOffsetPixels, -9.0f);
+    EXPECT_EQ(model.cursor().row, 3);
+    model.moveCursor(0, 0);
+    model.restoreCursor();
+    EXPECT_EQ(model.cursor().row, 3);
+    EXPECT_EQ(model.cursor().column, 1);
+    model.followTail();
+    model.advanceViewport(10);
+    model.scrollBy(1.5);
+    model.advanceViewport(10);
+    model.resize(3,
+                 7); // View near the old tail is now part of the live screen.
+    EXPECT_EQ(model.historySize(), std::size_t(3));
+    EXPECT(model.viewport().atTail());
+}
+
+TEST_CASE(
+    "Height growth cannot resurrect rows evicted by a small history limit") {
+    TerminalModel model(3, 5, 1);
+    for (int row = 0; row < 5; ++row) {
+        model.moveCursor(0, row);
+        model.write(std::u32string(3, char32_t(U'A' + row)));
+    }
+    model.resize(3, 1);
+    EXPECT_EQ(model.historySize(), std::size_t(1));
+    model.resize(3, 5);
+    EXPECT_EQ(model.historySize(), std::size_t(0));
+    EXPECT(model.cell(0, 0).codePoint == U'D');
+    EXPECT(model.cell(0, 1).codePoint == U'E');
+    EXPECT(model.cell(0, 2).codePoint == U' ');
+    EXPECT_EQ(model.cursor().row, 1);
+}
+
+TEST_CASE("Library saved-line erasure preserves origin margins and live cursor "
+          "state") {
+    TerminalModel model(5, 4, 10);
+    model.write(U"a\r\nb\r\nc\r\nd\r\ne\r\nf");
+    model.setScrollRegion(1, 3);
+    model.setOriginMode(true);
+    model.moveCursor(2, 2);
+    model.setColors({12, 34, 56}, {78, 90, 12});
+    model.saveCursor();
+    const auto live = model.cell(0, 0).codePoint;
+    model.eraseScrollback();
+    EXPECT_EQ(model.historySize(), std::size_t(0));
+    EXPECT_EQ(model.scrollTop(), 1);
+    EXPECT_EQ(model.scrollBottom(), 3);
+    EXPECT(model.originMode());
+    EXPECT_EQ(model.cursor().column, 2);
+    EXPECT_EQ(model.cursor().row, 2);
+    EXPECT(model.cell(0, 0).codePoint == live);
+    model.moveCursor(0, 0);
+    model.restoreCursor();
+    EXPECT_EQ(model.cursor().row, 2);
+    model.write(U"X");
+    EXPECT_EQ(model.cell(2, 2).foreground.r, 12);
 }
 
 TEST_CASE("Switching screens preserves a pending primary wrap") {

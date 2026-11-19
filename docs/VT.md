@@ -30,7 +30,8 @@ CSI parameter coordinates are one-based; omitted/zero movement parameters use on
 Movement clamps to the screen or origin-mode margins. Resize currently resets
 margins/origin to the full screen; applications can re-establish them on SIGWINCH.
 A height shrink drops blank rows below the cursor before pushing top rows into
-the scrollback; there is no reflow on width changes.
+the scrollback. Height growth reveals saved primary rows before adding blanks;
+the alternate screen only adds blanks. There is no reflow on width changes.
 
 | Input | Behavior |
 |---|---|
@@ -43,7 +44,7 @@ the scrollback; there is no reflow on width changes.
 | `CSI E F` | Relative line movement and column zero |
 | `CSI G`, `CSI d`, `CSI H` / `f` | Column, row, or row/column positioning |
 | `CSI a`, `CSI e` | Relative right/down aliases |
-| `CSI J`, `CSI K` | Display/line erase modes 0, 1, 2 using current colors; history is retained |
+| `CSI J`, `CSI K` | Display/line erase modes 0, 1, 2 using current colors; history is retained. `CSI 3 J` discards primary saved lines without clearing the live screen |
 | `CSI @`, `CSI P`, `CSI X` | Insert/delete/erase characters |
 | `CSI L`, `CSI M` | Insert/delete lines within the cursor-to-bottom margin |
 | `CSI S`, `CSI T`, `CSI r` | Scroll region up/down and set inclusive margins |
@@ -122,8 +123,8 @@ The future compatibility layer may need finer-grained DEC/ANSI state handling.
 - `finish()` replaces incomplete text UTF-8, discards incomplete control sequences,
   and retains completed rendition/model state. `resetInput()` drops pending input
   without inserting a replacement and also retains completed state.
-- Raw eight-bit C1 control forms, secondary/extended device attributes, erase
-  history mode 3, left/right margins (`?69`), and OSC 10/11 color setting are
+- Raw eight-bit C1 control forms, secondary/extended device attributes,
+  left/right margins (`?69`), and OSC 10/11 color setting are
   not supported yet. Primary DA does not imply full VT100 conformance.
 Do not advertise full VT100/xterm compatibility or Vim support.
 
