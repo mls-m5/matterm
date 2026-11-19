@@ -175,6 +175,13 @@ if(BUILD_TESTING)
         endforeach()
     endif()
 
+    if(TARGET matterm)
+        add_test(NAME terminal_cli_help
+            COMMAND "${CMAKE_COMMAND}" "-DAPP=$<TARGET_FILE:matterm>"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/terminal_cli.cmake")
+        set_tests_properties(terminal_cli_help PROPERTIES TIMEOUT 10)
+    endif()
+
     set(TEST_FONT_FILE "" CACHE FILEPATH "TrueType font for atlas and rendering tests")
     if(NOT TEST_FONT_FILE AND MATTERM_ASSET_JetBrainsMono-Regular.ttf)
         set(TEST_FONT_FILE "${MATTERM_ASSET_JetBrainsMono-Regular.ttf}")
@@ -213,6 +220,11 @@ if(BUILD_TESTING)
                     COMMAND matterm "${TEST_FONT_FILE}" --font-size 12 --pty-smoke-test -- $<TARGET_FILE:pty_test_child> vt)
                 set_tests_properties(pty_frontend_render_smoke PROPERTIES
                     ENVIRONMENT "SDL_VIDEODRIVER=dummy" TIMEOUT 15)
+                add_test(NAME pty_frontend_smooth_cursor_smoke
+                    COMMAND matterm "${TEST_FONT_FILE}" --smooth-cursor -- /bin/sh -c
+                        "printf 'cursor'; sleep 0.1; printf '\\r\\nmove'; sleep 0.1; test \"$1\" = --help" sh --help)
+                set_tests_properties(pty_frontend_smooth_cursor_smoke PROPERTIES
+                    ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software" TIMEOUT 15)
                 add_test(NAME pty_frontend_closes_on_exit
                     COMMAND matterm "${TEST_FONT_FILE}" -- /bin/sh -c "exit 0")
                 set_tests_properties(pty_frontend_closes_on_exit PROPERTIES
