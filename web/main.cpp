@@ -56,6 +56,11 @@ struct App {
     std::string title = "matterm"; // Base title, without the Ctrl-hover target.
     // Idle frames: skip render+present while nothing visible changed.
     std::optional<std::uint64_t> lastSignature;
+    std::uint64_t lastStable = 0;
+    // Idle throttling: full speed for a while after input or any visible
+    // change (blink excluded), otherwise one full pass every idleMs.
+    Uint64 activeUntil = 0;
+    Uint64 lastFull = 0;
     std::string shownTitle;
 };
 
@@ -362,11 +367,19 @@ void handleEvent(App &app, const SDL_Event &event) {
 void frame(void *data) {
     auto &app = *static_cast<App *>(data);
     SDL_Event event;
+    constexpr Uint64 activeMs = 500, idleMs = 100;
+    const auto start = SDL_GetTicks64();
     while (SDL_PollEvent(&event)) {
+        app.activeUntil = start + activeMs;
         if (app.link) {
             handleEvent(app, event);
         }
     }
+    if (start > app.activeUntil && start - app.lastFull < idleMs &&
+        app.lastSignature) {
+        return; // Idle: nothing happened and the next check is not due yet.
+    }
+    app.lastFull = start;
     if (app.session) {
         app.session->tick();
     }
@@ -418,6 +431,7 @@ void frame(void *data) {
     app.cursorGlide.apply(rendered.cursor);
     rendered.cursor.focused =
         (SDL_GetWindowFlags(app.window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+    const auto unblinkedCursorVisible = rendered.cursor.visible;
     // An inactive window shows a steady hollow cursor.
     rendered.cursor.visible = rendered.cursor.visible &&
                               (!rendered.cursor.focused ||
@@ -434,6 +448,20 @@ void frame(void *data) {
         return;
     }
     app.lastSignature = signature.value();
+    {
+        // Blinking alone must not keep the loop at full speed.
+        const auto blinkText = rendered.textBlinkVisible;
+        const auto blinkCursor = rendered.cursor.visible;
+        rendered.textBlinkVisible = true;
+        rendered.cursor.visible = unblinkedCursorVisible;
+        const auto stable = frontend::frameSignature(rendered, app.palette);
+        rendered.textBlinkVisible = blinkText;
+        rendered.cursor.visible = blinkCursor;
+        if (stable != app.lastStable) {
+            app.lastStable = stable;
+            app.activeUntil = now + activeMs;
+        }
+    }
     app.backend->render(rendered);
     app.backend->present();
 }
