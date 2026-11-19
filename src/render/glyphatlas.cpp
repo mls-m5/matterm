@@ -189,6 +189,37 @@ Glyph GlyphAtlas::getOrInsert(char32_t codePoint, CellAttribute attributes) {
         state.glyphs.emplace(key, glyph);
         return glyph;
     }
+    // Glyph metrics can describe ink even when SDL_ttf's text renderer
+    // suppresses the character (for example U+00AD soft hyphen). Rendering
+    // such text fails with "Text has zero width" rather than returning an
+    // empty surface. Measure with the same selected font/style first; retain
+    // the advance and cache an empty glyph, just as for a space. Measurement
+    // and all other rendering/atlas errors still propagate normally.
+    char text[5]{};
+    if (codePoint <= 0x7f) {
+        text[0] = char(codePoint);
+    }
+    else if (codePoint <= 0x7ff) {
+        text[0] = char(0xc0 | (codePoint >> 6));
+        text[1] = char(0x80 | (codePoint & 0x3f));
+    }
+    else if (codePoint <= 0xffff) {
+        text[0] = char(0xe0 | (codePoint >> 12));
+        text[1] = char(0x80 | ((codePoint >> 6) & 0x3f));
+        text[2] = char(0x80 | (codePoint & 0x3f));
+    }
+    else {
+        text[0] = char(0xf0 | (codePoint >> 18));
+        text[1] = char(0x80 | ((codePoint >> 12) & 0x3f));
+        text[2] = char(0x80 | ((codePoint >> 6) & 0x3f));
+        text[3] = char(0x80 | (codePoint & 0x3f));
+    }
+    int textWidth = 0;
+    check(TTF_SizeUTF8(font, text, &textWidth, nullptr));
+    if (textWidth == 0) {
+        state.glyphs.emplace(key, glyph);
+        return glyph;
+    }
     Surface rendered(TTF_RenderGlyph32_Blended(
                          font, codePoint, SDL_Color{255, 255, 255, 255}),
                      SDL_FreeSurface);
