@@ -192,7 +192,8 @@ These describe much more functionality than matterm currently implements.
 
 ## Later (owner's notes)
 
-- [ ] Several terminals in one window (tabs/splits) is wanted. It needs a design
+- [ ] Several terminals in one window (tabs/splits) is wanted. The plan is in
+  docs/MULTI_TERMINAL.md (open questions at its end). It needs a design
   first: protocol channels per terminal vs. one connection per terminal, server
   session ownership, focus and input routing, resize per pane, what closing the
   last pane means. Plan this before building a settings UI.
