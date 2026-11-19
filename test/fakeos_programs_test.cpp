@@ -18,6 +18,23 @@ bool hasAlternateScreenOff(const std::string &raw) {
 }
 } // namespace
 
+namespace {
+// Column and row (zero-based) of a word on the screen, or {-1, -1}.
+std::pair<int, int> find(const Pc &pc, const std::string &word) {
+    for (std::size_t y = 0; y < pc.model.rows(); ++y) {
+        const auto at = pc.row(y).find(word);
+        if (at != std::string::npos) {
+            return {int(at), int(y)};
+        }
+    }
+    return {-1, -1};
+}
+std::string click(std::pair<int, int> cell) {
+    return "\x1b[<0;" + std::to_string(cell.first + 1) + ";" +
+           std::to_string(cell.second + 1) + "M";
+}
+} // namespace
+
 TEST_SUIT_BEGIN(FakeosPrograms)
 
 TEST_CASE("fire is a file on disk, outside the PATH") {
@@ -138,6 +155,50 @@ TEST_CASE("The easter egg chain: .ember, xyzzy, a new program appears") {
     Pc other;
     other.run("ls /usr/games");
     EXPECT(!other.shows("plasma"));
+}
+
+TEST_CASE("Clicking a word a program drew can be an easter egg") {
+    Pc pc;
+    pc.run("xyzzy");
+    pc.run("/usr/games/plasma");
+    EXPECT(pc.sys.inProgram());
+    EXPECT(pc.raw.find("\x1b[?1000h\x1b[?1006h") !=
+           std::string::npos); // Mouse on.
+    pc.advance(100);
+    const auto blue = find(pc, "blue");
+    EXPECT(blue.first >= 0);
+    // A click on background or on the title does nothing.
+    pc.type(click({0, 0}));
+    pc.type(click(find(pc, "chance")));
+    EXPECT(pc.sys.inProgram());
+    // A click on "blue" ends the program and plays the egg.
+    pc.type(click({blue.first + 1, blue.second}));
+    EXPECT(!pc.sys.inProgram());
+    EXPECT(pc.raw.find("\x1b[?1000l") != std::string::npos); // Mouse off again.
+    EXPECT(pc.shows("you believe whatever you want to believe."));
+    EXPECT(pc.last() == kPrompt);
+    EXPECT(pc.sys.world().flags.count("pill-blue") == 1);
+}
+
+TEST_CASE("The keyboard makes the same choice as a click") {
+    Pc pc;
+    pc.run("xyzzy");
+    pc.run("/usr/games/plasma");
+    pc.advance(100);
+    pc.type("b");
+    EXPECT(!pc.sys.inProgram());
+    EXPECT(pc.shows("you believe whatever you want to believe."));
+    EXPECT(pc.last() == kPrompt);
+}
+
+TEST_CASE(
+    "The fire does not turn the mouse on, and clicks there mean nothing") {
+    Pc pc;
+    pc.run("/usr/games/fire");
+    EXPECT(pc.raw.find("\x1b[?1000h") == std::string::npos);
+    pc.advance(100);
+    pc.type(click({3, 3}));
+    EXPECT(pc.sys.inProgram());
 }
 
 TEST_CASE("Other eggs and sudo") {

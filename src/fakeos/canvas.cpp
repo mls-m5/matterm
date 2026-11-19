@@ -150,6 +150,33 @@ const Cell &AsciiCanvas::at(int x, int y) const {
     return cells_.at(std::size_t(y) * std::size_t(columns_) + std::size_t(x));
 }
 
+std::string AsciiCanvas::wordAt(int x, int y) const {
+    if (x < 0 || x >= columns_ || y < 0 || y >= rows_) {
+        return {};
+    }
+    auto isWord = [&](int column) {
+        const auto cp = at(column, y).codePoint;
+        return cp > U' ' && cp != U'(' && cp != U')' && cp != U'[' &&
+               cp != U']' && cp != U'<' && cp != U'>' && cp != U'|' &&
+               cp != U',';
+    };
+    if (!isWord(x)) {
+        return {};
+    }
+    int begin = x, end = x;
+    while (begin > 0 && isWord(begin - 1)) {
+        --begin;
+    }
+    while (end + 1 < columns_ && isWord(end + 1)) {
+        ++end;
+    }
+    std::string word;
+    for (int column = begin; column <= end; ++column) {
+        appendUtf8(word, at(column, y).codePoint);
+    }
+    return word;
+}
+
 void AsciiCanvas::appendColor(std::string &out,
                               bool foreground,
                               Rgb color) const {

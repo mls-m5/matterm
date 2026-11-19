@@ -25,6 +25,11 @@ struct Egg {
         Line,    // The whole trimmed line equals `match`.
         Prefix,  // The line starts with `match`.
         Command, // The first word equals `match`.
+        // A click, through mouse reporting, on text a program drew: `match` is
+        // "program/word", for example "gradient/red" (the word the click landed
+        // on, as drawn). The program ends; `print` is shown once the screen is
+        // back and `launch` may start the next program.
+        Click,
     };
     const char *id; // Also the World flag that records the discovery.
     Trigger trigger;
@@ -40,6 +45,10 @@ struct Egg {
 const std::vector<Egg> &eggs();
 // The first egg whose trigger matches the line, or null.
 const Egg *matchEgg(const World &world, const std::string &line);
+// The click egg for a word drawn by the named program, or null.
+const Egg *matchClickEgg(const World &world,
+                         const std::string &program,
+                         const std::string &word);
 // Performs the egg: prints, creates files, requests a program. Returns false
 // when it had nothing to do (a `once` egg already found, without repeat text).
 bool applyEgg(World &world, const Egg &egg, std::string &terminal);

@@ -57,6 +57,10 @@ public:
               Rgb background = {0, 0, 0},
               bool bold = false);
     const Cell &at(int x, int y) const;
+    // The run of non-blank characters around a cell, without surrounding
+    // punctuation like ( ) [ ]: the text that was drawn where a click landed.
+    // Empty when the cell is blank or outside.
+    std::string wordAt(int x, int y) const;
 
     // Updates since the last flush; `forceFull` redraws every cell.
     std::string flush(bool forceFull = false);
