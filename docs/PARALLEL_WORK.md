@@ -63,12 +63,10 @@ Agents work in separate worktrees with non-overlapping owned paths. Finished and
 integrated: server skeleton, hardening, configuration, ScriptedLink, fast-json
 fixes, resize duplication, zero-width glyph.
 
-- `docs/tasks/touch-gestures.md`: touch scrolling and pinch zoom in the browser
-  client. Worktree `.tmp/agent3`, branch `agent3-touch`.
-- `docs/tasks/empty-scroll-and-reflow.md`: empty content must not scroll, blank
-  area above the first row, grow pulls scrollback, optional reflow. Worktree
-  `.tmp/agent2`, branch `agent2-scroll`.
-  (Integrated: security review, URL opening.)
+No tasks are active. Integrated since the last list: security review, URL opening,
+touch gestures (`docs/tasks/touch-gestures.md`), empty-scroll/grow/ED3 work
+(`docs/tasks/empty-scroll-and-reflow.md`; reflow is only designed, see
+docs/SCROLLING_AND_REFLOW.md).
 
 Agents can be reached through the MCP message tools (`list_peers`,
 `send_message`, `receive_messages`); the integrator is the project named by
