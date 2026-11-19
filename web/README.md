@@ -29,6 +29,9 @@ server's Content-Security-Policy forbids it.
 
 ## Run
 
+First create the password file with `tools/set-password.sh` (see docs/SERVER.md,
+"Credentials").
+
 ```
 build/server/src/server/matterm-server --credentials ~/.config/matterm/credentials \
     --origin http://localhost:8080 --static-dir build-web/site
