@@ -51,6 +51,9 @@ public:
     void lineFeed();
     void eraseLine(EraseMode mode = EraseMode::ToEnd);
     void eraseDisplay(EraseMode mode = EraseMode::ToEnd);
+    // ED3: discard primary saved lines, keeping the live screen, rendition,
+    // modes and cursor. A no-op on the history-free alternate screen.
+    void eraseScrollback();
     void eraseCharacters(int count = 1);
     void insertCharacters(int count = 1);
     void deleteCharacters(int count = 1);

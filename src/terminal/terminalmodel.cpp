@@ -213,7 +213,8 @@ struct TerminalModel::Impl {
     std::unique_ptr<Screen> resized(const Screen &old,
                                     std::size_t width,
                                     std::size_t height,
-                                    std::size_t history) const {
+                                    std::size_t history,
+                                    bool discardHistory = false) const {
         auto result =
             std::make_unique<Screen>(width, height, history, blank(old));
         result->memory.clear();
@@ -229,7 +230,9 @@ struct TerminalModel::Impl {
              blankRow(old, start(old) + rows - 1 - dropped);
              ++dropped) {
         }
-        for (std::size_t y = 0; y < old.memory.size() - dropped; ++y) {
+        for (std::size_t y = discardHistory ? start(old) : 0;
+             y < old.memory.size() - dropped;
+             ++y) {
             result->append(old.memory.row(y),
                            blank(old),
                            width == columns && old.softWrap[y]);
@@ -257,6 +260,11 @@ struct TerminalModel::Impl {
             // Widening exposes the insertion position after the old last cell.
             result->cursor.column = old.cursor.column + 1;
             result->wrapPending = false;
+        }
+        if (discardHistory) {
+            result->scrollTop = old.scrollTop;
+            result->scrollBottom = old.scrollBottom;
+            result->origin = old.origin;
         }
         result->viewport = old.viewport;
         result->viewport.setGeometry(result->memory.size(), height);
@@ -624,6 +632,17 @@ void TerminalModel::clearTabStops(bool all) {
         impl_->tabStops[std::size_t(cursor().column)] = false;
     }
 }
+void TerminalModel::eraseScrollback() {
+    if (impl_->useAlternate || historySize() == 0) {
+        return;
+    }
+    // Rebuild before replacing: allocation failure leaves cells and view
+    // intact.
+    impl_->primary = impl_->resized(
+        *impl_->primary, columns(), rows(), impl_->scrollback, true);
+    ++impl_->selectionEpoch;
+}
+
 void TerminalModel::reset() {
     auto replacement =
         std::make_unique<Impl>(columns(), rows(), impl_->scrollback);
