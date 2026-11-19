@@ -14,6 +14,15 @@
     window.mattermWs =
       (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
     window.Module = { canvas: canvas };
+    // Ctrl+Shift+V: the browser's paste event carries the clipboard text.
+    document.addEventListener("paste", function (event) {
+      const text = event.clipboardData && event.clipboardData.getData("text");
+      if (text && window.Module && window.Module._matterm_paste) {
+        window.Module.ccall("matterm_paste", null, ["string"], [text]);
+      }
+      event.preventDefault();
+    });
+    canvas.focus();
     const script = document.createElement("script");
     script.src = "index.js";
     document.body.appendChild(script);

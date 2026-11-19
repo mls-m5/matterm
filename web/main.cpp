@@ -1,10 +1,13 @@
-// Browser spike: the terminal model, VT parser, and SDL renderer running on a
-// canvas, fed with a built-in VT stream. The network link comes later.
-#include "sdlbackend.h"
-#include "terminalmodel.h"
-#include "vtparser.h"
+// Browser front end: the terminal model, VT parser and SDL renderer on a
+// canvas, connected to matterm-server through ClientSession (WebSocket). With
+// no server URL it shows a built-in VT demo instead.
 #include "clientsession.h"
 #include "inputencoder.h"
+#include "palette.h"
+#include "sdlbackend.h"
+#include "sdlinput.h"
+#include "terminalmodel.h"
+#include "vtparser.h"
 #include "websocketchannel.h"
 
 #include <SDL.h>
@@ -12,11 +15,15 @@
 #include <emscripten.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <optional>
 #include <string>
+
+using namespace frontend;
+using MouseEvent = InputEncoder::MouseEvent;
 
 namespace {
 struct App {
@@ -26,43 +33,19 @@ struct App {
     std::unique_ptr<VtParser> parser;
     std::unique_ptr<WebSocketChannel> channel;
     std::unique_ptr<ClientSession> session;
+    const Palette defaultPalette;
+    Palette palette;
     Uint64 last = 0;
-    std::string status;
     bool skipText = false;
+    // Mouse: application reporting, or local selection.
+    bool mouseCaptured = false;
+    MouseEvent::Button heldButton = MouseEvent::Button::None;
+    std::optional<std::pair<int, int>> lastMouseCell;
+    bool dragging = false;
+    std::optional<Selection> selection;
 };
 
-std::optional<InputEncoder::Key> special(SDL_Keycode key) {
-    using K = InputEncoder::Key;
-    switch (key) {
-    case SDLK_RETURN: return K::Enter;
-    case SDLK_BACKSPACE: return K::Backspace;
-    case SDLK_TAB: return K::Tab;
-    case SDLK_ESCAPE: return K::Escape;
-    case SDLK_UP: return K::Up;
-    case SDLK_DOWN: return K::Down;
-    case SDLK_LEFT: return K::Left;
-    case SDLK_RIGHT: return K::Right;
-    case SDLK_HOME: return K::Home;
-    case SDLK_END: return K::End;
-    case SDLK_INSERT: return K::Insert;
-    case SDLK_DELETE: return K::Delete;
-    case SDLK_PAGEUP: return K::PageUp;
-    case SDLK_PAGEDOWN: return K::PageDown;
-    case SDLK_F1: return K::F1;
-    case SDLK_F2: return K::F2;
-    case SDLK_F3: return K::F3;
-    case SDLK_F4: return K::F4;
-    case SDLK_F5: return K::F5;
-    case SDLK_F6: return K::F6;
-    case SDLK_F7: return K::F7;
-    case SDLK_F8: return K::F8;
-    case SDLK_F9: return K::F9;
-    case SDLK_F10: return K::F10;
-    case SDLK_F11: return K::F11;
-    case SDLK_F12: return K::F12;
-    default: return std::nullopt;
-    }
-}
+App *gApp = nullptr; // For matterm_paste.
 
 // The `ws` query parameter (?ws=ws://127.0.0.1:8080/ws) or window.mattermWs
 // (set by login.js). Empty: demo.
@@ -80,44 +63,246 @@ std::string wsUrl() {
     return url;
 }
 
+void setTitle(const std::string &title) {
+    EM_ASM({ document.title = UTF8ToString($0); }, title.c_str());
+}
+
+void copyToClipboard(const std::string &text) {
+    EM_ASM(
+        {
+            const t = UTF8ToString($0);
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(t).catch(function(){});
+            }
+        },
+        text.c_str());
+}
+
+void send(App &app, const std::string &bytes) {
+    if (bytes.empty() || !app.session) {
+        return;
+    }
+    if (app.session->sendInput(bytes)) {
+        app.model->followTail();
+    }
+}
+
+bool mouseTracking(const App &app) {
+    return app.parser->modes().mouseTracking !=
+           TerminalModes::MouseTracking::Off;
+}
+
+void sendMouse(App &app,
+               MouseEvent::Type type,
+               MouseEvent::Button button,
+               int x,
+               int y,
+               bool clamp,
+               bool dedupe) {
+    auto &model = *app.model;
+    const auto cell = mouseCell(*app.window, *app.backend, model, x, y, clamp);
+    if (!cell) {
+        return;
+    }
+    const auto first = model.firstRetainedRow() + model.viewport().firstRow();
+    MouseEvent report;
+    report.type = type;
+    report.button = button;
+    report.modifiers = modifiers(SDL_GetModState());
+    report.column = int(cell->column);
+    report.row = cell->row >= first ? int(cell->row - first) : 0;
+    if (dedupe &&
+        app.lastMouseCell == std::make_pair(report.column, report.row)) {
+        return;
+    }
+    app.lastMouseCell = std::make_pair(report.column, report.row);
+    send(app, InputEncoder::mouse(report, app.parser->modes()));
+}
+
+void handleKey(App &app, const SDL_KeyboardEvent &key) {
+    const auto mod = modifiers(SDL_Keymod(key.keysym.mod));
+    const auto sym = key.keysym.sym;
+    const auto &modes = app.parser->modes();
+    if (mod.control && mod.shift && sym == SDLK_c) {
+        // Ctrl+Shift+V (paste) is handled by the page's paste event.
+        if (!key.repeat && app.selection && app.selection->valid(*app.model)) {
+            if (const auto text = app.model->copyText(
+                    app.selection->anchor, app.selection->end, 1024 * 1024)) {
+                copyToClipboard(*text);
+            }
+        }
+    }
+    else if (mod.control && mod.shift && sym == SDLK_v) {
+        // Nothing to send: see above.
+    }
+    else if (mod.shift && (sym == SDLK_PAGEUP || sym == SDLK_PAGEDOWN)) {
+        app.model->scrollBy((sym == SDLK_PAGEUP ? 1.0 : -1.0) *
+                            app.model->rows());
+    }
+    else if (mod.control && mod.shift && sym == SDLK_HOME) {
+        app.model->scrollToOldest();
+    }
+    else if (mod.control && mod.shift && sym == SDLK_END) {
+        app.model->followTail();
+    }
+    else if (modes.applicationKeypad && keypadKey(sym)) {
+        app.skipText = true;
+        send(app, InputEncoder::keypad(*keypadKey(sym), mod, modes));
+    }
+    else if (const auto encoded = special(sym)) {
+        send(app, InputEncoder::key(*encoded, mod, modes));
+    }
+    else if (mod.control && sym >= 0 && sym <= 127) {
+        send(app, InputEncoder::control(char(sym), mod.alt));
+    }
+}
+
+void handleWheel(App &app, const SDL_MouseWheelEvent &wheel) {
+    double amount = wheel.preciseY != 0 ? wheel.preciseY : wheel.y;
+    if (wheel.direction == SDL_MOUSEWHEEL_FLIPPED) {
+        amount = -amount;
+    }
+    const auto &modes = app.parser->modes();
+    if (mouseTracking(app) && !modifiers(SDL_GetModState()).shift) {
+        int x = 0, y = 0;
+        SDL_GetMouseState(&x, &y);
+        const auto button = amount > 0 ? MouseEvent::Button::WheelUp
+                                       : MouseEvent::Button::WheelDown;
+        const int steps = std::clamp(int(std::ceil(std::abs(amount))), 1, 10);
+        for (int i = 0; i < steps; ++i) {
+            sendMouse(app, MouseEvent::Type::Press, button, x, y, true, false);
+        }
+    }
+    else if (app.model->alternateScreen()) {
+        const auto key =
+            amount > 0 ? InputEncoder::Key::Up : InputEncoder::Key::Down;
+        const int count = int(std::ceil(std::min(10.0, std::abs(amount)) * 3));
+        for (int i = 0; i < count; ++i) {
+            send(app, InputEncoder::key(key, {}, modes));
+        }
+    }
+    else {
+        app.model->scrollBy(amount * 3);
+    }
+}
+
+void handleEvent(App &app, const SDL_Event &event) {
+    auto &model = *app.model;
+    if (event.type == SDL_TEXTINPUT) {
+        const auto mod = modifiers(SDL_GetModState());
+        if (app.skipText) {
+            app.skipText = false;
+        }
+        else if (!mod.control) {
+            send(app, InputEncoder::text(event.text.text, mod.alt));
+        }
+    }
+    else if (event.type == SDL_KEYDOWN) {
+        handleKey(app, event.key);
+    }
+    else if (event.type == SDL_MOUSEBUTTONDOWN && mouseTracking(app) &&
+             !modifiers(SDL_GetModState()).shift &&
+             mouseButton(event.button.button)) {
+        app.mouseCaptured = true;
+        app.heldButton = *mouseButton(event.button.button);
+        app.lastMouseCell.reset();
+        sendMouse(app,
+                  MouseEvent::Type::Press,
+                  app.heldButton,
+                  event.button.x,
+                  event.button.y,
+                  false,
+                  false);
+    }
+    else if (event.type == SDL_MOUSEBUTTONUP && app.mouseCaptured &&
+             mouseButton(event.button.button)) {
+        const auto button = *mouseButton(event.button.button);
+        sendMouse(app,
+                  MouseEvent::Type::Release,
+                  button,
+                  event.button.x,
+                  event.button.y,
+                  true,
+                  false);
+        if (button == app.heldButton) {
+            app.mouseCaptured = false;
+            app.heldButton = MouseEvent::Button::None;
+        }
+    }
+    else if (event.type == SDL_MOUSEMOTION && mouseTracking(app) &&
+             (app.mouseCaptured || (app.parser->modes().mouseTracking ==
+                                        TerminalModes::MouseTracking::Any &&
+                                    !modifiers(SDL_GetModState()).shift))) {
+        sendMouse(app,
+                  MouseEvent::Type::Motion,
+                  app.heldButton,
+                  event.motion.x,
+                  event.motion.y,
+                  app.mouseCaptured,
+                  true);
+    }
+    else if (event.type == SDL_MOUSEBUTTONDOWN &&
+             event.button.button == SDL_BUTTON_LEFT) {
+        app.selection.reset();
+        const auto cell = mouseCell(*app.window,
+                                    *app.backend,
+                                    model,
+                                    event.button.x,
+                                    event.button.y,
+                                    false);
+        app.dragging = cell.has_value();
+        if (cell) {
+            app.selection = Selection{*cell, *cell, model.selectionEpoch()};
+        }
+    }
+    else if ((event.type == SDL_MOUSEMOTION && app.dragging) ||
+             (event.type == SDL_MOUSEBUTTONUP &&
+              event.button.button == SDL_BUTTON_LEFT)) {
+        const bool release = event.type == SDL_MOUSEBUTTONUP;
+        if (app.dragging && app.selection && app.selection->valid(model)) {
+            const auto cell =
+                mouseCell(*app.window,
+                          *app.backend,
+                          model,
+                          release ? event.button.x : event.motion.x,
+                          release ? event.button.y : event.motion.y,
+                          true);
+            if (cell) {
+                app.selection->end = *cell;
+            }
+        }
+        if (release) {
+            app.dragging = false;
+        }
+    }
+    else if (event.type == SDL_WINDOWEVENT &&
+             (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST ||
+              event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)) {
+        const bool gained = event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED;
+        if (!gained) {
+            app.dragging = false;
+            app.mouseCaptured = false;
+            app.heldButton = MouseEvent::Button::None;
+        }
+        send(app, InputEncoder::focus(gained, app.parser->modes()));
+    }
+    else if (event.type == SDL_MOUSEWHEEL) {
+        handleWheel(app, event.wheel);
+    }
+}
+
 void frame(void *data) {
     auto &app = *static_cast<App *>(data);
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-        if (!app.session) {
-            continue;
-        }
-        const auto &modes = app.parser->modes();
-        if (event.type == SDL_TEXTINPUT) {
-            if (app.skipText) {
-                app.skipText = false;
-            }
-            else {
-                const auto alt = (SDL_GetModState() & KMOD_ALT) != 0;
-                app.session->sendInput(
-                    InputEncoder::text(event.text.text, alt));
-            }
-        }
-        else if (event.type == SDL_KEYDOWN) {
-            const auto m = SDL_GetModState();
-            InputEncoder::Modifiers mod;
-            mod.shift = (m & KMOD_SHIFT) != 0;
-            mod.alt = (m & KMOD_ALT) != 0;
-            mod.control = (m & KMOD_CTRL) != 0;
-            const auto key = event.key.keysym.sym;
-            if (const auto encoded = special(key)) {
-                app.session->sendInput(InputEncoder::key(*encoded, mod, modes));
-            }
-            else if (mod.control && key >= 0 && key <= 127) {
-                app.session->sendInput(
-                    InputEncoder::control(char(key), mod.alt));
-            }
+        if (app.session) {
+            handleEvent(app, event);
         }
     }
     if (app.session) {
         app.session->tick();
     }
-    const auto columns = std::size_t(std::max(1, app.backend->columns()));
+    const auto columns = std::size_t(std::max(1, app.backend->columns(true)));
     const auto rows = std::size_t(std::max(1, app.backend->rows()));
     if (columns != app.model->columns() || rows != app.model->rows()) {
         app.model->resize(columns, rows);
@@ -129,13 +314,34 @@ void frame(void *data) {
     app.model->advanceViewport(double(now - app.last) / 1000);
     app.last = now;
     auto rendered = app.model->frame(app.backend->cellHeight());
+    rendered.palette = &app.palette;
+    if (app.selection) {
+        if (app.selection->valid(*app.model)) {
+            app.selection->apply(*app.model, rendered);
+        }
+        else {
+            app.selection.reset();
+            app.dragging = false;
+        }
+    }
     rendered.textBlinkVisible = (now / 500) % 2 == 0;
-    rendered.cursor.focused = true;
-    rendered.cursor.visible = rendered.cursor.visible && (now / 500) % 2 == 0;
+    rendered.cursor.focused =
+        (SDL_GetWindowFlags(app.window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+    // An inactive window shows a steady hollow cursor.
+    rendered.cursor.visible = rendered.cursor.visible &&
+                              (!rendered.cursor.focused ||
+                               !rendered.cursor.blink || (now / 500) % 2 == 0);
     app.backend->render(rendered);
     app.backend->present();
 }
 } // namespace
+
+// Called by login.js's paste listener with the clipboard text.
+extern "C" EMSCRIPTEN_KEEPALIVE void matterm_paste(const char *text) {
+    if (gApp && text) {
+        send(*gApp, InputEncoder::paste(text, gApp->parser->modes()));
+    }
+}
 
 int main() {
     if (SDL_Init(SDL_INIT_VIDEO) < 0 || TTF_Init() < 0) {
@@ -143,6 +349,7 @@ int main() {
         return 1;
     }
     static App app;
+    gApp = &app;
     app.window = SDL_CreateWindow("matterm",
                                   SDL_WINDOWPOS_CENTERED,
                                   SDL_WINDOWPOS_CENTERED,
@@ -162,10 +369,31 @@ int main() {
         return 1;
     }
     app.model = std::make_unique<TerminalModel>(
-        std::size_t(std::max(1, app.backend->columns())),
+        std::size_t(std::max(1, app.backend->columns(true))),
         std::size_t(std::max(1, app.backend->rows())),
         1000);
-    app.parser = std::make_unique<VtParser>(*app.model);
+    VtEvents vtEvents;
+    vtEvents.reply = [](std::string_view bytes) {
+        if (gApp->session) {
+            gApp->session->sendInput(bytes);
+        }
+    };
+    vtEvents.title = [](std::string_view title) {
+        setTitle(std::string(title));
+    };
+    vtEvents.palette = &app.palette;
+    vtEvents.setPaletteColor = [](std::size_t index, Rgb8 color) {
+        gApp->palette.colors[index] = color;
+    };
+    vtEvents.resetPaletteColor = [](std::optional<std::size_t> index) {
+        if (index) {
+            gApp->palette.colors[*index] = gApp->defaultPalette.colors[*index];
+        }
+        else {
+            gApp->palette.colors = gApp->defaultPalette.colors;
+        }
+    };
+    app.parser = std::make_unique<VtParser>(*app.model, std::move(vtEvents));
     const auto url = wsUrl();
     if (!url.empty()) {
         try {
@@ -177,19 +405,18 @@ int main() {
             };
             config.columns = int(app.model->columns());
             config.rows = int(app.model->rows());
-            app.session =
-                std::make_unique<ClientSession>(*app.channel, config);
+            app.session = std::make_unique<ClientSession>(*app.channel, config);
             TerminalLink::Events events;
             events.output = [](std::string_view bytes) {
-                app.parser->feed(bytes);
+                gApp->parser->feed(bytes);
             };
             events.exited = [](int code, int) {
-                app.parser->feed("\r\n[process exited: " +
-                                 std::to_string(code) + "]\r\n");
+                gApp->parser->feed(
+                    "\r\n[process exited: " + std::to_string(code) + "]\r\n");
             };
             events.closed = [](std::string_view reason) {
-                app.parser->feed("\r\n[disconnected: " +
-                                 std::string(reason) + "]\r\n");
+                gApp->parser->feed("\r\n[disconnected: " + std::string(reason) +
+                                   "]\r\n");
             };
             app.session->setEvents(std::move(events));
         }
@@ -197,14 +424,17 @@ int main() {
             std::fprintf(stderr, "link failed: %s\n", error.what());
         }
     }
-    if (!app.session) app.parser->feed(
-        "\x1b[1;32mmatterm\x1b[0m in the browser \x1b[38;5;208m(Emscripten + "
-        "SDL2)\x1b[0m\r\n\r\n"
-        "\x1b[31mred\x1b[0m \x1b[32mgreen\x1b[0m \x1b[33myellow\x1b[0m "
-        "\x1b[34mblue\x1b[0m \x1b[7minverse\x1b[0m \x1b[4munderline\x1b[0m\r\n"
-        "\x1b[48;2;40;80;160m  truecolor background  \x1b[0m\r\n"
-        "\x1b(0lqqqqqqqqqqqqqqqk\r\nx\x1b(B Line graphics \x1b(0x\r\n"
-        "mqqqqqqqqqqqqqqqj\x1b(B\r\n\r\n$ ");
+    if (!app.session) {
+        app.parser->feed(
+            "\x1b[1;32mmatterm\x1b[0m in the browser \x1b[38;5;208m(Emscripten "
+            "+ SDL2)\x1b[0m\r\n\r\n"
+            "\x1b[31mred\x1b[0m \x1b[32mgreen\x1b[0m \x1b[33myellow\x1b[0m "
+            "\x1b[34mblue\x1b[0m \x1b[7minverse\x1b[0m "
+            "\x1b[4munderline\x1b[0m\r\n"
+            "\x1b[48;2;40;80;160m  truecolor background  \x1b[0m\r\n"
+            "\x1b(0lqqqqqqqqqqqqqqqk\r\nx\x1b(B Line graphics \x1b(0x\r\n"
+            "mqqqqqqqqqqqqqqqj\x1b(B\r\n\r\n$ ");
+    }
     SDL_StartTextInput();
     app.last = SDL_GetTicks64();
     emscripten_set_main_loop_arg(frame, &app, 0, 1);
