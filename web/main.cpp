@@ -7,6 +7,7 @@
 #include "palette.h"
 #include "scriptedlink.h"
 #include "sdlbackend.h"
+#include "framesignature.h"
 #include "sdlinput.h"
 #include "terminalmodel.h"
 #include "vtparser.h"
@@ -53,6 +54,9 @@ struct App {
     bool dragging = false;
     std::optional<Selection> selection;
     std::string title = "matterm"; // Base title, without the Ctrl-hover target.
+    // Idle frames: skip render+present while nothing visible changed.
+    std::optional<std::uint64_t> lastSignature;
+    std::string shownTitle;
 };
 
 App *gApp = nullptr; // For matterm_paste.
@@ -400,8 +404,11 @@ void frame(void *data) {
     if (link) {
         link->underline(*app.model, rendered);
     }
-    const auto &shownTitle = link ? link->text : app.title;
-    EM_ASM({ document.title = UTF8ToString($0); }, shownTitle.c_str());
+    const auto &wantedTitle = link ? link->text : app.title;
+    if (wantedTitle != app.shownTitle) {
+        app.shownTitle = wantedTitle;
+        EM_ASM({ document.title = UTF8ToString($0); }, wantedTitle.c_str());
+    }
     rendered.textBlinkVisible = (now / 500) % 2 == 0;
     // Before blink masking: the glide follows the true cell, not the blink.
     app.cursorGlide.update(rendered.cursor.column,
@@ -415,6 +422,18 @@ void frame(void *data) {
     rendered.cursor.visible = rendered.cursor.visible &&
                               (!rendered.cursor.focused ||
                                !rendered.cursor.blink || (now / 500) % 2 == 0);
+    // An unchanged frame leaves the canvas as it is; the window size is part
+    // of the signature because a resized canvas must be redrawn.
+    int windowWidth = 0, windowHeight = 0;
+    SDL_GetWindowSize(app.window, &windowWidth, &windowHeight);
+    frontend::FrameSignature signature;
+    signature.add(frontend::frameSignature(rendered, app.palette));
+    signature.add(windowWidth);
+    signature.add(windowHeight);
+    if (app.lastSignature && *app.lastSignature == signature.value()) {
+        return;
+    }
+    app.lastSignature = signature.value();
     app.backend->render(rendered);
     app.backend->present();
 }
