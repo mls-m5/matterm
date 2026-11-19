@@ -147,24 +147,25 @@ TEST_CASE("top shows moving processes and q quits") {
 
 TEST_CASE("The system is called Mattrix OS everywhere its name shows") {
     Pc pc;
-    EXPECT(pc.shows("Welcome to Mattrix OS 1.0"));
+    EXPECT(pc.shows("Welcome to Mattrix OS 6.0 Professional Edition"));
     pc.run("clear");
     pc.run("cat /etc/os-release");
     EXPECT(pc.shows("NAME=\"Mattrix OS\""));
+    EXPECT(pc.shows("VERSION=\"6.0 Professional Edition\""));
     EXPECT(pc.shows("ID=mattrix"));
     pc.run("clear");
     pc.run("uname -o; uname -r");
-    EXPECT(pc.shows("Mattrix OS\n6.8.0-mattrix"));
+    EXPECT(pc.shows("Mattrix OS 6.0 Professional Edition\n6.8.0-mattrix"));
     pc.run("uname -a");
     EXPECT(pc.shows("Linux matterm 6.8.0-mattrix"));
-    EXPECT(pc.shows("Mattrix OS\n"));
+    EXPECT(pc.shows("Mattrix OS 6.0 Professional Edition\n"));
     pc.run("clear");
     pc.run("help");
-    EXPECT(pc.shows("Mattrix OS, a pretend system"));
+    EXPECT(pc.shows("Mattrix OS 6.0 Professional Edition, a pretend system."));
     pc.run("clear");
     pc.run("cat README | head -n 1; cat /etc/issue; ps");
     EXPECT(pc.shows("Welcome to Mattrix OS."));
-    EXPECT(pc.shows("Mattrix OS (pretend GNU/Linux)"));
+    EXPECT(pc.shows("Mattrix OS 6.0 Professional Edition"));
     EXPECT(pc.shows("mattrix-sh"));
     pc.run("clear");
     pc.run("echo $SHELL; ls /usr/share/doc");
@@ -177,7 +178,7 @@ TEST_CASE("neofetch draws a fat old TV next to the system information") {
     Pc pc;
     pc.run("neofetch");
     EXPECT(pc.shows("guest@matterm"));
-    EXPECT(pc.shows("OS: Mattrix OS 1.0 x86_64"));
+    EXPECT(pc.shows("OS: Mattrix OS 6.0 Professional Edition x86_64"));
     EXPECT(pc.shows("Kernel: 6.8.0-mattrix"));
     EXPECT(pc.shows("Shell: mattrix-sh 1.0"));
     EXPECT(pc.shows("Memory: "));
@@ -194,7 +195,7 @@ TEST_CASE("neofetch draws a fat old TV next to the system information") {
     }
     pc.run("clear");
     pc.run("sysinfo");
-    EXPECT(pc.shows("OS: Mattrix OS 1.0 x86_64"));
+    EXPECT(pc.shows("OS: Mattrix OS 6.0 Professional Edition x86_64"));
 }
 
 TEST_CASE("neofetch in a pipe has no colors and is a clean block") {

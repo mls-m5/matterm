@@ -1017,11 +1017,11 @@ int cmdUname(World &w, const Args &args, CommandIo &io) {
     if (all || o.has('r'))
         parts.push_back("6.8.0-mattrix");
     if (all || o.has('v'))
-        parts.push_back("#1 SMP PREEMPT_DYNAMIC");
+        parts.push_back("#6 SMP Professional Edition");
     if (all || o.has('m'))
         parts.push_back("x86_64");
     if (all || o.has('o'))
-        parts.push_back("Mattrix OS");
+        parts.push_back("Mattrix OS 6.0 Professional Edition");
     for (std::size_t i = 0; i < parts.size(); ++i) {
         io.out += (i ? " " : "") + parts[i];
     }
@@ -1210,8 +1210,8 @@ int cmdWhich(World &w, const Args &args, CommandIo &io) {
 }
 
 int cmdHelp(World &, const Args &, CommandIo &io) {
-    io.out += "Mattrix OS, a pretend system. A small Unix that lives in your "
-              "browser.\n"
+    io.out += "Mattrix OS 6.0 Professional Edition, a pretend system.\n"
+              "A small Unix that lives in a terminal.\n"
               "Nothing here touches your real computer.\n\n"
               "Commands:\n";
     std::string line;
@@ -1989,7 +1989,7 @@ int cmdNeofetch(World &w, const Args &, CommandIo &io) {
         std::string label, value;
     };
     const std::vector<Line> info = {
-        {"OS", "Mattrix OS 1.0 x86_64"},
+        {"OS", "Mattrix OS 6.0 Professional Edition x86_64"},
         {"Host", w.hostname + " (a pretend machine)"},
         {"Kernel", "6.8.0-mattrix"},
         {"Uptime",

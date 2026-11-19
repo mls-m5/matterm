@@ -151,13 +151,30 @@ int runWindow(const char *font,
         }
     };
     if (smokeTest) {
-        // Intro first frame, a skipped intro, a command, and a drawn frame.
+        // Intro first frames, a skipped intro (it fades out, about a second), a
+        // command, and a drawn frame.
         for (int i = 0; i < 4; ++i) {
             link->tick();
             SDL_Delay(20);
         }
         link->sendInput("x");
-        link->tick();
+        const auto deadline = SDL_GetTicks64() + 4000;
+        const auto promptShown = [&] {
+            for (std::size_t y = 0; y < model.rows(); ++y) {
+                std::string row;
+                for (std::size_t x = 0; x < model.columns(); ++x) {
+                    row.push_back(char(model.cell(x, y).codePoint));
+                }
+                if (row.rfind("guest@matterm", 0) == 0) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        while (!promptShown() && SDL_GetTicks64() < deadline) {
+            link->tick();
+            SDL_Delay(10);
+        }
         link->sendInput("echo smoke\r");
         link->tick();
         bool found = false;

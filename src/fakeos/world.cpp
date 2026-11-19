@@ -21,7 +21,8 @@ const char *kReadme =
     "PATH. A good explorer looks everywhere.\n";
 
 const char *kMotd =
-    "Welcome to Mattrix OS 1.0 (pretend GNU/Linux 6.8.0-mattrix x86_64)\n"
+    "Welcome to Mattrix OS 6.0 Professional Edition (pretend GNU/Linux "
+    "6.8.0-mattrix x86_64)\n"
     "\n"
     " * Everything here is make-believe. Type 'help', or read README.\n"
     "\n";
@@ -38,7 +39,7 @@ const char *kWords =
     "prism\nquartz\nradiant\nsmolder\nspark\nspectrum\ntorch\nvortex\nwarmth\n";
 
 const char *kSyslog =
-    "Jan  1 00:00:01 matterm kernel: Mattrix OS 6.8.0 booting\n"
+    "Jan  1 00:00:01 matterm kernel: Mattrix OS 6.0 booting\n"
     "Jan  1 00:00:02 matterm init: starting system\n"
     "Jan  1 00:00:03 matterm sshd: not running (this is a pretend system)\n"
     "Jan  1 00:00:04 matterm cron: nothing scheduled\n"
@@ -76,13 +77,14 @@ void seedWorld(World &world) {
         "/etc/hostname", world.hostname + "\n", "root", 0644, base - 30 * day);
     fs.put("/etc/motd", kMotd, "root", 0644, base - 30 * day);
     fs.put("/etc/issue",
-           "Mattrix OS (pretend GNU/Linux) \\n \\l\n",
+           "Mattrix OS 6.0 Professional Edition \\n \\l\n",
            "root",
            0644,
            base - 30 * day);
     fs.put("/etc/os-release",
-           "NAME=\"Mattrix OS\"\nVERSION=\"1.0\"\nID=mattrix\nPRETTY_NAME="
-           "\"Mattrix OS 1.0 (pretend)\"\n",
+           "NAME=\"Mattrix OS\"\nVERSION=\"6.0 Professional "
+           "Edition\"\nID=mattrix\nPRETTY_NAME="
+           "\"Mattrix OS 6.0 Professional Edition\"\n",
            "root",
            0644,
            base - 30 * day);

@@ -69,7 +69,8 @@ TEST_SUIT_BEGIN(DemoTty)
 TEST_CASE("The shell works in a real terminal and exit restores it") {
     Session s("xterm-256color", PtyProcess::ColorCapability::TrueColor);
     EXPECT(s.until("guest@matterm"));
-    EXPECT(s.output.find("Welcome to Mattrix OS 1.0") != std::string::npos);
+    EXPECT(s.output.find("Welcome to Mattrix OS 6.0 Professional Edition") !=
+           std::string::npos);
     s.link.sendInput("echo tty works\r");
     EXPECT(s.until("tty works"));
     s.link.sendInput("exit 4\r");
@@ -124,7 +125,7 @@ TEST_CASE("The intro plays and any key skips it") {
     EXPECT(s.until("#")); // The banner.
     s.link.sendInput(" ");
     EXPECT(s.until("\x1b[?1049l"));
-    EXPECT(s.until("Welcome to Mattrix OS 1.0"));
+    EXPECT(s.until("Welcome to Mattrix OS 6.0 Professional Edition"));
     EXPECT(s.until("guest@matterm"));
     s.link.sendInput("exit\r");
     EXPECT(s.untilExit());

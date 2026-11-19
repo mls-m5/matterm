@@ -174,9 +174,9 @@ TEST_CASE("A key skips part by part: words, then rain, then the intro") {
     EXPECT(pc.sys.inProgram());
     EXPECT(pc.shows("press any key to skip"));
     pc.type("x"); // Skips the intro: it fades, then the prompt is back.
-    pc.advance(400);
+    pc.advance(1400);
     EXPECT(!pc.sys.inProgram());
-    EXPECT(pc.shows("Welcome to Mattrix OS 1.0"));
+    EXPECT(pc.shows("Welcome to Mattrix OS 6.0 Professional Edition"));
     EXPECT(pc.last() == kPrompt);
 }
 

@@ -36,6 +36,28 @@ std::string click(std::pair<int, int> cell) {
 }
 } // namespace
 
+namespace {
+Rgb cornerBackground(const Pc &pc) {
+    const auto &bg = pc.model.cell(0, 0).background;
+    return {bg.r, bg.g, bg.b};
+}
+int brightness(const Pc &pc, std::size_t from = 0, std::size_t to = 99) {
+    int most = 0;
+    for (std::size_t y = from; y < to && y < pc.model.rows(); ++y) {
+        for (std::size_t x = 0; x < pc.model.columns(); ++x) {
+            const auto &cell = pc.model.cell(x, y);
+            if (cell.codePoint != U' ') {
+                most = std::max<int>(most,
+                                     std::max({cell.foreground.r,
+                                               cell.foreground.g,
+                                               cell.foreground.b}));
+            }
+        }
+    }
+    return most;
+}
+} // namespace
+
 TEST_SUIT_BEGIN(FakeosPrograms)
 
 TEST_CASE("fire is a file on disk, outside the PATH") {
@@ -233,9 +255,9 @@ TEST_CASE("The intro plays first, then the welcome and the prompt") {
     pc.advance(1200);
     EXPECT(pc.sys.inProgram());
     EXPECT(pc.shows("#")); // The banner is being drawn.
-    pc.advance(2600);
+    pc.advance(6300);      // The whole intro takes about seven seconds.
     EXPECT(!pc.sys.inProgram());
-    EXPECT(pc.shows("Welcome to Mattrix OS 1.0"));
+    EXPECT(pc.shows("Welcome to Mattrix OS 6.0 Professional Edition"));
     EXPECT(pc.last() == kPrompt);
     EXPECT(!pc.sys.nextDeadline());
 }
@@ -244,27 +266,27 @@ TEST_CASE("Any key skips the intro") {
     Pc pc(true);
     pc.advance(300);
     pc.type("x");
-    EXPECT(pc.sys.inProgram()); // It fades out first, quickly.
+    EXPECT(pc.sys.inProgram()); // The text goes quickly, the background glides.
     pc.advance(150);
     EXPECT(pc.sys.inProgram());
-    pc.advance(250);
+    pc.advance(1200);
     EXPECT(!pc.sys.inProgram());
-    EXPECT(pc.shows("Welcome to Mattrix OS 1.0"));
+    EXPECT(pc.shows("Welcome to Mattrix OS 6.0 Professional Edition"));
     EXPECT(pc.last() == kPrompt);
     // The key that skipped it was not typed at the prompt.
     EXPECT(pc.last() == kPrompt);
     Pc click(true);
     click.advance(300);
     click.type("\x1b[<0;5;5M");
-    click.advance(400);
+    click.advance(1400);
     EXPECT(!click.sys.inProgram());
 }
 
-TEST_CASE("The intro spells the name of the system in big letters") {
+TEST_CASE("The intro spells the name of the terminal in big letters") {
     Pc pc(true, 80, 24);
-    pc.advance(2000); // Resolved, before the subtitle is done.
-    // Five rows of "MATTRIX", centered: left margin (80 - 41) / 2 = 19.
-    const std::string name = "MATTRIX";
+    pc.advance(2000); // Resolved, before the first line is done.
+    // Five rows of "MATTERM", centered: left margin (80 - 41) / 2 = 19.
+    const std::string name = "MATTERM";
     const std::size_t top = 9;
     for (int gy = 0; gy < 5; ++gy) {
         std::string expected(19, ' ');
@@ -275,51 +297,119 @@ TEST_CASE("The intro spells the name of the system in big letters") {
         while (!expected.empty() && expected.back() == ' ') {
             expected.pop_back();
         }
-        EXPECT(pc.row(top + std::size_t(gy)) == expected);
+        EXPECT(pc.row(top + std::size_t(gy)).substr(0, expected.size()) ==
+               expected);
     }
 }
 
-TEST_CASE("The intro fades into the terminal's background, not into black") {
+TEST_CASE("The first line is typed, scrambles into noise and vanishes; then "
+          "the second") {
     Pc pc(true, 80, 24);
-    auto brightest = [&] {
-        int most = 0;
-        for (std::size_t y = 0; y < pc.model.rows(); ++y) {
+    EXPECT(!pc.shows("Futuristic"));
+    pc.advance(1300 + 2000); // Typed (44 letters at 32 ms) and held.
+    EXPECT(pc.shows("Futuristic system agnostic terminal emulator"));
+    EXPECT(
+        !pc.shows("a small pretend system")); // The old text is gone for good.
+    pc.advance(1000); // t = 4300: in the middle of the scramble.
+    EXPECT(!pc.shows("Futuristic system agnostic terminal emulator"));
+    // Noise glyphs, and some of the line is already blank.
+    const auto row = pc.row(9 + 7);
+    EXPECT(!row.empty());
+    pc.advance(700); // t = 5000: gone; the second line starts to be typed.
+    EXPECT(!pc.shows("Futuristic"));
+    pc.advance(1500);
+    EXPECT(pc.shows("Real terminal, fake operating system"));
+}
+
+TEST_CASE("DEMO MODE blinks red in the corner for a few seconds") {
+    Pc pc(true, 80, 24);
+    EXPECT(!pc.shows("DEMO MODE"));
+    bool on = false, off = false;
+    int redCells = 0;
+    for (int i = 0; i < 70; ++i) { // t = 0 to 7000 in 100 ms steps.
+        pc.advance(100);
+        const auto topRow = pc.row(0);
+        const bool shown = topRow.find("DEMO MODE") != std::string::npos;
+        if (pc.sys.inProgram() && pc.sys.world().now.count() > 1000 &&
+            pc.sys.world().now.count() < 5800) {
+            on = on || shown;
+            off = off || !shown;
+        }
+        if (shown) {
             for (std::size_t x = 0; x < pc.model.columns(); ++x) {
-                const auto &cell = pc.model.cell(x, y);
-                if (cell.codePoint != U' ') {
-                    most = std::max<int>(most,
-                                         std::max({cell.foreground.r,
-                                                   cell.foreground.g,
-                                                   cell.foreground.b}));
-                }
+                const auto &cell = pc.model.cell(x, 0);
+                redCells += cell.codePoint == U'D' && cell.foreground.r > 200 &&
+                            cell.foreground.g < 120;
             }
         }
-        return most;
-    };
-    pc.advance(2400);
-    const int before = brightest();
-    EXPECT(before > 200);
-    // The whole canvas is the terminal's background color from the start.
-    for (std::size_t y = 0; y < pc.model.rows(); ++y) {
-        for (std::size_t x = 0; x < pc.model.columns(); ++x) {
-            const auto &bg = pc.model.cell(x, y).background;
-            EXPECT(bg.r == 30 && bg.g == 30 && bg.b == 30);
+        if (pc.sys.world().now.count() > 6200) {
+            EXPECT(!shown); // It went away before the end.
         }
     }
-    pc.advance(900); // Into the fade.
-    const int during = brightest();
-    EXPECT(during < before);
-    EXPECT(pc.sys.inProgram());
-    int last = during;
-    for (int i = 0; i < 6 && pc.sys.inProgram(); ++i) {
+    EXPECT(on && off);    // It blinks.
+    EXPECT(redCells > 0); // Red.
+}
+
+TEST_CASE("The background moves gradually from the intro's to the terminal's") {
+    Pc pc(true, 80, 24);
+    pc.advance(1000);
+    const auto first = cornerBackground(pc);
+    EXPECT(first.r < 15 && first.g < 15); // Dark, the intro's own.
+    pc.advance(4000);                     // t = 5000: not started yet.
+    EXPECT(cornerBackground(pc) == first);
+    int last = cornerBackground(pc).g;
+    bool between = false;
+    for (int i = 0; i < 20 && pc.sys.inProgram(); ++i) {
         pc.advance(100);
-        const int now = brightest();
-        EXPECT(now <= last + 2); // Only ever dimmer.
+        if (!pc.sys.inProgram()) {
+            break; // Back on the normal screen.
+        }
+        const int now = cornerBackground(pc).g;
+        EXPECT(now >= last);     // Only ever toward the terminal's 30.
+        EXPECT(now - last <= 6); // In small steps, never a jump.
+        between = between || (now > first.g + 3 && now < 28);
         last = now;
     }
-    pc.advance(300);
+    EXPECT(between);
+    pc.advance(1200);
     EXPECT(!pc.sys.inProgram());
     EXPECT(pc.last() == kPrompt);
+}
+
+TEST_CASE("Skipping the intro still glides the background, without a cut") {
+    Pc pc(true, 80, 24);
+    pc.advance(1500);
+    const auto before = cornerBackground(pc);
+    pc.type("x");
+    pc.advance(100);
+    const auto soon = cornerBackground(pc);
+    EXPECT(soon.g - before.g <= 4); // No hard jump to the terminal's color.
+    pc.advance(300);                // The text is gone by now.
+    int lit = 0;
+    for (std::size_t y = 1; y < pc.model.rows() - 1; ++y) {
+        for (std::size_t x = 0; x < pc.model.columns(); ++x) {
+            const auto &cell = pc.model.cell(x, y);
+            lit += cell.codePoint != U' ' &&
+                   cell.foreground.r > cell.background.r + 40;
+        }
+    }
+    EXPECT(lit == 0);
+    int last = cornerBackground(pc).g;
+    bool between = false;
+    for (int i = 0; i < 12 && pc.sys.inProgram(); ++i) {
+        pc.advance(100);
+        if (!pc.sys.inProgram()) {
+            break; // Back on the normal screen.
+        }
+        const int now = cornerBackground(pc).g;
+        EXPECT(now >= last);
+        between = between || (now > before.g && now < 30);
+        last = now;
+    }
+    EXPECT(between);
+    pc.advance(800);
+    EXPECT(!pc.sys.inProgram());
+    EXPECT(pc.shows("Welcome to Mattrix OS 6.0 Professional Edition"));
 }
 
 TEST_CASE("A start command is typed at the first prompt, once") {
@@ -341,7 +431,7 @@ TEST_CASE("A start command can start a program after the intro") {
     Pc pc(config);
     pc.advance(300);
     pc.type("x"); // Skip the intro.
-    pc.advance(400);
+    pc.advance(1400);
     EXPECT(pc.sys.inProgram());
     EXPECT(pc.model.alternateScreen());
     pc.advance(200);
@@ -351,8 +441,8 @@ TEST_CASE("A start command can start a program after the intro") {
 TEST_CASE("The intro adapts to a small terminal") {
     Pc pc(true, 30, 8);
     pc.advance(1500);
-    EXPECT(pc.shows("M A T T R I X"));
-    pc.advance(3000);
+    EXPECT(pc.shows("M A T T E R M"));
+    pc.advance(6000);
     EXPECT(!pc.sys.inProgram());
 }
 
@@ -423,7 +513,7 @@ TEST_CASE("The ScriptedLink adapter runs the system and wakes the host") {
     link.sendInput("x"); // Skip: a short fade, then the prompt.
     now = 1510;
     link.tick();
-    now = 1900;
+    now = 2900;
     link.tick();
     EXPECT(!model.alternateScreen());
     EXPECT(!link.nextDeadline());
