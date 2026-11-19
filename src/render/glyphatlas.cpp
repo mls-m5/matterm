@@ -1,6 +1,10 @@
 #include "glyphatlas.h"
 
 #include <SDL_ttf.h>
+#ifdef MATTERM_HAS_FONTCONFIG
+#include <fontconfig/fontconfig.h>
+#include <map>
+#endif
 
 #include <algorithm>
 #include <stdexcept>
@@ -8,45 +12,80 @@
 
 namespace {
 using Surface = std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)>;
+using Font = std::unique_ptr<TTF_Font, decltype(&TTF_CloseFont)>;
+
+#ifdef MATTERM_HAS_FONTCONFIG
+class SystemFonts {
+public:
+    TTF_Font *match(char32_t codePoint, int pixelSize) {
+        if (!FcInit()) {
+            return nullptr;
+        }
+        const std::unique_ptr<FcPattern, decltype(&FcPatternDestroy)> pattern{
+            FcPatternCreate(), FcPatternDestroy};
+        const std::unique_ptr<FcCharSet, decltype(&FcCharSetDestroy)> charset{
+            FcCharSetCreate(), FcCharSetDestroy};
+        if (!pattern || !charset ||
+            !FcCharSetAddChar(charset.get(), codePoint) ||
+            !FcPatternAddCharSet(pattern.get(), FC_CHARSET, charset.get()) ||
+            !FcPatternAddString(
+                pattern.get(),
+                FC_FAMILY,
+                reinterpret_cast<const FcChar8 *>("monospace")) ||
+            !FcConfigSubstitute(nullptr, pattern.get(), FcMatchPattern)) {
+            return nullptr;
+        }
+        FcDefaultSubstitute(pattern.get());
+        FcResult result;
+        const std::unique_ptr<FcFontSet, decltype(&FcFontSetDestroy)> matches{
+            FcFontSort(nullptr, pattern.get(), FcFalse, nullptr, &result),
+            FcFontSetDestroy};
+        for (int i = 0; matches && i < matches->nfont; ++i) {
+            auto *candidate = matches->fonts[i];
+            FcCharSet *coverage = nullptr;
+            FcChar8 *file = nullptr;
+            int index = 0;
+            if (FcPatternGetCharSet(candidate, FC_CHARSET, 0, &coverage) !=
+                    FcResultMatch ||
+                !FcCharSetHasChar(coverage, codePoint) ||
+                FcPatternGetString(candidate, FC_FILE, 0, &file) !=
+                    FcResultMatch) {
+                continue;
+            }
+            FcPatternGetInteger(candidate, FC_INDEX, 0, &index);
+            const auto *path = reinterpret_cast<const char *>(file);
+            auto [it, inserted] =
+                faces.try_emplace({path, index}, nullptr, TTF_CloseFont);
+            if (inserted) {
+                it->second.reset(
+                    TTF_OpenFontIndexDPI(path, pixelSize, index, 72, 72));
+            }
+            if (auto *font = it->second.get();
+                font && TTF_GlyphIsProvided32(font, codePoint)) {
+                return font;
+            }
+        }
+        return nullptr;
+    }
+
+private:
+    std::map<std::pair<std::string, int>, Font> faces;
+};
+#endif
 
 void check(int result) {
     if (result < 0) {
         throw std::runtime_error(SDL_GetError());
     }
 }
-
-Surface brailleBitmap(unsigned mask, int width, int height) {
-    Surface pixels(SDL_CreateRGBSurfaceWithFormat(
-                       0, width, height, 32, SDL_PIXELFORMAT_RGBA32),
-                   SDL_FreeSurface);
-    if (!pixels) {
-        throw std::runtime_error(SDL_GetError());
-    }
-    check(SDL_FillRect(pixels.get(), nullptr, 0));
-    const auto ink = SDL_MapRGBA(pixels->format, 255, 255, 255, 255);
-    const int size = std::max(1, std::min(width / 4, height / 6));
-    // Unicode dot numbers: 1–3 down the left, 4–6 down the right,
-    // with dots 7 and 8 on the bottom row.
-    constexpr unsigned dots[4][2] = {{1, 8}, {2, 16}, {4, 32}, {64, 128}};
-    for (int row = 0; row < 4; ++row) {
-        for (int col = 0; col < 2; ++col) {
-            if (mask & dots[row][col]) {
-                const SDL_Rect dot{
-                    std::max(0, ((2 * col + 1) * width / 4) - size / 2),
-                    std::max(0, ((2 * row + 1) * height / 8) - size / 2),
-                    size,
-                    size};
-                check(SDL_FillRect(pixels.get(), &dot, ink));
-            }
-        }
-    }
-    return pixels;
-}
 } // namespace
 
 struct GlyphAtlas::Impl {
-    std::unique_ptr<TTF_Font, decltype(&TTF_CloseFont)> font{nullptr,
-                                                             TTF_CloseFont};
+    Font font{nullptr, TTF_CloseFont};
+#ifdef MATTERM_HAS_FONTCONFIG
+    SystemFonts systemFonts;
+    int pixelSize = 0;
+#endif
     std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)> texture{
         nullptr, SDL_DestroyTexture};
     std::unordered_map<std::uint64_t, Glyph> glyphs;
@@ -72,6 +111,9 @@ GlyphAtlas::GlyphAtlas(SDL_Renderer &renderer,
     if (!impl_->font) {
         throw std::runtime_error(TTF_GetError());
     }
+#ifdef MATTERM_HAS_FONTCONFIG
+    impl_->pixelSize = pixelSize;
+#endif
     impl_->width = textureWidth;
     impl_->height = textureHeight;
     impl_->texture.reset(SDL_CreateTexture(&renderer,
@@ -110,15 +152,18 @@ Glyph GlyphAtlas::getOrInsert(char32_t codePoint, CellAttribute attributes) {
     if (const auto it = state.glyphs.find(key); it != state.glyphs.end()) {
         return it->second;
     }
-    TTF_SetFontStyle(
-        state.font.get(),
-        (hasAttribute(style, CellAttribute::Bold) ? TTF_STYLE_BOLD : 0) |
-            (hasAttribute(style, CellAttribute::Italic) ? TTF_STYLE_ITALIC
-                                                        : 0));
-    const bool available = TTF_GlyphIsProvided32(state.font.get(), codePoint);
-    const bool drawBraille =
-        !available && codePoint >= U'\u2800' && codePoint <= U'\u28ff';
-    if (!available && !drawBraille) {
+    auto *font = state.font.get();
+    TTF_Font *fallback = nullptr;
+    const bool provided = TTF_GlyphIsProvided32(font, codePoint);
+#ifdef MATTERM_HAS_FONTCONFIG
+    if (!provided) {
+        fallback = state.systemFonts.match(codePoint, state.pixelSize);
+    }
+#endif
+    if (fallback) {
+        font = fallback;
+    }
+    else if (!provided) {
         for (const char32_t replacement : {U'\ufffd', U'?'}) {
             if (TTF_GlyphIsProvided32(state.font.get(), replacement)) {
                 const auto glyph = getOrInsert(replacement, attributes);
@@ -128,56 +173,62 @@ Glyph GlyphAtlas::getOrInsert(char32_t codePoint, CellAttribute attributes) {
         }
         throw std::runtime_error("Font has no replacement glyph");
     }
+    const int cellAdvance =
+        fallback && codePoint != U'M' ? getOrInsert(U'M').advanceX : 0;
+    TTF_SetFontStyle(
+        font,
+        (hasAttribute(style, CellAttribute::Bold) ? TTF_STYLE_BOLD : 0) |
+            (hasAttribute(style, CellAttribute::Italic) ? TTF_STYLE_ITALIC
+                                                        : 0));
+    int minX, maxX, minY, maxY, advance;
+    check(TTF_GlyphMetrics32(
+        font, codePoint, &minX, &maxX, &minY, &maxY, &advance));
     Glyph glyph;
-    Surface pixels(nullptr, SDL_FreeSurface);
-    if (drawBraille) {
-        TTF_SetFontStyle(state.font.get(), TTF_STYLE_NORMAL);
-        check(TTF_GlyphMetrics32(state.font.get(),
-                                 U'M',
-                                 nullptr,
-                                 nullptr,
-                                 nullptr,
-                                 nullptr,
-                                 &glyph.advanceX));
-        glyph.advanceX = std::max(1, glyph.advanceX);
-        const unsigned mask = unsigned(codePoint - U'\u2800');
-        if (!mask) {
-            state.glyphs.emplace(key, glyph);
-            return glyph;
-        }
-        const int height = std::max(1, lineHeight());
-        glyph.bearingY = ascent();
-        pixels = brailleBitmap(mask, glyph.advanceX, height);
+    glyph.advanceX = cellAdvance > 0 ? cellAdvance : advance;
+    if (maxX <= minX || maxY <= minY) {
+        state.glyphs.emplace(key, glyph);
+        return glyph;
     }
-    else {
-        int minX, maxX, minY, maxY;
-        check(TTF_GlyphMetrics32(state.font.get(),
-                                 codePoint,
-                                 &minX,
-                                 &maxX,
-                                 &minY,
-                                 &maxY,
-                                 &glyph.advanceX));
-        if (maxX <= minX || maxY <= minY) {
-            state.glyphs.emplace(key, glyph);
-            return glyph;
+    Surface rendered(TTF_RenderGlyph32_Blended(
+                         font, codePoint, SDL_Color{255, 255, 255, 255}),
+                     SDL_FreeSurface);
+    if (!rendered) {
+        throw std::runtime_error(TTF_GetError());
+    }
+    Surface pixels(
+        SDL_ConvertSurfaceFormat(rendered.get(), SDL_PIXELFORMAT_RGBA32, 0),
+        SDL_FreeSurface);
+    if (!pixels) {
+        throw std::runtime_error(SDL_GetError());
+    }
+    // SDL_ttf renders a baseline-aligned surface, including its top/left
+    // padding.
+    glyph.bearingX = std::min(0, minX);
+    glyph.bearingY = std::max(TTF_FontAscent(font), maxY);
+    if (fallback) {
+        // Keep the primary font's grid. Shrink and center wider fallback
+        // bitmaps rather than letting them overlap neighboring cells.
+        const int cellWidth = std::max(1, glyph.advanceX);
+        const int cellHeight = std::max(1, lineHeight());
+        if (pixels->w > cellWidth || pixels->h > cellHeight) {
+            const double scale = std::min(double(cellWidth) / pixels->w,
+                                          double(cellHeight) / pixels->h);
+            const int w = std::max(1, int(pixels->w * scale));
+            const int h = std::max(1, int(pixels->h * scale));
+            Surface fitted(SDL_CreateRGBSurfaceWithFormat(
+                               0, w, h, 32, SDL_PIXELFORMAT_RGBA32),
+                           SDL_FreeSurface);
+            if (!fitted) {
+                throw std::runtime_error(SDL_GetError());
+            }
+            check(SDL_SetSurfaceBlendMode(pixels.get(), SDL_BLENDMODE_NONE));
+            check(SDL_BlitScaled(pixels.get(), nullptr, fitted.get(), nullptr));
+            glyph.bearingY = int(glyph.bearingY * scale);
+            pixels = std::move(fitted);
         }
-        Surface rendered(
-            TTF_RenderGlyph32_Blended(
-                state.font.get(), codePoint, SDL_Color{255, 255, 255, 255}),
-            SDL_FreeSurface);
-        if (!rendered) {
-            throw std::runtime_error(TTF_GetError());
-        }
-        pixels.reset(SDL_ConvertSurfaceFormat(
-            rendered.get(), SDL_PIXELFORMAT_RGBA32, 0));
-        if (!pixels) {
-            throw std::runtime_error(SDL_GetError());
-        }
-        // SDL_ttf renders a baseline-aligned surface, including top/left
-        // padding.
-        glyph.bearingX = std::min(0, minX);
-        glyph.bearingY = std::max(ascent(), maxY);
+        glyph.bearingX = (cellWidth - pixels->w) / 2;
+        glyph.bearingY = std::clamp(
+            glyph.bearingY, ascent() - (cellHeight - pixels->h), ascent());
     }
     int x = state.x;
     int y = state.y;

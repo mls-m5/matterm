@@ -62,9 +62,24 @@ scaling. The desktop scale and font choice can affect how big the text looks;
 there is no universal 2:1 conversion. For benchmark comparisons, match the
 terminal grid dimensions and record font sizes and display scaling separately.
 
-The bundled font lacks Braille Patterns (U+2800–U+28FF). The atlas draws these
-patterns in one cell when the selected font has no glyph, including the patterns
-used in terminal spinners. This is not general fallback font selection.
+## System Font Fallback
+
+On Linux, a build with Fontconfig looks up missing code points among installed
+fonts, preferring monospace faces. For example, the bundled JetBrains Mono lacks
+Braille Patterns (U+2800–U+28FF), but DejaVu Sans Mono supplies them. The primary
+font still determines the grid. If there is no usable fallback, matterm draws
+its usual replacement glyph. This is per-code-point fallback, not text shaping,
+emoji sequence handling, or wide-cell support.
+
+Install Fontconfig development files and a suitable system font (Debian/Ubuntu:
+`libfontconfig-dev` and `fonts-dejavu-core`), then reconfigure and rebuild. Builds
+without Fontconfig, or with `-DMATTERM_SYSTEM_FONT_FALLBACK=OFF`, use the primary
+font and its replacement glyph only. To run the Braille regression test with
+JetBrains Mono as the test font and a covering system font installed:
+
+```sh
+GLYPH_TEST_EXPECT_BRAILLE_FALLBACK=1 ctest --test-dir build -R '^glyph_atlas$' --output-on-failure
+```
 
 Current bundled assets contain only Regular. Bold/italic are SDL_ttf synthetic
 variants, not separately bundled face files. Browser asset preloading, native
