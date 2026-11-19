@@ -54,6 +54,16 @@ TEST_CASE(
     EXPECT_EQ(count(text, "gamma"), std::size_t(1));
 }
 
+TEST_CASE("Never-written cells use the default colors like cleared cells") {
+    TerminalModel model(20, 10, 100);
+    const auto fresh = model.cell(5, 5);
+    EXPECT(fresh.backgroundColor().kind == ColorReference::Kind::Default);
+    EXPECT(fresh.foregroundColor().kind == ColorReference::Kind::Default);
+    model.write(U"x");
+    model.eraseDisplay(TerminalModel::EraseMode::All);
+    const auto cleared = model.cell(5, 5);
+    EXPECT(cleared.backgroundColor().kind == fresh.backgroundColor().kind);
+}
 TEST_CASE("Resizing back and forth under a TUI never duplicates its rows") {
     TerminalModel model(20, 10, 100);
     VtParser parser(model);

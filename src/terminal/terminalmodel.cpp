@@ -43,6 +43,14 @@ struct TerminalModel::Impl {
                 ++firstRow;
             }
         }
+        // Never-written cells use the default colors, like cleared ones, so a
+        // theme change recolors both the same way.
+        static FChar defaultCell() {
+            FChar cell;
+            cell.setForeground(ColorReference::defaultColor());
+            cell.setBackground(ColorReference::defaultColor());
+            return cell;
+        }
         CursorState cursor;
         FChar style;
         bool wrapPending = false;
@@ -61,7 +69,7 @@ struct TerminalModel::Impl {
         Screen(std::size_t columns,
                std::size_t rows,
                std::size_t history,
-               FChar fill = {})
+               FChar fill = defaultCell())
             : memory(columns, rows + history)
             , style(fill) {
             cursor.visible = true;
