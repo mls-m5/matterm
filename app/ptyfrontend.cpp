@@ -5,6 +5,7 @@
 #include "ptysession.h"
 #include "sdlbackend.h"
 #include "sdlinput.h"
+#include "windowsnap.h"
 #include "terminalmodel.h"
 
 #include <SDL.h>
@@ -230,6 +231,7 @@ int runPtyFrontend(const char *font,
         throw std::runtime_error(SDL_GetError());
     }
     SdlBackend backend(*window, font, fontSize, smokeTest);
+    backend.setReserveScrollbarStrip(true);
     auto resize = [&] {
         const int columns = std::clamp(backend.columns(true), 1, 65535);
         const int rows = std::clamp(backend.rows(), 1, 65535);
@@ -414,6 +416,32 @@ int runPtyFrontend(const char *font,
                 }
                 if (event.type == SDL_MOUSEBUTTONUP) {
                     dragging = false;
+                }
+            }
+            else if (event.type == SDL_WINDOWEVENT &&
+                     (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
+                      event.window.event == SDL_WINDOWEVENT_RESIZED)) {
+                // Leave no partial cell at the right or bottom edge. Maximized,
+                // full-screen and tiled windows are sized by the window manager
+                // and keep the leftover as terminal background.
+                const auto flags = SDL_GetWindowFlags(window.get());
+                if (!(flags & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP |
+                               SDL_WINDOW_MAXIMIZED | SDL_WINDOW_MINIMIZED))) {
+                    frontend::WindowSize current, drawable;
+                    SDL_GetWindowSize(window.get(), &current.width, &current.height);
+                    SDL_GetRendererOutputSize(SDL_GetRenderer(window.get()),
+                                              &drawable.width,
+                                              &drawable.height);
+                    const auto snapped = frontend::snappedWindowSize(
+                        current,
+                        drawable,
+                        backend.cellWidth(),
+                        backend.cellHeight(),
+                        SdlBackend::scrollbarStrip());
+                    if (!(snapped == current)) {
+                        SDL_SetWindowSize(
+                            window.get(), snapped.width, snapped.height);
+                    }
                 }
             }
             else if (event.type == SDL_WINDOWEVENT &&

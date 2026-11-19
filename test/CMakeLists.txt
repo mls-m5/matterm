@@ -102,6 +102,10 @@ if(BUILD_TESTING)
     target_link_libraries(scriptedlink_test PRIVATE matterm::transport matterm::vt)
     add_test(NAME scripted_link COMMAND scriptedlink_test)
 
+    add_executable(windowsnap_test windowsnap_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(windowsnap_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+    add_test(NAME window_snap COMMAND windowsnap_test)
+
     add_executable(touchgesture_test touchgesture_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(touchgesture_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
     add_test(NAME touch_gesture COMMAND touchgesture_test)
