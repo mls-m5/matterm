@@ -66,6 +66,10 @@ fixes, resize duplication, zero-width glyph.
 - `docs/tasks/window-frame.md`: framed, narrower terminal window with margins,
   rounded corners and shadow. Worktree `.tmp/agent3`, branch `agent3-frame`.
 
+- `docs/tasks/server-sessions.md`: `trusted_proxy`, then server-owned sessions
+  with an optional replay ring (phase 1 of docs/MULTI_TERMINAL.md). Worktree
+  `.tmp/agent2`, branch `agent2-sessions`.
+
 Integrated since the previous list: security review, URL opening,
 touch gestures (`docs/tasks/touch-gestures.md`), empty-scroll/grow/ED3 work
 (`docs/tasks/empty-scroll-and-reflow.md`; reflow is only designed, see
