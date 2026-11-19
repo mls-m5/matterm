@@ -146,7 +146,8 @@ public:
     // Call every frame; reports a long press once its time has come.
     std::vector<Action> tick(std::uint64_t now) {
         std::vector<Action> out;
-        if (state_ == State::Pending && now - downAt_ >= config_.longPressMs) {
+        if (state_ == State::Pending && now >= downAt_ &&
+            now - downAt_ >= config_.longPressMs) {
             state_ = State::Selecting;
             out.push_back({Kind::LongPress, first_.x, first_.y});
         }

@@ -80,7 +80,8 @@ struct Batch {
 
 struct SdlBackend::Impl {
     std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)> renderer;
-    GlyphAtlas atlas;
+    std::string fontPath;
+    std::unique_ptr<GlyphAtlas> atlas;
     SDL_RendererInfo info{};
     int cellWidth;
     int cellHeight;
@@ -96,12 +97,13 @@ struct SdlBackend::Impl {
          int size,
          bool software)
         : renderer(createRenderer(window, software), SDL_DestroyRenderer)
-        , atlas(*renderer, fontPath, size)
-        , cellWidth(std::max(1, atlas.getOrInsert(U'M').advanceX))
-        , cellHeight(std::max(1, atlas.lineHeight())) {
+        , fontPath(fontPath)
+        , atlas(std::make_unique<GlyphAtlas>(*renderer, fontPath, size))
+        , cellWidth(std::max(1, atlas->getOrInsert(U'M').advanceX))
+        , cellHeight(std::max(1, atlas->lineHeight())) {
         check(SDL_GetRendererInfo(renderer.get(), &info));
         check(SDL_QueryTexture(
-            atlas.texture(), nullptr, nullptr, &textureWidth, &textureHeight));
+            atlas->texture(), nullptr, nullptr, &textureWidth, &textureHeight));
     }
 };
 
@@ -150,7 +152,7 @@ void SdlBackend::render(const RenderFrame &frame) {
     for (std::size_t y = 0; y < rows; ++y) {
         const auto row = frame.cells.row(y);
         for (std::size_t x = 0; x < columns; ++x) {
-            s.atlas.getOrInsert(row.data()[x].codePoint,
+            s.atlas->getOrInsert(row.data()[x].codePoint,
                                 row.data()[x].attributes);
         }
     }
@@ -215,13 +217,13 @@ void SdlBackend::render(const RenderFrame &frame) {
                     left, top + s.cellHeight / 2, float(s.cellWidth), 1, ink);
             }
             const auto glyph =
-                s.atlas.getOrInsert(cell.codePoint, cell.attributes);
+                s.atlas->getOrInsert(cell.codePoint, cell.attributes);
             if (glyph.source.w == 0 || glyph.source.h == 0) {
                 continue;
             }
             s.glyphs.quad(
                 left + glyph.bearingX,
-                top + s.atlas.ascent() - glyph.bearingY,
+                top + s.atlas->ascent() - glyph.bearingY,
                 float(glyph.source.w),
                 float(glyph.source.h),
                 ink,
@@ -247,7 +249,7 @@ void SdlBackend::render(const RenderFrame &frame) {
         }
     } clipReset{s.renderer.get()};
     s.backgrounds.draw(*s.renderer, nullptr);
-    s.glyphs.draw(*s.renderer, s.atlas.texture());
+    s.glyphs.draw(*s.renderer, s.atlas->texture());
     s.decorations.draw(*s.renderer, nullptr);
 
     const auto &cursor = frame.cursor;
@@ -319,6 +321,23 @@ void SdlBackend::render(const RenderFrame &frame) {
 void SdlBackend::present() {
     SDL_RenderPresent(impl_->renderer.get());
 }
+void SdlBackend::setPixelSize(int pixelSize) {
+    auto &s = *impl_;
+    // Build the new atlas first: a failure leaves the old font in place. The
+    // renderer (and with it the page's touch and input registration) is kept.
+    auto atlas = std::make_unique<GlyphAtlas>(*s.renderer, s.fontPath, pixelSize);
+    const int width = std::max(1, atlas->getOrInsert(U'M').advanceX);
+    const int height = std::max(1, atlas->lineHeight());
+    int textureWidth = 0, textureHeight = 0;
+    check(SDL_QueryTexture(
+        atlas->texture(), nullptr, nullptr, &textureWidth, &textureHeight));
+    s.atlas = std::move(atlas);
+    s.cellWidth = width;
+    s.cellHeight = height;
+    s.textureWidth = textureWidth;
+    s.textureHeight = textureHeight;
+}
+
 int SdlBackend::cellWidth() const noexcept {
     return impl_->cellWidth;
 }

@@ -17,6 +17,15 @@ TEST_CASE("A short touch without movement is a tap") {
     EXPECT(!g.active());
 }
 
+TEST_CASE("A tick timestamped before the touch began is not a long press") {
+    // The frame clock can be read before the event queue is drained, so the
+    // finger-down time may be later than the tick that follows it.
+    TouchGesture g;
+    g.down(1, 50, 60, 1000);
+    EXPECT(g.tick(990).empty());
+    EXPECT(g.up(1, 1010)[0].kind == Kind::Tap);
+}
+
 TEST_CASE("Small jitter stays a tap") {
     TouchGesture g;
     g.down(1, 50, 60, 0);

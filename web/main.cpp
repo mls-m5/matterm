@@ -552,24 +552,17 @@ void handleEvent(App &app, const SDL_Event &event) {
 // new cell size and resizes the model and the link as for a window resize.
 void changeFont(App &app) {
     const int wanted = app.pendingFontCss;
-    app.backend.reset(); // The window has one renderer at a time.
-    for (const int css : {wanted, app.fontCss}) {
-        try {
-            app.backend = std::make_unique<SdlBackend>(
-                *app.window, "/assets/font.ttf", fontPixels(css));
-            app.fontCss = css;
-            break;
-        }
-        catch (const std::exception &error) {
-            std::fprintf(stderr, "font change failed: %s\n", error.what());
-        }
+    try {
+        app.backend->setPixelSize(fontPixels(wanted));
+        app.fontCss = wanted;
+        saveFontSize(app.fontCss);
+    }
+    catch (const std::exception &error) {
+        std::fprintf(stderr, "font change failed: %s\n", error.what());
     }
     app.pendingFontCss = app.fontCss;
     app.lastSignature.reset();
     app.touchRows = 0;
-    if (app.backend) {
-        saveFontSize(app.fontCss);
-    }
 }
 
 void frame(void *data) {
@@ -583,7 +576,7 @@ void frame(void *data) {
             handleEvent(app, event);
         }
     }
-    if (const auto held = app.touch.tick(start); !held.empty()) {
+    if (const auto held = app.touch.tick(SDL_GetTicks64()); !held.empty()) {
         app.activeUntil = start + activeMs;
         applyTouch(app, held);
     }
