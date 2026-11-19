@@ -80,6 +80,49 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "Primary and alternate frames start at the first row without padding") {
+    for (bool alternate : {false, true}) {
+        TerminalModel model(6, 3, 8);
+        model.setAlternateScreen(alternate);
+        model.write(U"FIRST");
+        model.scrollBy(0.5);
+        model.advanceViewport(0.01);
+        EXPECT(model.frame(17).cells.row(0).data()[0].codePoint == U'F');
+        EXPECT_EQ(model.frame(17).verticalOffsetPixels, 0.0f);
+        model.reset();
+        model.setAlternateScreen(alternate);
+        for (char32_t ch = U'A'; ch <= U'P'; ++ch) {
+            model.write(std::u32string_view(&ch, 1));
+            if (ch != U'P')
+                model.write(U"\r\n");
+        }
+        for (double delta : {0.5, 1e-12, 1000.0, -0.25, -1000.0}) {
+            model.scrollBy(delta);
+            for (double dt : {0.001, 0.02, 10.0}) {
+                model.advanceViewport(dt);
+                const auto frame = model.frame(17);
+                const auto first =
+                    model.firstRetainedRow() + model.viewport().firstRow();
+                EXPECT(frame.cells.row(0).data()[0].codePoint ==
+                       model.textCodePoint({first, 0}).value());
+                EXPECT(frame.cells.row(0).data()[0].codePoint != U' ');
+                EXPECT(frame.verticalOffsetPixels <= 0.0f);
+                EXPECT(frame.verticalOffsetPixels > -17.0f);
+                EXPECT(float(frame.cells.rows() * 17) +
+                           frame.verticalOffsetPixels >=
+                       frame.textHeightPixels);
+            }
+        }
+        model.scrollToOldest();
+        model.advanceViewport(10);
+        EXPECT_EQ(model.viewport().firstRow(), std::size_t(0));
+        EXPECT_EQ(model.frame(17).verticalOffsetPixels, 0.0f);
+        EXPECT(model.frame(17).cells.row(0).data()[0].codePoint ==
+               (alternate ? U'N' : U'F'));
+    }
+}
+
+TEST_CASE(
     "ED3 erases saved lines and clamps a fractional historical viewport") {
     TerminalModel model(8, 3, 20);
     VtParser parser(model);
