@@ -1,5 +1,9 @@
 # Terminal Simulator
 
+> The browser demo now runs the larger pretend system in [FAKEOS.md](FAKEOS.md)
+> through the same `ScriptedLink`. The `Simulator` below stays as the minimal
+> example and test fixture.
+
 `ScriptedLink` (`src/transport/scriptedlink.h`) is the third `TerminalLink`
 implementation, next to `ClientSession` (remote server) and `PtyLink` (local
 PTY). It behaves like a terminal program without any process or network, so:
