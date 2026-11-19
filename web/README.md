@@ -79,6 +79,35 @@ Checked with `tools/e2e-input.js` and `tools/e2e-copy.js`. Headless Chromium
 cannot produce a real Ctrl+Shift+V paste, so that test dispatches the `paste`
 event instead.
 
+## The framed window
+
+On a wide desktop viewport (`min-width: 800px` and `pointer: fine`) the terminal
+is a panel on the page: narrower than the viewport (at most 1100 px), with
+margins on all sides, rounded corners, a layered shadow and a hairline border.
+The panel clips the canvas, so the scrollbar strip and the selection follow the
+corners. The page color around it follows `prefers-color-scheme`; the terminal
+palette does not change. Phones, tablets and small viewports stay edge to edge
+(a media query, no user-agent checks), and the key bar and soft keyboard are
+unchanged there.
+
+A small button in the top right corner of the panel switches to edge to edge and
+back. It is for the mouse only: it is invisible (and does not take clicks) until
+the pointer is near that corner, or it has keyboard focus, so it never covers
+terminal content, and it hands the keyboard focus back to the terminal. The
+choice is stored in `localStorage` (`matterm.layout`); `?fullscreen` starts edge
+to edge.
+
+The grid comes from the panel: the canvas fills it, and a `ResizeObserver` in
+`login.js` sets the backing store to the canvas's exact device pixels
+(`devicePixelContentBoxSize`, falling back to `clientWidth * devicePixelRatio`),
+so window resizes, rotation and the toggle all follow the same path (`main.cpp`
+sees the new size, resizes the model and tells the server).
+
+"Embedded" here means the framed window. Embedding the page in another page with
+an `<iframe>` stays blocked by the server's headers (`frame-ancestors 'none'`).
+There is no title bar inside the frame: it would cost a terminal row of height,
+and the program's title already appears in the browser tab (`document.title`).
+
 ## Phones and tablets
 
 On touch devices (`pointer: coarse`, or `?touch` to force it) tapping the

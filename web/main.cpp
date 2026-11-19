@@ -656,6 +656,13 @@ void frame(void *data) {
     signature.add(frontend::frameSignature(rendered, app.palette));
     signature.add(windowWidth);
     signature.add(windowHeight);
+    // The backing store can change without SDL's window size changing (the
+    // framed/full-screen toggle, a pixel-ratio change); it is cleared then.
+    int drawableWidth = 0, drawableHeight = 0;
+    SDL_GetRendererOutputSize(
+        SDL_GetRenderer(app.window), &drawableWidth, &drawableHeight);
+    signature.add(drawableWidth);
+    signature.add(drawableHeight);
     if (app.lastSignature && *app.lastSignature == signature.value()) {
         return;
     }
