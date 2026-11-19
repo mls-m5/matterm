@@ -7,6 +7,7 @@
 #include "sdlbackend.h"
 #include "terminalmodel.h"
 #include "textselection.h"
+#include "urllink.h"
 
 #include <SDL.h>
 
@@ -167,5 +168,23 @@ inline std::optional<TerminalModel::TextCell> mouseCell(
                                        viewport.firstRow() +
                                        std::min(row, viewport.rowCount() - 1),
                                    column};
+}
+// Poll after model/viewport updates so stationary-pointer previews cannot
+// retain stale text after output, scrolling or a screen switch.
+inline std::optional<UrlMatch> hoveredUrl(SDL_Window &window,
+                                          const SdlBackend &backend,
+                                          const TerminalModel &model,
+                                          bool applicationMouse,
+                                          bool captured) {
+    const auto mod = modifiers(SDL_GetModState());
+    constexpr auto focus = SDL_WINDOW_MOUSE_FOCUS | SDL_WINDOW_INPUT_FOCUS;
+    if (!localLinkGesture(mod.control, mod.shift, applicationMouse, captured) ||
+        (SDL_GetWindowFlags(&window) & focus) != focus) {
+        return std::nullopt;
+    }
+    int x = 0, y = 0;
+    SDL_GetMouseState(&x, &y);
+    const auto cell = mouseCell(window, backend, model, x, y, false);
+    return cell ? urlAt(model, *cell) : std::nullopt;
 }
 } // namespace frontend

@@ -344,4 +344,52 @@ TEST_CASE("A new palette recolors existing frame cells without touching their "
     EXPECT_EQ(cells.at(0, 0).backgroundColor().value.r, 1);
 }
 
+TEST_CASE("Presentation underline spans wrapped rows and clears without "
+          "modifying cells") {
+    Fixture fixture;
+    CellBuffer cells(3, 2);
+    for (std::size_t y = 0; y < 2; ++y) {
+        for (std::size_t x = 0; x < 3; ++x) {
+            cells.at(x, y) = FChar{U' ', {20, 200, 40}, {10, 20, 30}};
+        }
+    }
+    cells.at(1, 0).attributes = CellAttribute::Blink;
+    RenderFrame frame{cells.view(), {}};
+    frame.textBlinkVisible = false;
+    frame.underlineBegin = 1;
+    frame.underlineEnd = 5;
+    frame.selectionBegin = 2;
+    frame.selectionEnd = 3;
+    fixture.backend->render(frame);
+    const int w = fixture.backend->cellWidth(),
+              h = fixture.backend->cellHeight();
+    EXPECT_EQ(fixture.pixel(1, h - 2), Uint32(0x0a141e));
+    EXPECT_EQ(fixture.pixel(w + 1, h - 2), Uint32(0x14c828));
+    EXPECT_EQ(fixture.pixel(2 * w + 1, h - 2), Uint32(0xffffff));
+    EXPECT_EQ(fixture.pixel(1, 2 * h - 2), Uint32(0x14c828));
+    EXPECT_EQ(fixture.pixel(2 * w + 1, 2 * h - 2), Uint32(0x0a141e));
+    EXPECT(cells.at(1, 0).attributes == CellAttribute::Blink);
+    frame.underlineBegin = frame.underlineEnd = 0;
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(w + 1, h - 2), Uint32(0x0a141e));
+    EXPECT_EQ(fixture.pixel(1, 2 * h - 2), Uint32(0x0a141e));
+}
+
+TEST_CASE(
+    "Presentation underline follows fractional scroll and text clipping") {
+    Fixture fixture;
+    CellBuffer cells(1, 2);
+    for (std::size_t y = 0; y < 2; ++y) {
+        cells.at(0, y) = FChar{U' ', {20, 200, 40}, {10, 20, 30}};
+    }
+    const int h = fixture.backend->cellHeight();
+    RenderFrame frame{cells.view(), {}};
+    frame.underlineEnd = 2;
+    frame.verticalOffsetPixels = -float(h / 2);
+    frame.textHeightPixels = h;
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(1, h - 2 - h / 2), Uint32(0x14c828));
+    EXPECT_EQ(fixture.pixel(1, 2 * h - 2 - h / 2), Uint32(0x1e1e1e));
+}
+
 TEST_SUIT_END

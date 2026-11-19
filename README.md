@@ -76,6 +76,9 @@ extend by whole words/lines. Ctrl+Shift+C copies, joining soft-wrapped rows and
 retaining explicit line breaks. Copies over 1 MiB fail explicitly, without
 truncation. Resize, screen switches, and eviction of a selected row clear the
 selection. See [Selection](docs/SELECTION.md) for word boundaries and details.
+Ctrl+left click opens detected HTTP(S) links; Ctrl-hover underlines the link and
+shows its target in the title. With application mouse reporting, add Shift for
+local link handling. See [Links](docs/LINKS.md) for the security policy.
 The window closes once the child exits and its PTY output is drained. In
 an interactive shell, Ctrl+D at an empty prompt normally exits that shell.
 
