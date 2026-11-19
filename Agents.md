@@ -25,3 +25,11 @@ separate `matterm` application. Track implementation progress in `ROADMAP.md`.
 Common types/storage belong in `src/core/`, graphical backends in `src/render/`,
 and terminal emulation/stream parsing in `src/terminal/` and its `vt/` subdirectory.
 The reverse-direction ANSI output backend idea is deferred, not current work.
+
+The operator authorizes subagents for small, well-scoped tasks such as independent
+tests, documentation updates, or focused reviews. Prefer direct execution for
+simple changes; delegate only independent work with clear boundaries. The operator
+reports a smaller model named `luna-6`; verify available agents/model configuration
+before using it rather than assuming that this identifier is configured. Read the
+pi-subagents skill before delegation. The main agent reviews delegated changes
+and runs integration tests before committing.
