@@ -3,6 +3,9 @@
 #include "sdlbackend.h"
 #include "terminalmodel.h"
 #include "vtparser.h"
+#include "clientsession.h"
+#include "inputencoder.h"
+#include "websocketchannel.h"
 
 #include <SDL.h>
 #include <SDL_ttf.h>
@@ -10,7 +13,9 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace {
@@ -19,18 +24,104 @@ struct App {
     std::unique_ptr<SdlBackend> backend;
     std::unique_ptr<TerminalModel> model;
     std::unique_ptr<VtParser> parser;
+    std::unique_ptr<WebSocketChannel> channel;
+    std::unique_ptr<ClientSession> session;
     Uint64 last = 0;
+    std::string status;
+    bool skipText = false;
 };
+
+std::optional<InputEncoder::Key> special(SDL_Keycode key) {
+    using K = InputEncoder::Key;
+    switch (key) {
+    case SDLK_RETURN: return K::Enter;
+    case SDLK_BACKSPACE: return K::Backspace;
+    case SDLK_TAB: return K::Tab;
+    case SDLK_ESCAPE: return K::Escape;
+    case SDLK_UP: return K::Up;
+    case SDLK_DOWN: return K::Down;
+    case SDLK_LEFT: return K::Left;
+    case SDLK_RIGHT: return K::Right;
+    case SDLK_HOME: return K::Home;
+    case SDLK_END: return K::End;
+    case SDLK_INSERT: return K::Insert;
+    case SDLK_DELETE: return K::Delete;
+    case SDLK_PAGEUP: return K::PageUp;
+    case SDLK_PAGEDOWN: return K::PageDown;
+    case SDLK_F1: return K::F1;
+    case SDLK_F2: return K::F2;
+    case SDLK_F3: return K::F3;
+    case SDLK_F4: return K::F4;
+    case SDLK_F5: return K::F5;
+    case SDLK_F6: return K::F6;
+    case SDLK_F7: return K::F7;
+    case SDLK_F8: return K::F8;
+    case SDLK_F9: return K::F9;
+    case SDLK_F10: return K::F10;
+    case SDLK_F11: return K::F11;
+    case SDLK_F12: return K::F12;
+    default: return std::nullopt;
+    }
+}
+
+// The `ws` query parameter, e.g. ?ws=ws://127.0.0.1:8080/tty. Empty: demo.
+std::string wsUrl() {
+    char *value = static_cast<char *>(EM_ASM_PTR({
+        const v = new URLSearchParams(location.search).get("ws") || "";
+        const n = lengthBytesUTF8(v) + 1;
+        const p = _malloc(n);
+        stringToUTF8(v, p, n);
+        return p;
+    }));
+    std::string url = value;
+    std::free(value);
+    return url;
+}
 
 void frame(void *data) {
     auto &app = *static_cast<App *>(data);
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        if (!app.session) {
+            continue;
+        }
+        const auto &modes = app.parser->modes();
+        if (event.type == SDL_TEXTINPUT) {
+            if (app.skipText) {
+                app.skipText = false;
+            }
+            else {
+                const auto alt = (SDL_GetModState() & KMOD_ALT) != 0;
+                app.session->sendInput(
+                    InputEncoder::text(event.text.text, alt));
+            }
+        }
+        else if (event.type == SDL_KEYDOWN) {
+            const auto m = SDL_GetModState();
+            InputEncoder::Modifiers mod;
+            mod.shift = (m & KMOD_SHIFT) != 0;
+            mod.alt = (m & KMOD_ALT) != 0;
+            mod.control = (m & KMOD_CTRL) != 0;
+            const auto key = event.key.keysym.sym;
+            if (const auto encoded = special(key)) {
+                app.session->sendInput(InputEncoder::key(*encoded, mod, modes));
+            }
+            else if (mod.control && key >= 0 && key <= 127) {
+                app.session->sendInput(
+                    InputEncoder::control(char(key), mod.alt));
+            }
+        }
+    }
+    if (app.session) {
+        app.session->tick();
     }
     const auto columns = std::size_t(std::max(1, app.backend->columns()));
     const auto rows = std::size_t(std::max(1, app.backend->rows()));
     if (columns != app.model->columns() || rows != app.model->rows()) {
         app.model->resize(columns, rows);
+        if (app.session) {
+            app.session->resize(int(columns), int(rows));
+        }
     }
     const auto now = SDL_GetTicks64();
     app.model->advanceViewport(double(now - app.last) / 1000);
@@ -73,7 +164,38 @@ int main() {
         std::size_t(std::max(1, app.backend->rows())),
         1000);
     app.parser = std::make_unique<VtParser>(*app.model);
-    app.parser->feed(
+    const auto url = wsUrl();
+    if (!url.empty()) {
+        try {
+            app.channel = std::make_unique<WebSocketChannel>(url);
+            ClientSession::Config config;
+            config.clock = [] {
+                return protocol::Time(
+                    std::chrono::milliseconds(SDL_GetTicks64()));
+            };
+            config.columns = int(app.model->columns());
+            config.rows = int(app.model->rows());
+            app.session =
+                std::make_unique<ClientSession>(*app.channel, config);
+            TerminalLink::Events events;
+            events.output = [](std::string_view bytes) {
+                app.parser->feed(bytes);
+            };
+            events.exited = [](int code, int) {
+                app.parser->feed("\r\n[process exited: " +
+                                 std::to_string(code) + "]\r\n");
+            };
+            events.closed = [](std::string_view reason) {
+                app.parser->feed("\r\n[disconnected: " +
+                                 std::string(reason) + "]\r\n");
+            };
+            app.session->setEvents(std::move(events));
+        }
+        catch (const std::exception &error) {
+            std::fprintf(stderr, "link failed: %s\n", error.what());
+        }
+    }
+    if (!app.session) app.parser->feed(
         "\x1b[1;32mmatterm\x1b[0m in the browser \x1b[38;5;208m(Emscripten + "
         "SDL2)\x1b[0m\r\n\r\n"
         "\x1b[31mred\x1b[0m \x1b[32mgreen\x1b[0m \x1b[33myellow\x1b[0m "
