@@ -230,6 +230,11 @@ struct TerminalModel::Impl {
              blankRow(old, start(old) + rows - 1 - dropped);
              ++dropped) {
         }
+        // Only primary saved lines are available to reveal on growth. Append
+        // blank rows only after those saved lines have all become visible.
+        const auto pulled = height > rows && history > 0 && !discardHistory
+                                ? std::min(height - rows, start(old))
+                                : 0;
         for (std::size_t y = discardHistory ? start(old) : 0;
              y < old.memory.size() - dropped;
              ++y) {
@@ -237,11 +242,16 @@ struct TerminalModel::Impl {
                            blank(old),
                            width == columns && old.softWrap[y]);
         }
-        for (std::size_t y = rows; y < height; ++y) {
+        for (std::size_t y = rows + pulled; y < height; ++y) {
             result->append(FStringView{}, blank(old));
         }
         result->style = old.style;
         result->savedCursor = old.savedCursor;
+        if (pulled > 0) {
+            result->savedCursor.row = int(
+                std::min(std::size_t(std::max(0, old.savedCursor.row)) + pulled,
+                         height - 1));
+        }
         result->savedStyle = old.savedStyle;
         result->savedWrap = old.savedWrap;
         result->hasSavedCursor = old.hasSavedCursor;
@@ -253,7 +263,8 @@ struct TerminalModel::Impl {
         result->cursor.column = std::min(old.cursor.column, int(width) - 1);
         const auto removed = rows > height ? rows - height - dropped : 0;
         const auto oldRow = std::size_t(old.cursor.row);
-        result->cursor.row = int(oldRow >= removed ? oldRow - removed : 0);
+        result->cursor.row =
+            int((oldRow >= removed ? oldRow - removed : 0) + pulled);
         result->cursor.row = std::min(result->cursor.row, int(height) - 1);
         result->wrapPending = old.wrapPending && oldRow >= removed;
         if (result->wrapPending && width > columns) {
@@ -267,7 +278,7 @@ struct TerminalModel::Impl {
             result->origin = old.origin;
         }
         result->viewport = old.viewport;
-        result->viewport.setGeometry(result->memory.size(), height);
+        result->viewport.rowsRevealed(pulled, result->memory.size(), height);
         return result;
     }
 };

@@ -61,6 +61,14 @@ void ScrollViewport::rowsAppended(std::size_t count, std::size_t retainedRows) {
     clamp();
 }
 
+void ScrollViewport::rowsRevealed(std::size_t count,
+                                  std::size_t retainedRows,
+                                  std::size_t visibleRows) {
+    target_ = std::max(0.0, target_ - double(count));
+    displayed_ = std::max(0.0, displayed_ - double(count));
+    setGeometry(retainedRows, visibleRows);
+}
+
 bool ScrollViewport::atTail() const noexcept {
     return target_ == 0 && displayed_ == 0;
 }

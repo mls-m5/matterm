@@ -30,7 +30,8 @@ CSI parameter coordinates are one-based; omitted/zero movement parameters use on
 Movement clamps to the screen or origin-mode margins. Resize currently resets
 margins/origin to the full screen; applications can re-establish them on SIGWINCH.
 A height shrink drops blank rows below the cursor before pushing top rows into
-the scrollback; there is no reflow on width changes.
+the scrollback. Height growth reveals saved primary rows before adding blanks;
+the alternate screen only adds blanks. There is no reflow on width changes.
 
 | Input | Behavior |
 |---|---|

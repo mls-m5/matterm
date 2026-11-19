@@ -87,9 +87,10 @@ public:
 
     // Positive dimensions only. No reflow: width clips/pads. Height shrink
     // first drops blank rows below the cursor, then keeps the bottom screen
-    // rows (primary top rows become history); growth adds blanks. Preserves
-    // both buffers; resets margins/origin to full screen. Allocation failure
-    // leaves both unchanged.
+    // rows (primary top rows become history). Growth reveals primary saved
+    // rows first, then adds blanks; alternate growth only adds blanks.
+    // Preserves both buffers; resets margins/origin to full screen. Allocation
+    // failure leaves both unchanged.
     void resize(std::size_t columns, std::size_t rows);
 
     struct TextCell {
