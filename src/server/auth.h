@@ -33,6 +33,10 @@ public:
     bool valid(std::string_view token, bool touch = true);
     bool claim(std::string_view token);
     void revoke();
+    std::uint64_t generation() const {
+        return generation_;
+    }
+    bool attachedValid(std::uint64_t generation, bool touch);
 
 private:
     AuthConfig config_;
@@ -40,6 +44,7 @@ private:
     std::string digest_;
     Clock::time_point created_{}, touched_{};
     bool claimed_ = false;
+    std::uint64_t generation_ = 0;
 };
 // Strict, bounded single-field JSON object. Supports JSON escapes including
 // Unicode surrogate pairs; rejects extra/duplicate fields and control bytes.

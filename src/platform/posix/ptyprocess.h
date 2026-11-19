@@ -29,7 +29,9 @@ public:
                int columns,
                int rows,
                const std::string &term = "xterm-256color",
-               ColorCapability color = ColorCapability::Unspecified);
+               ColorCapability color = ColorCapability::Unspecified,
+               std::optional<std::vector<std::string>> environmentAllowList =
+                   std::nullopt);
     ~PtyProcess();
     PtyProcess(const PtyProcess &) = delete;
     PtyProcess &operator=(const PtyProcess &) = delete;
@@ -40,7 +42,12 @@ public:
     // Nonblocking: returns bytes accepted, possibly zero/partial. Caller queues
     // the remainder. CR/ETX etc. go to the tty driver, not simulated signals.
     std::size_t write(std::string_view bytes);
-    void resize(int columns, int rows);
+    void resize(int columns, int rows, int pixelWidth = 0, int pixelHeight = 0);
+    // Nonblocking group signal; process ownership/reaping remains here.
+    void signalProcessGroup(int signal) noexcept;
+    // Observes exit without reaping, retaining the process-group identity for
+    // callers that must finish group cleanup before releasing the leader.
+    std::optional<ExitStatus> peekExit();
     std::optional<ExitStatus> pollExit();
     void terminate() noexcept;
     int nativeHandle() const noexcept;

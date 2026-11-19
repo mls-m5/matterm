@@ -1,5 +1,6 @@
 #include "ptyprocess.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <climits>
@@ -10,6 +11,7 @@
 #include <stdexcept>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <system_error>
 #include <thread>
@@ -64,8 +66,10 @@ std::string executable(const std::string &command) {
     throw std::system_error(ENOENT, std::generic_category(), command);
 }
 
-std::vector<std::string> environment(const std::string &term,
-                                     PtyProcess::ColorCapability color) {
+std::vector<std::string> environment(
+    const std::string &term,
+    PtyProcess::ColorCapability color,
+    const std::optional<std::vector<std::string>> &allowList) {
     std::vector<std::string> result;
     for (char **entry = environ; entry && *entry; ++entry) {
         const std::string value = *entry;
@@ -75,7 +79,12 @@ std::vector<std::string> environment(const std::string &term,
             value.compare(0, 6, "LINES=") == 0) {
             continue;
         }
-        result.push_back(value);
+        const auto name = value.substr(0, value.find('='));
+        if (!allowList ||
+            std::find(allowList->begin(), allowList->end(), name) !=
+                allowList->end()) {
+            result.push_back(value);
+        }
     }
     result.push_back("TERM=" + term);
     if (color == PtyProcess::ColorCapability::TrueColor) {
@@ -140,7 +149,8 @@ struct PtyProcess::Impl {
                int columns,
                int rows,
                const std::string &term,
-               ColorCapability color) {
+               ColorCapability color,
+               const std::optional<std::vector<std::string>> &allowList) {
         dimensions(columns, rows);
         if (arguments.empty() || arguments[0].empty() || term.empty() ||
             term.find('\0') != std::string::npos) {
@@ -153,7 +163,7 @@ struct PtyProcess::Impl {
             }
         }
         const auto path = executable(arguments[0]);
-        auto env = environment(term, color);
+        auto env = environment(term, color, allowList);
         std::vector<char *> argv, envp;
         for (const auto &argument : arguments) {
             argv.push_back(const_cast<char *>(argument.c_str()));
@@ -171,12 +181,27 @@ struct PtyProcess::Impl {
         winsize size{};
         size.ws_col = static_cast<unsigned short>(columns);
         size.ws_row = static_cast<unsigned short>(rows);
+        const long maxOpen = ::sysconf(_SC_OPEN_MAX);
+        if (maxOpen < 0) fail("sysconf open maximum");
         child = ::forkpty(&master.value, nullptr, nullptr, &size);
         if (child < 0) {
             fail("forkpty");
         }
         if (child == 0) {
             ::close(errorRead.value);
+            // In particular, never leak listener/client sockets or credentials
+            // into the shell. Preserve only stdio and the CLOEXEC error pipe.
+            bool rangesClosed = false;
+#ifdef SYS_close_range
+            const auto lower = errorWrite.value <= 3 ? 0 : ::syscall(SYS_close_range, 3u, static_cast<unsigned>(errorWrite.value - 1), 0u);
+            const auto upper = ::syscall(SYS_close_range, static_cast<unsigned>(errorWrite.value + 1), UINT_MAX, 0u);
+            rangesClosed = lower == 0 && upper == 0;
+#endif
+            if (!rangesClosed) {
+                for (long fd = 3; fd < maxOpen; ++fd) {
+                    if (fd != errorWrite.value) ::close(static_cast<int>(fd));
+                }
+            }
             // All allocation/environment/PATH preparation happened before fork.
             ::execve(path.c_str(), argv.data(), envp.data());
             const int error = errno;
@@ -231,13 +256,15 @@ struct PtyProcess::Impl {
     }
 };
 
-PtyProcess::PtyProcess(const std::vector<std::string> &arguments,
-                       int columns,
-                       int rows,
-                       const std::string &term,
-                       ColorCapability color)
+PtyProcess::PtyProcess(
+    const std::vector<std::string> &arguments,
+    int columns,
+    int rows,
+    const std::string &term,
+    ColorCapability color,
+    std::optional<std::vector<std::string>> environmentAllowList)
     : impl_(std::make_unique<Impl>()) {
-    impl_->start(arguments, columns, rows, term, color);
+    impl_->start(arguments, columns, rows, term, color, environmentAllowList);
 }
 PtyProcess::~PtyProcess() = default;
 PtyProcess::ReadResult PtyProcess::read(char *buffer, std::size_t capacity) {
@@ -286,21 +313,44 @@ std::size_t PtyProcess::write(std::string_view bytes) {
     fail("PTY write");
     return 0;
 }
-void PtyProcess::resize(int columns, int rows) {
+void PtyProcess::resize(int columns,
+                        int rows,
+                        int pixelWidth,
+                        int pixelHeight) {
     dimensions(columns, rows);
+    if (pixelWidth < 0 || pixelWidth > USHRT_MAX || pixelHeight < 0 ||
+        pixelHeight > USHRT_MAX) {
+        throw std::invalid_argument("PTY pixels must be in 0..65535");
+    }
     if (closed()) {
         return;
     }
     winsize size{};
     size.ws_col = static_cast<unsigned short>(columns);
     size.ws_row = static_cast<unsigned short>(rows);
+    size.ws_xpixel = static_cast<unsigned short>(pixelWidth);
+    size.ws_ypixel = static_cast<unsigned short>(pixelHeight);
     if (::ioctl(impl_->master.value, TIOCSWINSZ, &size) < 0 && errno != EIO &&
         errno != ENXIO) {
         fail("TIOCSWINSZ");
     }
 }
+std::optional<PtyProcess::ExitStatus> PtyProcess::peekExit() {
+    if (impl_->status) return impl_->status;
+    siginfo_t info{};
+    if (::waitid(P_PID, impl_->child, &info, WEXITED | WNOHANG | WNOWAIT) == 0 && info.si_pid == impl_->child) {
+        return ExitStatus{info.si_code == CLD_EXITED ? info.si_status : -1,
+                          info.si_code == CLD_EXITED ? 0 : info.si_status};
+    }
+    return std::nullopt;
+}
 std::optional<PtyProcess::ExitStatus> PtyProcess::pollExit() {
     return impl_->reap();
+}
+void PtyProcess::signalProcessGroup(int signal) noexcept {
+    if (impl_->child > 0 && !impl_->status) {
+        ::kill(-impl_->child, signal);
+    }
 }
 void PtyProcess::terminate() noexcept {
     impl_->terminate();
