@@ -66,7 +66,7 @@ terminal grid dimensions and record font sizes and display scaling separately.
 
 On Linux, a build with Fontconfig looks up missing code points among installed
 fonts, preferring monospace faces. For example, the bundled JetBrains Mono lacks
-Braille Patterns (U+2800–U+28FF), but DejaVu Sans Mono supplies them. The primary
+Braille Patterns (U+2800–U+28FF), but DejaVu Sans supplies them. The primary
 font still determines the grid. If there is no usable fallback, matterm draws
 its usual replacement glyph. This is per-code-point fallback, not text shaping,
 emoji sequence handling, or wide-cell support.
@@ -74,7 +74,10 @@ emoji sequence handling, or wide-cell support.
 Install Fontconfig development files and a suitable system font (Debian/Ubuntu:
 `libfontconfig-dev` and `fonts-dejavu-core`), then reconfigure and rebuild. Builds
 without Fontconfig, or with `-DMATTERM_SYSTEM_FONT_FALLBACK=OFF`, use the primary
-font and its replacement glyph only. To run the Braille regression test with
+font and its replacement glyph only. Install the fonts where matterm runs,
+not inside a container that only runs a terminal application. Use
+`fc-list ':charset=280b' family` to check which local fonts cover the `⠋` glyph.
+To run the Braille regression test with
 JetBrains Mono as the test font and a covering system font installed:
 
 ```sh

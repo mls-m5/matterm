@@ -46,7 +46,7 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [ ] Reproduce prompt and Pi panel color reports; see [Interaction and Compatibility](docs/INTERACTION_AND_COMPATIBILITY.md).
 - [ ] Golden transcripts from real programs, fuzz/property tests, and compatibility fixtures.
 - [x] Use optional Fontconfig system font fallback on Linux for missing glyphs, including Braille.
-- [ ] Verify the Fontconfig-enabled build and Braille fallback with installed system fonts.
+- [x] Verify the Fontconfig-enabled build and Braille fallback with installed system fonts.
 - [ ] Wide cells, combining clusters, shaping, and system font fallback on other platforms.
 
 ## 4. POSIX PTY Adapter (Implemented on Linux)
