@@ -91,7 +91,7 @@ float ScrollViewport::pixelOffset(int cellHeight) const noexcept {
 }
 
 ScrollbarState ScrollViewport::scrollbar() const noexcept {
-    return {true,
+    return {maxOffset() > 0,
             maxOffset() > 0 ? float(firstPosition() / maxOffset()) : 0.0f,
             retained_ > 0
                 ? float(std::min(visible_, retained_)) / float(retained_)

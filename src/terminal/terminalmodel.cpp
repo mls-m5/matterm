@@ -770,6 +770,6 @@ RenderFrame TerminalModel::frame(int cellHeight) const & {
     frame.verticalOffsetPixels = viewport.pixelOffset(cellHeight);
     frame.textHeightPixels = int(rows()) * cellHeight;
     frame.scrollbar = viewport.scrollbar();
-    frame.scrollbar.visible = !alternateScreen();
+    frame.scrollbar.visible = frame.scrollbar.visible && !alternateScreen();
     return frame;
 }
