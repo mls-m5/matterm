@@ -863,7 +863,7 @@ int main() {
                 return $0 ? 80 : 0;
             }
             const v = parseInt(p.get("smooth"), 10);
-            return v === 0 ? 0 : (v > 0 ? v : 80);
+            return v == = 0 ? 0 : (v > 0 ? v : 80);
         },
         url.empty() ? 1 : 0);
     glide.enabled = smoothMs > 0;
@@ -930,8 +930,23 @@ int main() {
         // ?noreveal prints it at once.
         pretend.revealCharsPerSecond = EM_ASM_INT({
             return new URLSearchParams(location.search).has("noreveal") ? 0
-                                                                        : 2500;
+                                                                        : 1250;
         });
+        // Pips: login.js decides (on in the demo page, off when embedded,
+        // ?sound=1 / ?mute) and plays them with WebAudio after a user gesture.
+        pretend.sound =
+            EM_ASM_INT({ return window.mattermSoundWanted ? 1 : 0; }) != 0;
+        pretend.onBeep = [](const fakeos::Beep &beep) {
+            EM_ASM(
+                {
+                    if (window.mattermBeep) {
+                        window.mattermBeep($0, $1, $2);
+                    }
+                },
+                beep.frequency,
+                double(beep.durationMs),
+                beep.volume);
+        };
         pretend.seed = std::uint64_t(EM_ASM_DOUBLE({ return Date.now(); }));
         pretend.unixTime = std::int64_t(
             EM_ASM_DOUBLE({ return Math.floor(Date.now() / 1000); }));

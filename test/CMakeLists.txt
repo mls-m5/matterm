@@ -260,6 +260,11 @@ if(BUILD_TESTING)
                 COMMAND matterm-demo "${TEST_FONT_FILE}" --smoke-test)
             set_tests_properties(demo_render_smoke PROPERTIES
                 ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+            # The pips go through SDL audio (a dummy device here) while text is revealed.
+            add_test(NAME demo_sound_smoke
+                COMMAND matterm-demo "${TEST_FONT_FILE}" --sound --smoke-test)
+            set_tests_properties(demo_sound_smoke PROPERTIES
+                ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
         endif()
             add_test(NAME terminal_model_render_smoke
                 COMMAND matterm-lib-demo "${TEST_FONT_FILE}" --smoke-test)

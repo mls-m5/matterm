@@ -6,7 +6,7 @@ files and programs in the virtual file system, or changes a program makes to the
 
 | Discovery | How |
 |---|---|
-| The fire | `fire` is "command not found": `/usr/games` is not in the `PATH`. `ls /usr/games`, then run `/usr/games/fire`. |
+| The fire | Not hidden: `fire` and `gradient` are in the `PATH` (`/usr/games`) and in the motd, README and `help`. The rewards below are what is hidden. |
 | An ember | Watch the fire for at least 8 seconds, then quit. The ashes leave `~/.ember`, which points to the cave's word. (Also hinted by `~/.plan` and `~/notes.txt`.) |
 | The magic word | `xyzzy` (the first time): a voice says "Fool." and `/usr/games/plasma` appears. Later: "Nothing happens." |
 | Plasma | `/usr/games/plasma` runs the gradient program (`q` quits, space changes the pattern). |
@@ -28,8 +28,7 @@ Blue ends the story with a short line.
 
 ## The Matrix sequence
 
-The trail: README mentions programs outside the `PATH` -> `ls /usr/games` ->
-watch `/usr/games/fire` for 8 seconds -> `~/.ember` -> `xyzzy` ->
+The trail: the motd and README point at `fire` -> watch `fire` for 8 seconds -> `~/.ember` -> `xyzzy` ->
 `/usr/games/plasma` -> the red pill. Then, as one scripted program
 (`src/fakeos/matrix.cpp`, timing in named constants at the top):
 
