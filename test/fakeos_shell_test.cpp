@@ -14,7 +14,7 @@ TEST_SUIT_BEGIN(FakeosShell)
 
 TEST_CASE("Without the intro the system opens with the motd and a prompt") {
     Pc pc;
-    EXPECT(pc.shows("Welcome to matterm 1.0"));
+    EXPECT(pc.shows("Welcome to Mattrix OS 6.0 Professional Edition"));
     EXPECT(pc.last() == kPrompt);
     EXPECT(!pc.sys.nextDeadline()); // Idle: nothing wakes the host.
 }
@@ -104,6 +104,18 @@ TEST_CASE("cd, pwd and the prompt follow the directory") {
     EXPECT(pc.shows("cd: /nope: No such file or directory"));
     pc.run("cd README");
     EXPECT(pc.shows("cd: README: Not a directory"));
+}
+
+TEST_CASE(
+    "A long path is abbreviated in the prompt so the line keeps its room") {
+    Pc pc(false, 50, 10);
+    pc.run("mkdir -p aaa/bbb/ccc/ddd");
+    pc.run("cd aaa/bbb/ccc/ddd");
+    EXPECT(pc.last() == "guest@matterm:.../ccc/ddd$");
+    pc.run("pwd");
+    EXPECT(pc.shows("/home/guest/aaa/bbb/ccc/ddd"));
+    pc.run("cd");
+    EXPECT(pc.last() == kPrompt);
 }
 
 TEST_CASE("Redirects create, append and read files") {

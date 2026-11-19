@@ -7,6 +7,10 @@ const std::vector<ProgramInfo> &programs() {
         {"fire", makeFire, "watch a fire burn"},
         {"gradient", makeGradient, "slow colors"},
         {"intro", makeIntro, "the opening animation"},
+        {"less", makePager, "page through text"},
+        {"top", makeTop, "watch the processes"},
+        {"crumble", makeCrumble, "a word falls apart"},
+        {"matrix", makeMatrix, "follow the white rabbit"},
     };
     return table;
 }

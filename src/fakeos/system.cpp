@@ -8,6 +8,61 @@ namespace fakeos {
 namespace {
 const char *kEnterApp = "\x1b[?1049h\x1b[?25l\x1b[0m\x1b[2J";
 const char *kLeaveApp = "\x1b[0m\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l";
+// Reveal pacing: a newline costs this many characters' time, so lines (not only
+// characters) set the pace; short texts are not held back at all; and a long
+// text is shown within a few seconds whatever the configured rate.
+constexpr double kNewlineCost = 12;
+constexpr double kInstantCost = 60;
+constexpr double kMostRevealSeconds = 4.0;
+
+// What showing one unit of terminal output costs, and how many bytes it takes:
+// a character, a line end, or an escape sequence (free).
+struct Unit {
+    std::size_t bytes;
+    double cost;
+};
+Unit nextUnit(const std::string &text, std::size_t at) {
+    const auto b = (unsigned char)text[at];
+    if (b == 0x1b) {
+        std::size_t n = 1;
+        if (at + 1 < text.size() && text[at + 1] == '[') {
+            n = 2;
+            while (at + n < text.size() &&
+                   !((unsigned char)text[at + n] >= 0x40 &&
+                     (unsigned char)text[at + n] <= 0x7e)) {
+                ++n;
+            }
+            n = std::min(n + 1, text.size() - at);
+        }
+        else if (at + 1 < text.size() && text[at + 1] == ']') {
+            n = 2;
+            while (at + n < text.size() && text[at + n] != '\a' &&
+                   text[at + n] != '\x1b') {
+                ++n;
+            }
+            n = std::min(
+                n + (at + n < text.size() && text[at + n] == '\x1b' ? 2 : 1),
+                text.size() - at);
+        }
+        else {
+            n = std::min<std::size_t>(2, text.size() - at);
+        }
+        return {n, 0};
+    }
+    if (b == '\n') {
+        return {1, kNewlineCost};
+    }
+    if (b == '\r' || b == '\a' || b < 0x20) {
+        return {1, 0};
+    }
+    const std::size_t n = b < 0x80    ? 1
+                          : b >= 0xF0 ? 4
+                          : b >= 0xE0 ? 3
+                          : b >= 0xC0 ? 2
+                                      : 1;
+    return {std::min(n, text.size() - at), 1};
+}
+
 const char *kClearScreen = "\x1b[0m\x1b[H\x1b[2J";
 
 std::vector<std::string> utf8Characters(const std::string &text) {
@@ -40,6 +95,7 @@ void System::freshWorld() {
     fresh.columns = config_.columns;
     fresh.rows = config_.rows;
     fresh.caps = config_.capabilities;
+    fresh.background = config_.background;
     fresh.rng = Rng(config_.seed);
     fresh.bootUnix = config_.unixTime;
     fresh.now = world_.now;
@@ -61,7 +117,6 @@ Reaction System::take() {
 Reaction System::start() {
     started_ = true;
     if (config_.intro && findProgram("intro")) {
-        programIsIntro_ = true;
         launch("intro", {});
     }
     else {
@@ -71,6 +126,7 @@ Reaction System::start() {
 }
 
 void System::showWelcome() {
+    const auto mark = out_.size();
     if (const auto *motd = world_.fs.find("/etc/motd")) {
         for (char c : motd->data) {
             if (c == '\n') {
@@ -80,6 +136,20 @@ void System::showWelcome() {
         }
     }
     showPrompt();
+    if (config_.startCommand.empty() || startCommandRan_) {
+        queueOutput(mark); // The welcome text appears at a pace too.
+        return;
+    }
+    if (!config_.startCommand.empty() && !startCommandRan_) {
+        // Typed at the first prompt, so it shows the way a visitor's would.
+        startCommandRan_ = true;
+        for (const auto &character : utf8Characters(config_.startCommand)) {
+            if (character.size() > 1 || (unsigned char)character[0] >= 0x20) {
+                insert(character);
+            }
+        }
+        submit();
+    }
 }
 
 std::string System::promptText(std::size_t *width) const {
@@ -91,6 +161,17 @@ std::string System::promptText(std::size_t *width) const {
     else if (home != "/" &&
              where.compare(0, home.size() + 1, home + "/") == 0) {
         where = "~" + where.substr(home.size());
+    }
+    // A long path would leave no room for the line: keep the last two parts.
+    if (where.size() >
+        std::max<std::size_t>(12, std::size_t(world_.columns) / 3)) {
+        const auto last = where.rfind('/');
+        const auto before = last == std::string::npos || last == 0
+                                ? std::string::npos
+                                : where.rfind('/', last - 1);
+        if (before != std::string::npos) {
+            where = "..." + where.substr(before);
+        }
     }
     const std::string plain =
         world_.user + "@" + world_.hostname + ":" + where + "$ ";
@@ -374,8 +455,72 @@ void System::submit() {
     if (world_.history.empty() || world_.history.back() != line) {
         world_.history.push_back(line);
     }
+    const auto mark = out_.size();
     out_ += shell_.run(line);
     afterCommand();
+    queueOutput(mark);
+}
+
+// ---- Revealing program output at a pace -----------------------------------
+
+void System::queueOutput(std::size_t mark) {
+    if (config_.revealCharsPerSecond <= 0 || mark >= out_.size()) {
+        return;
+    }
+    double cost = 0;
+    for (std::size_t at = mark; at < out_.size();) {
+        const auto unit = nextUnit(out_, at);
+        cost += unit.cost;
+        at += unit.bytes;
+    }
+    if (cost <= kInstantCost) {
+        return; // A line or two, and the prompt: no need to hold it back.
+    }
+    reveal_ = out_.substr(mark);
+    out_.resize(mark);
+    revealRate_ = std::max(double(config_.revealCharsPerSecond),
+                           cost / kMostRevealSeconds);
+    revealCredit_ = 0;
+    revealAt_ = now_;
+    if (exitCode_) { // `exit` happens after its text has been shown.
+        deferredExit_ = exitCode_;
+        exitCode_.reset();
+    }
+}
+
+void System::drainReveal(Time now) {
+    const double seconds =
+        std::clamp(double((now - revealAt_).count()), 0.0, 100.0) / 1000.0;
+    revealAt_ = now;
+    revealCredit_ += revealRate_ * seconds;
+    std::size_t used = 0;
+    while (used < reveal_.size()) {
+        const auto unit = nextUnit(reveal_, used);
+        if (unit.cost > revealCredit_) {
+            break;
+        }
+        revealCredit_ -= unit.cost;
+        used += unit.bytes;
+    }
+    out_.append(reveal_, 0, used);
+    reveal_.erase(0, used);
+    if (reveal_.empty()) {
+        revealCredit_ = 0;
+        if (deferredExit_) {
+            exitCode_ = deferredExit_;
+            deferredExit_.reset();
+        }
+    }
+}
+
+void System::flushReveal() {
+    out_ += reveal_;
+    reveal_.clear();
+    revealCredit_ = 0;
+    if (deferredExit_) {
+        exitCode_ = deferredExit_;
+        deferredExit_.reset();
+    }
 }
 
 void System::afterCommand() {
@@ -410,6 +555,7 @@ void System::launch(const std::string &name,
         return;
     }
     program_ = info->make(args);
+    ++programSerial_;
     programName_ = name;
     programBegun_ = false;
     canvas_.resize(world_.columns, world_.rows);
@@ -423,6 +569,7 @@ void System::launch(const std::string &name,
 }
 
 void System::endProgram() {
+    const bool wasIntro = programName_ == "intro";
     out_ += world_.caps.alternateScreen
                 ? kLeaveApp
                 : (std::string(kClearScreen) + "\x1b[?25h");
@@ -444,13 +591,13 @@ void System::endProgram() {
     if (world_.launch) { // A program (or a click egg) asked for the next one.
         const auto request = *world_.launch;
         world_.launch.reset();
+        world_.programInput = request.input;
         launch(request.name, request.args);
         if (program_) {
             return;
         }
     }
-    if (programIsIntro_) {
-        programIsIntro_ = false;
+    if (wasIntro) {
         showWelcome();
     }
     else {
@@ -479,13 +626,34 @@ Reaction System::input(std::string_view bytes) {
         if (exitCode_) {
             break;
         }
+        if (!reveal_.empty()) {
+            // A key shows the rest at once. Space, Enter, Escape and Ctrl-C
+            // only skip; any other key is then typed, like type-ahead. Mouse
+            // reports mean nothing here.
+            if (key.is(Key::Type::Mouse)) {
+                continue;
+            }
+            flushReveal();
+            if (key.is(Key::Type::Enter) || key.is(Key::Type::Escape) ||
+                key.isText(" ") ||
+                (key.is(Key::Type::Ctrl) && key.text == "c")) {
+                continue;
+            }
+            if (exitCode_) {
+                break;
+            }
+        }
         if (program_) {
+            const auto serial = programSerial_;
             if (key.is(Key::Type::Mouse) && key.press && !key.motion &&
                 key.button == 0) {
                 clicked(key);
             }
-            if (program_) {
+            // The click may have ended the program (and started the next one,
+            // which has not seen this key).
+            if (program_ && serial == programSerial_) {
                 program_->key(world_, key);
+                nextFrame_ = now_; // Show the effect of the key at once.
                 if (program_->finished()) {
                     endProgram();
                 }
@@ -504,6 +672,12 @@ Reaction System::tick(Time now) {
     }
     now_ = now;
     world_.now = now - base_;
+    if (!reveal_.empty()) {
+        // A program that is waiting to start shows nothing until the text is
+        // out.
+        drainReveal(now);
+        return take();
+    }
     if (program_ && !exitCode_) {
         if (!programBegun_) {
             programBegun_ = true;
@@ -533,6 +707,9 @@ void System::resize(int columns, int rows) {
 }
 
 std::optional<Time> System::nextDeadline() const {
+    if (!reveal_.empty()) {
+        return revealAt_ + Time(16); // The next little piece of text.
+    }
     if (program_ && !exitCode_) {
         return nextFrame_;
     }

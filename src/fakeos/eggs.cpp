@@ -65,10 +65,34 @@ const std::vector<Egg> &eggs() {
                    "something rustles.\n")
             .create("/usr/games/plasma", "#!builtin gradient --pills\n", 0755)
             .once("Nothing happens.\n"),
+        egg("editor", T::Command, "vim")
+            .print("There is no editor here, only echo and redirects. Nice "
+                   "try.\n"),
+        egg("editor-vi", T::Command, "vi")
+            .print("There is no editor here, only echo and redirects. Nice "
+                   "try.\n"),
+        egg("editor-nano", T::Command, "nano")
+            .print("There is no editor here, only echo and redirects. Nice "
+                   "try.\n"),
+        egg("editor-emacs", T::Command, "emacs")
+            .print("There is no editor here, only echo and redirects. Nice "
+                   "try.\n"),
+        egg("no-preserve-root", T::Prefix, "rm -rf --no-preserve-root")
+            .print(
+                "Nice try. The pretend system folds its arms and says no.\n"),
+        egg("forkbomb", T::Line, ":(){ :|:& };:")
+            .print("matterm: fork: Resource temporarily unavailable. (This "
+                   "system has more sense.)\n"),
+        egg("answer", T::Line, "42")
+            .print("That is the answer. The question is still open.\n"),
+        egg("neo", T::Command, "neo").print("The Matrix has you.\n"),
         egg("hello", T::Command, "hello")
             .print("Hello, guest. The system hums quietly.\n"),
         // Clicks on words a program drew (mouse reporting): the pills of the
         // plasma program. The blue one ends the story.
+        egg("pill-red", T::Click, "gradient/red")
+            .print("You take the red pill. The rabbit hole opens.\n")
+            .launch("matrix"),
         egg("pill-blue", T::Click, "gradient/blue")
             .print("You close your eyes. When you open them you are at your "
                    "own keyboard,\n"

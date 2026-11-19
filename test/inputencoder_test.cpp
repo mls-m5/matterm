@@ -102,7 +102,8 @@ TEST_CASE("Focus reports and application keypad are negotiated by VT") {
               std::string("\r"));
     parser.feed("\x1b[?1004h\x1b=");
     EXPECT_EQ(InputEncoder::focus(true, parser.modes()), std::string("\x1b[I"));
-    EXPECT_EQ(InputEncoder::focus(false, parser.modes()), std::string("\x1b[O"));
+    EXPECT_EQ(InputEncoder::focus(false, parser.modes()),
+              std::string("\x1b[O"));
     EXPECT_EQ(InputEncoder::keypad('5', {}, parser.modes()),
               std::string("\x1bOu"));
     EXPECT_EQ(InputEncoder::keypad('\r', {}, parser.modes()),

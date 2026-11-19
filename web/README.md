@@ -140,6 +140,23 @@ grid is re-fitted and the server told through the normal resize path. Touch even
 wake the idle-throttled loop, which stays awake while a finger is down.
 `tools/e2e-gestures.js` checks these with CDP touch events.
 
+## Demo page parameters
+
+For the static demo (`demo.html`, or `index.html?demo`; see docs/DEMO.md):
+
+| Parameter | Effect |
+|---|---|
+| `?embed` | Edge to edge for a page inside an `<iframe>`; no layout toggle. |
+| `?nointro` | Skip the intro animation. |
+| `?noreveal` | Print program output at once, not at a pace. |
+| `?cmd=...` | Type and run a command at the first prompt (text only, 200 characters). |
+| `?theme=light\|dark` | Page colors around the terminal (not the terminal palette). |
+| `?smooth=N` | Cursor glide in milliseconds; on (80) in the demo, `?smooth=0` turns it off. |
+
+While the page is out of view (a hidden tab, an iframe scrolled away) the loop
+stops drawing (`window.mattermPaused`, set from `visibilitychange` and an
+`IntersectionObserver`).
+
 ## HiDPI
 
 The canvas backing store is sized in device pixels (`devicePixelRatio`) and the

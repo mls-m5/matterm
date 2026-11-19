@@ -22,6 +22,16 @@ struct Config {
     std::string hostname = "matterm";
     Capabilities capabilities;
     bool intro = true;
+    // The terminal's default background color (the matterm palette's is
+    // 30,30,30).
+    Rgb background{30, 30, 30};
+    // Program output (commands, help, the motd) appears at about this many
+    // characters per second, a new line costing a few more; any key shows the
+    // rest at once. Typing and prompts are never delayed. 0: all at once.
+    int revealCharsPerSecond = 0;
+    // Typed and run at the first prompt, as if the visitor had entered it (for
+    // embedding a demo that starts with something to look at). Empty: none.
+    std::string startCommand;
     // The pretend clock starts here (Unix seconds); the default is a fixed
     // date so that output is reproducible.
     std::int64_t unixTime = 1767225600; // 2026-01-01 00:00:00 UTC
@@ -51,6 +61,10 @@ public:
     bool inProgram() const {
         return program_ != nullptr;
     }
+    // Program output is still being revealed (Config::revealCharsPerSecond).
+    bool revealing() const {
+        return !reveal_.empty();
+    }
 
 private:
     void freshWorld();
@@ -68,6 +82,11 @@ private:
     void launch(const std::string &name, const std::vector<std::string> &args);
     void clicked(const Key &key);
     void endProgram();
+    // Output produced since `mark` (an offset into out_) is held back and shown
+    // at the configured pace, when it is more than a line or two.
+    void queueOutput(std::size_t mark);
+    void drainReveal(Time now);
+    void flushReveal();
     std::string lineText() const;
     Reaction take();
 
@@ -79,8 +98,8 @@ private:
     std::unique_ptr<Program> program_;
     std::string programName_; // The builtin that runs, not the file's name.
     std::string pendingText_; // Shown after the program ends (click eggs).
+    std::uint64_t programSerial_ = 0; // Changes whenever a program starts.
     bool programBegun_ = false;
-    bool programIsIntro_ = false;
     Time now_{0}, base_{0}, nextFrame_{0};
     bool started_ = false;
     std::string out_;
@@ -91,6 +110,12 @@ private:
     std::size_t historyIndex_ = 0;
     std::string savedLine_;
     int tabCount_ = 0;
+    std::string reveal_;      // Output waiting to be shown.
+    double revealCredit_ = 0; // Units that may still be shown.
+    double revealRate_ = 0;   // Units per second for the current text.
+    Time revealAt_{0};
+    std::optional<int> deferredExit_; // `exit` after the text has been shown.
+    bool startCommandRan_ = false;
 };
 
 } // namespace fakeos

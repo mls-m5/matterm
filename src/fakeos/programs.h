@@ -54,5 +54,9 @@ const ProgramInfo *findProgram(const std::string &name);
 std::unique_ptr<Program> makeFire(const std::vector<std::string> &args);
 std::unique_ptr<Program> makeGradient(const std::vector<std::string> &args);
 std::unique_ptr<Program> makeIntro(const std::vector<std::string> &args);
+std::unique_ptr<Program> makePager(const std::vector<std::string> &args);
+std::unique_ptr<Program> makeTop(const std::vector<std::string> &args);
+std::unique_ptr<Program> makeCrumble(const std::vector<std::string> &args);
+std::unique_ptr<Program> makeMatrix(const std::vector<std::string> &args);
 
 } // namespace fakeos

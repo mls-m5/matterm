@@ -25,7 +25,20 @@ html, body { margin: 0; height: 100%; color: #ddd;
     --frame-shadow: 0 1px 2px rgba(0, 0, 0, .25), 0 8px 24px rgba(0, 0, 0, .22),
       0 24px 64px rgba(0, 0, 0, .18); }
 }
+/* ?theme=light|dark forces the page colors (not the terminal palette). */
+:root[data-scheme="dark"] { --page: #1a1c21; --frame-border: rgba(255, 255, 255, .14);
+  --frame-color: #353a47; --frame-edge: rgba(255, 255, 255, .22);
+  --frame-inner: rgba(0, 0, 0, .65);
+  --frame-shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px rgba(0, 0, 0, .45),
+    0 24px 64px rgba(0, 0, 0, .35); }
+:root[data-scheme="light"] { --page: #d9dce3; --frame-border: rgba(0, 0, 0, .28);
+  --frame-color: #7d879c; --frame-edge: rgba(255, 255, 255, .6);
+  --frame-inner: rgba(0, 0, 0, .55);
+  --frame-shadow: 0 1px 2px rgba(0, 0, 0, .25), 0 8px 24px rgba(0, 0, 0, .22),
+    0 24px 64px rgba(0, 0, 0, .18); }
 body.started { background: var(--page); }
+/* ?embed: the terminal fills the frame of the page that embeds it. */
+body.embed #layout { display: none !important; }
 #window { position: fixed; inset: 0; box-sizing: border-box; background: #000;
   overflow: hidden; }
 #window[hidden] { display: none; }

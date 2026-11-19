@@ -208,6 +208,7 @@ These describe much more functionality than matterm currently implements.
   graphics protocol are the existing choices). Needs image cells in the model, a
   memory/size policy and a security decision (decoding untrusted images,
   scrollback cost); decide which protocol(s) first.
+- [x] The demo (`matterm-demo`, docs/DEMO.md): the pretend Mattrix OS 6.0 Professional Edition (src/fakeos) with intro, shell, about fifty commands, programs found on disk (fire, plasma, crumble, less, top), easter eggs including a click egg and the Matrix sequence, paced output, a cursor that glides, a native window, `--tty` for a plain terminal, and a static web page that can be embedded in an iframe (`?embed`, `embed.js`). Remaining: browser end-to-end runs (`web/tools/e2e-demo.js`) are written but need a browser; apps beyond the demo (see below).
 - [ ] Web demo as a platform: static apps written against a small program interface,
   optional relay for chat/multi-user later (see docs/tasks/fakeos-demo.md).
   The fakeos demo became the new `matterm-demo`; the old demos are now `matterm-render-demo` and `matterm-lib-demo`.

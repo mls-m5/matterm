@@ -25,6 +25,9 @@ struct World {
     std::vector<std::string> history;
     int columns = 80, rows = 24;
     Capabilities caps;
+    // The terminal's default background: animations fade to it, so leaving the
+    // alternate screen shows no jump.
+    Rgb background{30, 30, 30};
     Rng rng;
     Time now{0};               // Time since the system started.
     std::int64_t bootUnix = 0; // Unix seconds at start; see unixNow().
@@ -36,7 +39,10 @@ struct World {
     struct Launch {
         std::string name;
         std::vector<std::string> args;
+        std::string input; // Text for the program (a pager's file), if any.
     };
+    // The text handed to the program that is starting (read in its begin()).
+    std::string programInput;
     std::optional<Launch> launch;
 
     std::int64_t unixNow() const {

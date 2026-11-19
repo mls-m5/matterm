@@ -143,6 +143,18 @@ const char *kMonths[] = {"Jan",
                          "Oct",
                          "Nov",
                          "Dec"};
+const char *kFullMonths[] = {"January",
+                             "February",
+                             "March",
+                             "April",
+                             "May",
+                             "June",
+                             "July",
+                             "August",
+                             "September",
+                             "October",
+                             "November",
+                             "December"};
 const char *kDays[] = {"Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"};
 
 struct Civil {
@@ -992,7 +1004,7 @@ int cmdFind(World &w, const Args &args, CommandIo &io) {
 // ---- system and shell commands -------------------------------------------
 
 int cmdUname(World &w, const Args &args, CommandIo &io) {
-    const auto o = parse(args, "asnrvm");
+    const auto o = parse(args, "asnrvmo");
     if (!o.bad.empty()) {
         return badOption(args, o, io);
     }
@@ -1003,13 +1015,13 @@ int cmdUname(World &w, const Args &args, CommandIo &io) {
     if (all || o.has('n'))
         parts.push_back(w.hostname);
     if (all || o.has('r'))
-        parts.push_back("6.8.0-matterm");
+        parts.push_back("6.8.0-mattrix");
     if (all || o.has('v'))
-        parts.push_back("#1 SMP PREEMPT_DYNAMIC");
+        parts.push_back("#6 SMP Professional Edition");
     if (all || o.has('m'))
         parts.push_back("x86_64");
-    if (all)
-        parts.push_back("GNU/Linux");
+    if (all || o.has('o'))
+        parts.push_back("Mattrix OS 6.0 Professional Edition");
     for (std::size_t i = 0; i < parts.size(); ++i) {
         io.out += (i ? " " : "") + parts[i];
     }
@@ -1090,7 +1102,7 @@ int cmdUnset(World &w, const Args &args, CommandIo &) {
 int cmdPs(World &w, const Args &, CommandIo &io) {
     io.out += "    PID TTY          TIME CMD\n";
     io.out += "      1 ?        00:00:01 init\n";
-    io.out += "     42 pts/0    00:00:00 matterm-sh\n";
+    io.out += "     42 pts/0    00:00:00 mattrix-sh\n";
     io.out += "    137 pts/0    00:00:00 ps\n";
     (void)w;
     return 0;
@@ -1198,10 +1210,10 @@ int cmdWhich(World &w, const Args &args, CommandIo &io) {
 }
 
 int cmdHelp(World &, const Args &, CommandIo &io) {
-    io.out +=
-        "matterm pretend system. A small Unix that lives in your browser.\n"
-        "Nothing here touches your real computer.\n\n"
-        "Commands:\n";
+    io.out += "Mattrix OS 6.0 Professional Edition, a pretend system.\n"
+              "A small Unix that lives in a terminal.\n"
+              "Nothing here touches your real computer.\n\n"
+              "Commands:\n";
     std::string line;
     for (const auto &c : commands()) {
         const std::string entry = std::string(c.name);
@@ -1273,6 +1285,796 @@ int cmdTree(World &w, const Args &args, CommandIo &io) {
     walk(root, "", 0);
     io.out += "\n" + std::to_string(dirs) + " directories, " +
               std::to_string(files) + " files\n";
+    return 0;
+}
+
+// ---- more commands -------------------------------------------------------
+
+std::int64_t daysFromCivil(int y, int m, int d) {
+    y -= m <= 2;
+    const std::int64_t era = (y >= 0 ? y : y - 399) / 400;
+    const auto yoe = unsigned(y - era * 400);
+    const auto doy = unsigned((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1);
+    const auto doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + std::int64_t(doe) - 719468;
+}
+
+int cmdCal(World &w, const Args &args, CommandIo &io) {
+    const auto today = civil(w.unixNow());
+    int month = today.month, year = today.year;
+    if (args.size() == 3) {
+        month = toInt(args[1], 0);
+        year = toInt(args[2], 0);
+    }
+    else if (args.size() == 2) {
+        year = toInt(args[1], 0);
+        month = 0;
+    }
+    if (year < 1 || year > 9999 || month < 0 || month > 12) {
+        io.err += "cal: invalid date\n";
+        return 1;
+    }
+    auto one = [&](int m) {
+        std::string out;
+        const std::string title =
+            std::string(kFullMonths[m - 1]) + " " + std::to_string(year);
+        out += std::string((20 - std::min<std::size_t>(20, title.size())) / 2,
+                           ' ') +
+               title + "\n";
+        out += "Su Mo Tu We Th Fr Sa\n";
+        // 1970-01-01 was a Thursday (4 when Sunday is 0).
+        const auto first = ((daysFromCivil(year, m, 1) % 7 + 7) % 7 + 4) % 7;
+        static const int lengths[] = {
+            31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        const bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+        const int days = lengths[m - 1] + (m == 2 && leap);
+        std::string line(std::size_t(first) * 3, ' ');
+        for (int d = 1; d <= days; ++d) {
+            std::string cell = (d < 10 ? " " : "") + std::to_string(d);
+            if (io.tty && d == today.day && m == today.month &&
+                year == today.year) {
+                cell = "\x1b[7m" + cell + "\x1b[0m";
+            }
+            line += cell;
+            if ((first + d) % 7 == 0 || d == days) {
+                out += line + "\n";
+                line.clear();
+            }
+            else {
+                line += " ";
+            }
+        }
+        return out;
+    };
+    if (month == 0) {
+        for (int m = 1; m <= 12; ++m) {
+            io.out += one(m) + "\n";
+        }
+    }
+    else {
+        io.out += one(month);
+    }
+    return 0;
+}
+
+int cmdFortune(World &w, const Args &, CommandIo &io) {
+    static const char *quotes[] = {
+        "A journey of a thousand miles begins with a single `ls`.",
+        "There is no place like 127.0.0.1.",
+        "Programs must be written for people to read, and only incidentally "
+        "for machines to execute.",
+        "The best way to predict the future is to invent it.",
+        "Everything should be made as simple as possible, but no simpler.",
+        "Premature optimization is the root of all evil.",
+        "To iterate is human, to recurse divine.",
+        "It works on my machine. (This machine is imaginary.)",
+        "Not all those who wander the file system are lost.",
+        "Have you tried turning it off and on again? Try `reset`.",
+        "In the beginning was the command line.",
+        "Look in the dark corners. Look in /usr/games.",
+    };
+    io.out +=
+        std::string(quotes[w.rng.below(sizeof quotes / sizeof quotes[0])]) +
+        "\n";
+    return 0;
+}
+
+int cmdCowsay(World &, const Args &args, CommandIo &io) {
+    std::string text;
+    for (std::size_t i = 1; i < args.size(); ++i) {
+        text += (i > 1 ? " " : "") + args[i];
+    }
+    if (text.empty()) {
+        text = io.in;
+        while (!text.empty() && text.back() == '\n')
+            text.pop_back();
+    }
+    if (text.empty()) {
+        text = "Moo.";
+    }
+    // Wrap at 40 columns.
+    std::vector<std::string> lines;
+    std::istringstream words(text);
+    std::string word, line;
+    while (words >> word) {
+        if (!line.empty() && line.size() + 1 + word.size() > 40) {
+            lines.push_back(line);
+            line.clear();
+        }
+        line += (line.empty() ? "" : " ") + word;
+    }
+    lines.push_back(line);
+    std::size_t width = 0;
+    for (const auto &l : lines)
+        width = std::max(width, l.size());
+    io.out += " " + std::string(width + 2, '_') + "\n";
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        const char open = lines.size() == 1       ? '<'
+                          : i == 0                ? '/'
+                          : i + 1 == lines.size() ? '\\'
+                                                  : '|';
+        const char close = lines.size() == 1       ? '>'
+                           : i == 0                ? '\\'
+                           : i + 1 == lines.size() ? '/'
+                                                   : '|';
+        io.out += std::string(1, open) + " " + lines[i] +
+                  std::string(width - lines[i].size(), ' ') + " " + close +
+                  "\n";
+    }
+    io.out += " " + std::string(width + 2, '-') +
+              "\n"
+              "        \\   ^__^\n"
+              "         \\  (oo)\\_______\n"
+              "            (__)\\       )\\/\\\n"
+              "                ||----w |\n"
+              "                ||     ||\n";
+    return 0;
+}
+
+int cmdRev(World &w, const Args &args, CommandIo &io) {
+    std::string text;
+    const bool ok =
+        inputOf(w, "rev", Args(args.begin() + 1, args.end()), text, io);
+    for (const auto &l : splitLines(text)) {
+        // Reverse by code points so UTF-8 survives.
+        std::vector<std::string> chars;
+        for (std::size_t i = 0; i < l.size();) {
+            const auto b = (unsigned char)l[i];
+            const std::size_t n = b < 0x80    ? 1
+                                  : b >= 0xF0 ? 4
+                                  : b >= 0xE0 ? 3
+                                  : b >= 0xC0 ? 2
+                                              : 1;
+            chars.push_back(l.substr(i, n));
+            i += n;
+        }
+        for (auto it = chars.rbegin(); it != chars.rend(); ++it)
+            io.out += *it;
+        io.out += "\n";
+    }
+    return ok ? 0 : 1;
+}
+
+int cmdTac(World &w, const Args &args, CommandIo &io) {
+    std::string text;
+    const bool ok =
+        inputOf(w, "tac", Args(args.begin() + 1, args.end()), text, io);
+    auto lines = splitLines(text);
+    for (auto it = lines.rbegin(); it != lines.rend(); ++it)
+        io.out += *it + "\n";
+    return ok ? 0 : 1;
+}
+
+int cmdNl(World &w, const Args &args, CommandIo &io) {
+    std::string text;
+    const bool ok =
+        inputOf(w, "nl", Args(args.begin() + 1, args.end()), text, io);
+    int n = 1;
+    for (const auto &l : splitLines(text)) {
+        if (l.empty()) {
+            io.out += "\n";
+            continue;
+        }
+        const auto num = std::to_string(n++);
+        io.out += std::string(6 - std::min<std::size_t>(5, num.size()), ' ') +
+                  num + "\t" + l + "\n";
+    }
+    return ok ? 0 : 1;
+}
+
+std::string expandSet(const std::string &set) {
+    std::string out;
+    for (std::size_t i = 0; i < set.size(); ++i) {
+        char c = set[i];
+        if (c == '\\' && i + 1 < set.size()) {
+            const char e = set[++i];
+            c = e == 'n' ? '\n' : e == 't' ? '\t' : e;
+        }
+        if (i + 2 < set.size() && set[i + 1] == '-' && set[i + 2] >= c) {
+            for (int ch = (unsigned char)c; ch <= (unsigned char)set[i + 2];
+                 ++ch)
+                out += char(ch);
+            i += 2;
+        }
+        else {
+            out += c;
+        }
+    }
+    return out;
+}
+
+int cmdTr(World &, const Args &args, CommandIo &io) {
+    bool del = false, squeeze = false;
+    Args sets;
+    for (std::size_t i = 1; i < args.size(); ++i) {
+        if (args[i] == "-d")
+            del = true;
+        else if (args[i] == "-s")
+            squeeze = true;
+        else
+            sets.push_back(args[i]);
+    }
+    if (sets.empty() || (!del && !squeeze && sets.size() < 2)) {
+        io.err += "tr: missing operand\n";
+        return 1;
+    }
+    const auto from = expandSet(sets[0]);
+    auto to = sets.size() > 1 ? expandSet(sets[1]) : std::string();
+    if (!to.empty() && to.size() < from.size())
+        to.append(from.size() - to.size(), to.back());
+    std::string out;
+    char last = 0;
+    for (const char c : io.in) {
+        const auto at = from.find(c);
+        if (del) {
+            if (at == std::string::npos)
+                out += c;
+            continue;
+        }
+        const char mapped = at != std::string::npos && !to.empty() ? to[at] : c;
+        if (squeeze && at != std::string::npos && mapped == last)
+            continue;
+        out += mapped;
+        last = mapped;
+    }
+    io.out += out;
+    return 0;
+}
+
+int cmdCut(World &w, const Args &args, CommandIo &io) {
+    char delimiter = '\t';
+    std::string fields, chars;
+    Args files;
+    for (std::size_t i = 1; i < args.size(); ++i) {
+        if (args[i] == "-d" && i + 1 < args.size())
+            delimiter = args[++i].empty() ? '\t' : args[i][0];
+        else if (args[i].compare(0, 2, "-d") == 0 && args[i].size() > 2)
+            delimiter = args[i][2];
+        else if (args[i] == "-f" && i + 1 < args.size())
+            fields = args[++i];
+        else if (args[i].compare(0, 2, "-f") == 0)
+            fields = args[i].substr(2);
+        else if (args[i] == "-c" && i + 1 < args.size())
+            chars = args[++i];
+        else if (args[i].compare(0, 2, "-c") == 0)
+            chars = args[i].substr(2);
+        else
+            files.push_back(args[i]);
+    }
+    if (fields.empty() && chars.empty()) {
+        io.err +=
+            "cut: you must specify a list of bytes, characters, or fields\n";
+        return 1;
+    }
+    // A list like "1,3-4": expand to 1-based numbers.
+    auto parseList = [&](const std::string &list) {
+        std::vector<int> picks;
+        std::stringstream parts(list);
+        std::string part;
+        while (std::getline(parts, part, ',')) {
+            const auto dash = part.find('-');
+            if (dash == std::string::npos)
+                picks.push_back(toInt(part, 0));
+            else {
+                const int a = toInt(part.substr(0, dash), 1);
+                const int b = toInt(part.substr(dash + 1), 200);
+                for (int n = a; n <= std::min(b, 200); ++n)
+                    picks.push_back(n);
+            }
+        }
+        return picks;
+    };
+    std::string text;
+    const bool ok = inputOf(w, "cut", files, text, io);
+    const auto picks = parseList(fields.empty() ? chars : fields);
+    for (const auto &l : splitLines(text)) {
+        std::string out;
+        if (!fields.empty()) {
+            std::vector<std::string> cols;
+            std::size_t begin = 0;
+            for (;;) {
+                const auto end = l.find(delimiter, begin);
+                cols.push_back(l.substr(
+                    begin, end == std::string::npos ? end : end - begin));
+                if (end == std::string::npos)
+                    break;
+                begin = end + 1;
+            }
+            if (cols.size() == 1 && l.find(delimiter) == std::string::npos) {
+                io.out += l + "\n";
+                continue;
+            }
+            bool first = true;
+            for (const int n : picks) {
+                if (n >= 1 && std::size_t(n) <= cols.size()) {
+                    out += (first ? "" : std::string(1, delimiter)) +
+                           cols[std::size_t(n) - 1];
+                    first = false;
+                }
+            }
+        }
+        else {
+            for (const int n : picks) {
+                if (n >= 1 && std::size_t(n) <= l.size())
+                    out += l[std::size_t(n) - 1];
+            }
+        }
+        io.out += out + "\n";
+    }
+    return ok ? 0 : 1;
+}
+
+int cmdBasename(World &, const Args &args, CommandIo &io) {
+    if (args.size() < 2) {
+        io.err += "basename: missing operand\n";
+        return 1;
+    }
+    auto path = args[1];
+    while (path.size() > 1 && path.back() == '/')
+        path.pop_back();
+    auto name = path == "/" ? std::string("/")
+                            : path.substr(path.rfind('/') == std::string::npos
+                                              ? 0
+                                              : path.rfind('/') + 1);
+    if (args.size() > 2 && name.size() > args[2].size() &&
+        name.compare(name.size() - args[2].size(), args[2].size(), args[2]) ==
+            0) {
+        name.resize(name.size() - args[2].size());
+    }
+    io.out += name + "\n";
+    return 0;
+}
+
+int cmdDirname(World &, const Args &args, CommandIo &io) {
+    if (args.size() < 2) {
+        io.err += "dirname: missing operand\n";
+        return 1;
+    }
+    auto path = args[1];
+    while (path.size() > 1 && path.back() == '/')
+        path.pop_back();
+    const auto slash = path.rfind('/');
+    io.out += (slash == std::string::npos ? "."
+               : slash == 0               ? "/"
+                                          : path.substr(0, slash)) +
+              "\n";
+    return 0;
+}
+
+int cmdSleep(World &, const Args &, CommandIo &) {
+    return 0; // Nothing waits in a pretend system.
+}
+
+int cmdDf(World &w, const Args &, CommandIo &io) {
+    const auto used = w.fs.totalBytes() / 1024;
+    io.out += "Filesystem     1K-blocks   Used Available Use% Mounted on\n";
+    io.out +=
+        "pretendfs        1048576 " +
+        std::string(6 - std::min<std::size_t>(5, std::to_string(used).size()),
+                    ' ') +
+        std::to_string(used) + "   " + std::to_string(1048576 - used) + "   " +
+        std::to_string(used * 100 / 1048576) + "% /\n";
+    io.out += "tmpfs             262144      0    262144   0% /tmp\n";
+    return 0;
+}
+
+int cmdFree(World &, const Args &, CommandIo &io) {
+    io.out += "               total        used        free      shared  "
+              "buff/cache   available\n"
+              "Mem:         1048576      214040      602112        1024      "
+              "232424      760832\n"
+              "Swap:              0           0           0\n";
+    return 0;
+}
+
+int cmdPrintf(World &, const Args &args, CommandIo &io) {
+    if (args.size() < 2) {
+        io.err += "printf: usage: printf format [arguments]\n";
+        return 2;
+    }
+    const auto &f = args[1];
+    std::size_t next = 2;
+    for (std::size_t i = 0; i < f.size(); ++i) {
+        if (f[i] == '\\' && i + 1 < f.size()) {
+            const char e = f[++i];
+            io.out += e == 'n'    ? '\n'
+                      : e == 't'  ? '\t'
+                      : e == 'e'  ? '\x1b'
+                      : e == '\\' ? '\\'
+                                  : e;
+        }
+        else if (f[i] == '%' && i + 1 < f.size()) {
+            const char k = f[++i];
+            if (k == '%')
+                io.out += '%';
+            else if (k == 's')
+                io.out += next < args.size() ? args[next++] : "";
+            else if (k == 'd')
+                io.out += std::to_string(
+                    next < args.size() ? toInt(args[next++], 0) : 0);
+            else {
+                io.out += '%';
+                io.out += k;
+            }
+        }
+        else {
+            io.out += f[i];
+        }
+    }
+    return 0;
+}
+
+int cmdSed(World &w, const Args &args, CommandIo &io) {
+    if (args.size() < 2) {
+        io.err += "sed: no script given\n";
+        return 1;
+    }
+    const auto &script = args[1];
+    if (script.size() < 4 || script[0] != 's') {
+        io.err += "sed: only s/pattern/replacement/[g] is supported\n";
+        return 1;
+    }
+    const char d = script[1];
+    const auto a = script.find(d, 2);
+    const auto b = a == std::string::npos ? a : script.find(d, a + 1);
+    if (b == std::string::npos) {
+        io.err += "sed: unterminated `s' command\n";
+        return 1;
+    }
+    const auto pattern = script.substr(2, a - 2);
+    const auto replacement = script.substr(a + 1, b - a - 1);
+    const auto flags = script.substr(b + 1);
+    std::regex re;
+    try {
+        re = std::regex(pattern,
+                        flags.find('i') != std::string::npos
+                            ? std::regex::icase | std::regex::ECMAScript
+                            : std::regex::ECMAScript);
+    }
+    catch (const std::regex_error &) {
+        io.err += "sed: invalid regular expression\n";
+        return 1;
+    }
+    std::string text;
+    const bool ok =
+        inputOf(w, "sed", Args(args.begin() + 2, args.end()), text, io);
+    for (const auto &l : splitLines(text)) {
+        io.out +=
+            std::regex_replace(l,
+                               re,
+                               replacement,
+                               flags.find('g') != std::string::npos
+                                   ? std::regex_constants::format_default
+                                   : std::regex_constants::format_first_only) +
+            "\n";
+    }
+    return ok ? 0 : 1;
+}
+
+// A fat old CRT television, drawn with markers: \x01 body, \x02 screen,
+// \x03 the name on the screen, \x04 knobs, \x05 back to plain.
+const char *const kTv[] = {
+    "       "
+    "\x01"
+    "\\"
+    "\x05"
+    "       "
+    "\x01"
+    "/"
+    "\x05"
+    "        "
+    "\x05"
+    "",
+    "        "
+    "\x01"
+    "\\"
+    "\x05"
+    "     "
+    "\x01"
+    "/"
+    "\x05"
+    "         "
+    "\x05"
+    "",
+    "         "
+    "\x01"
+    "\\"
+    "\x05"
+    "   "
+    "\x01"
+    "/"
+    "\x05"
+    "          "
+    "\x05"
+    "",
+    "          "
+    "\x01"
+    "\\"
+    "\x05"
+    " "
+    "\x01"
+    "/"
+    "\x05"
+    "           "
+    "\x05"
+    "",
+    "   "
+    "\x01"
+    ".-------V-------."
+    "\x05"
+    "    "
+    "\x05"
+    "",
+    "  "
+    "\x01"
+    "/"
+    "\x05"
+    "  "
+    "\x01"
+    ".-----------."
+    "\x05"
+    "  "
+    "\x01"
+    "\\"
+    "\x05"
+    "   "
+    "\x05"
+    "",
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    "  "
+    "\x01"
+    "/"
+    "\x02"
+    "             "
+    "\x01"
+    "\\"
+    "\x05"
+    "  "
+    "\x01"
+    "|"
+    "\x05"
+    "  "
+    "\x05"
+    "",
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x01"
+    "|"
+    "\x02"
+    "    "
+    "\x03"
+    "MATTRIX"
+    "\x02"
+    "    "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    "  "
+    "\x05"
+    "",
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x01"
+    "|"
+    "\x02"
+    "      "
+    "\x03"
+    "O S"
+    "\x02"
+    "      "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    "  "
+    "\x05"
+    "",
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x01"
+    "|"
+    "\x02"
+    "               "
+    "\x01"
+    "|"
+    "\x05"
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    "  "
+    "\x05"
+    "",
+    " "
+    "\x01"
+    "|"
+    "\x05"
+    "  "
+    "\x01"
+    "\\"
+    "\x02"
+    "_____________"
+    "\x01"
+    "/"
+    "\x05"
+    "  "
+    "\x01"
+    "|"
+    "\x05"
+    "  "
+    "\x05"
+    "",
+    "  "
+    "\x01"
+    "\\"
+    "\x05"
+    "  "
+    "\x04"
+    "o  o      "
+    "\x01"
+    "::::"
+    "\x05"
+    "  "
+    "\x01"
+    "/"
+    "\x05"
+    "  "
+    "\x05"
+    "",
+    "   "
+    "\x01"
+    "'---------------'"
+    "\x05"
+    "    "
+    "\x05"
+    "",
+    "     "
+    "\x01"
+    "|__|"
+    "\x05"
+    "      "
+    "\x01"
+    "|__|"
+    "\x05"
+    "     "
+    "\x05"
+    "",
+};
+
+int cmdNeofetch(World &w, const Args &, CommandIo &io) {
+    const auto up =
+        std::chrono::duration_cast<std::chrono::seconds>(w.now).count() +
+        3 * 86400 + 4 * 3600 + 17 * 60;
+    const std::string account = w.user + "@" + w.hostname;
+    struct Line {
+        std::string label, value;
+    };
+    const std::vector<Line> info = {
+        {"OS", "Mattrix OS 6.0 Professional Edition x86_64"},
+        {"Host", w.hostname + " (a pretend machine)"},
+        {"Kernel", "6.8.0-mattrix"},
+        {"Uptime",
+         std::to_string(up / 86400) + " days, " +
+             std::to_string(up % 86400 / 3600) + " hours, " +
+             std::to_string(up % 3600 / 60) + " mins"},
+        {"Packages", "42 (mattrix)"},
+        {"Shell", "mattrix-sh 1.0"},
+        {"Terminal",
+         std::to_string(w.columns) + "x" + std::to_string(w.rows) + " cells"},
+        {"CPU", "Imaginary i0-9000 (1) @ 3.00GHz"},
+        {"Memory", "214MiB / 1024MiB"},
+    };
+    std::vector<std::string> right;
+    right.push_back(io.tty ? "\x1b[1;32m" + w.user + "\x1b[0m@\x1b[1;32m" +
+                                 w.hostname + "\x1b[0m"
+                           : account);
+    right.push_back(std::string(account.size(), '-'));
+    for (const auto &l : info) {
+        right.push_back(io.tty ? "\x1b[1;36m" + l.label + "\x1b[0m: " + l.value
+                               : l.label + ": " + l.value);
+    }
+    right.push_back("");
+    std::string blocks, bright;
+    for (int i = 0; i < 8; ++i) {
+        blocks += "\x1b[4" + std::to_string(i) + "m   ";
+        bright += "\x1b[10" + std::to_string(i) + "m   ";
+    }
+    right.push_back(io.tty ? blocks + "\x1b[0m" : "");
+    right.push_back(io.tty ? bright + "\x1b[0m" : "");
+    const std::size_t rows = std::max(right.size(), sizeof kTv / sizeof kTv[0]);
+    for (std::size_t r = 0; r < rows; ++r) {
+        std::string left;
+        std::size_t width = 0;
+        if (r < sizeof kTv / sizeof kTv[0]) {
+            for (const char c : std::string(kTv[r])) {
+                if ((unsigned char)c <= 5) {
+                    if (io.tty) {
+                        static const char *colors[] = {"",
+                                                       "\x1b[33m",
+                                                       "\x1b[36m",
+                                                       "\x1b[1;92m",
+                                                       "\x1b[31m",
+                                                       "\x1b[0m"};
+                        left += colors[int(c)];
+                    }
+                }
+                else {
+                    left += c;
+                    ++width;
+                }
+            }
+        }
+        left += std::string(width < 27 ? 27 - width : 0, ' ');
+        io.out += left + (r < right.size() ? right[r] : "") + "\n";
+    }
+    return 0;
+}
+
+// Programs started from a command: `less FILE`, `top`, ... The program gets the
+// text through the World.
+int cmdLess(World &w, const Args &args, CommandIo &io) {
+    std::string text;
+    if (args.size() > 1) {
+        for (std::size_t i = 1; i < args.size(); ++i) {
+            std::string part;
+            if (!readFile(w, "less", args[i], part, io))
+                return 1;
+            text += part;
+        }
+    }
+    else if (!io.in.empty()) {
+        text = io.in;
+    }
+    else {
+        io.err += "Missing filename (\"less --help\" for help)\n";
+        return 1;
+    }
+    w.programInput = text;
+    w.launch = World::Launch{"less", {}, {}};
+    return 0;
+}
+
+int cmdTop(World &w, const Args &, CommandIo &) {
+    w.launch = World::Launch{"top", {}, {}};
     return 0;
 }
 
@@ -1464,6 +2266,25 @@ const std::vector<CommandInfo> &commands() {
         {"colors", cmdColors, false, "show the terminal's colors"},
         {"which", cmdWhich, false, "locate a command"},
         {"man", cmdMan, false, "show a manual entry"},
+        {"cal", cmdCal, false, "show a calendar"},
+        {"fortune", cmdFortune, false, "print a saying"},
+        {"cowsay", cmdCowsay, false, "a cow says it"},
+        {"rev", cmdRev, false, "reverse each line"},
+        {"tac", cmdTac, false, "print lines in reverse order"},
+        {"nl", cmdNl, false, "number lines"},
+        {"tr", cmdTr, false, "translate or delete characters"},
+        {"cut", cmdCut, false, "select fields or characters"},
+        {"sed", cmdSed, false, "replace text with s/old/new/"},
+        {"printf", cmdPrintf, false, "format and print"},
+        {"basename", cmdBasename, false, "strip the directory from a path"},
+        {"dirname", cmdDirname, false, "strip the last part of a path"},
+        {"sleep", cmdSleep, false, "wait (instantly, here)"},
+        {"df", cmdDf, false, "show disk space"},
+        {"free", cmdFree, false, "show memory"},
+        {"less", cmdLess, false, "page through a file"},
+        {"neofetch", cmdNeofetch, false, "show the system with a picture"},
+        {"sysinfo", cmdNeofetch, false, "show the system with a picture"},
+        {"top", cmdTop, false, "watch the processes"},
     };
     return table;
 }

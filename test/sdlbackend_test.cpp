@@ -136,7 +136,8 @@ TEST_CASE("Fractional rows are clipped to text bounds and cannot cover the "
     EXPECT_EQ(fixture.pixel(319, 0), Uint32(0xc81e28));
 }
 
-TEST_CASE("A reserved strip without a scrollbar continues the last cell per row") {
+TEST_CASE(
+    "A reserved strip without a scrollbar continues the last cell per row") {
     Fixture fixture;
     // The frontend's column count leaves the 12 px strip (and any remainder)
     // to the right of the last column.
