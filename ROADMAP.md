@@ -8,7 +8,7 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [x] Direct cell drawing, bounded block-backed history, and borrowed row views.
 - [x] SDL atlas rendering, cursor overlay, scrollbar, and fractional scrolling.
 - [x] CPU terminal model with cursor, colors, erasure, wrapping, primary/alternate screens.
-- [x] Keep matterm-demo and matterm-terminal-demo as separate permanent clients.
+- [x] Keep matterm-render-demo and matterm-lib-demo as separate permanent clients (the name `matterm-demo` is reserved for the showcase, see docs/tasks/fakeos-demo.md).
 - [x] Group common cells/storage/view state under src/core/.
 - [x] Group graphical backends under src/render/.
 - [x] Keep screen behavior under src/terminal/ and stream parsing under src/terminal/vt/.
@@ -210,4 +210,4 @@ These describe much more functionality than matterm currently implements.
   scrollback cost); decide which protocol(s) first.
 - [ ] Web demo as a platform: static apps written against a small program interface,
   optional relay for chat/multi-user later (see docs/tasks/fakeos-demo.md).
-  Consider merging the fakeos demo with `matterm-terminal-demo`.
+  The fakeos demo became the new `matterm-demo`; the old demos are now `matterm-render-demo` and `matterm-lib-demo`.

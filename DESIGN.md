@@ -1,7 +1,7 @@
 # matterm Architecture and Roadmap
 
 This document records the agreed direction, not a completed implementation.
-The matterm-demo application starts with ASCII branding and a static gradient
+The matterm-render-demo application starts with ASCII branding and a static gradient
 welcome screen. User-triggered streaming and burst output exercise TerminalMemory,
 RenderFrame, and SdlBackend. It draws numbered rows from a block-backed ring directly
 through a borrowed cell view, without a separate visible-cell copy. Mouse wheel
@@ -9,7 +9,7 @@ and keyboard controls navigate history; a blinking cursor is shown at the live
 bottom. ScrollViewport now provides smooth fractional-row navigation and scrollbar
 proportions; SdlBackend clips shifted text and draws a right-hand scrollbar.
 CellBuffer remains available as a CPU-only scratch surface. A separate
-matterm-terminal-demo now uses TerminalModel for writing, cursor/erase operations,
+matterm-lib-demo now uses TerminalModel for writing, cursor/erase operations,
 primary history, and an isolated alternate screen. A separate matterm application
 now consumes VT streams from a real Linux PTY or optional built-in/file sources.
 Native input, resize, process lifecycle, and parser replies are connected. Text
@@ -20,9 +20,9 @@ clusters and complete VT compatibility are not implemented yet.
 matterm is the project name. The build-tree target matterm::renderer is the common
 rendering library interface. Keep it usable independently of terminal emulation.
 
-- matterm-demo is a permanent, separate example application. Its welcome artwork,
+- matterm-render-demo is a permanent, separate example application. Its welcome artwork,
   generated rows, and demo controls live under demo/, outside the renderer.
-- matterm::terminal provides the CPU-only TerminalModel. matterm-terminal-demo
+- matterm::terminal provides the CPU-only TerminalModel. matterm-lib-demo
   exercises its direct API and renders through matterm::renderer. It has no shell.
 - matterm::vt provides the incremental UTF-8/VT subset; the separate matterm
   frontend uses it without changing either demo. It calls model operations,
@@ -238,7 +238,7 @@ current colors and never removes primary history. Characters currently occupy
 one cell each; invalid scalars become U+FFFD. Resize keeps the insertion point
 when widening a line whose wrap was pending. Screen sizes must be positive.
 
-matterm-terminal-demo converts SDL text input to UTF-32 at its client boundary
+matterm-lib-demo converts SDL text input to UTF-32 at its client boundary
 using the shared incremental Utf8Decoder, not platform-dependent iconv formats.
 The decoder buffers split characters, replaces malformed UTF-8, and flushes
 truncated input on finish(). VtParser now reuses this decoder for text runs;
@@ -317,10 +317,10 @@ measurements justify them; no performance target has been verified yet.
    are implemented, with CPU and framebuffer tests. Optional scrollbar interaction
    and smooth live-output scrolling can be considered separately.
 6. Branding and the static gradient welcome screen are implemented in the
-   permanent matterm-demo client. S/Space toggles output, B bursts 300 rows, and
+   permanent matterm-render-demo client. S/Space toggles output, B bursts 300 rows, and
    R restores the welcome screen. Startup is idle, not a continuous stress test.
 7. Basic terminal screen semantics and independent primary/alternate state are
-   implemented in matterm::terminal and demonstrated by matterm-terminal-demo.
+   implemented in matterm::terminal and demonstrated by matterm-lib-demo.
    Tests cover wrapping, controls, erasure, history, resize, and screen isolation.
 8. The initial VT parser now handles fragmented text/CSI/OSC input, colors,
    cursor/erase operations, saved cursor, narrow alternate mode, and explicit

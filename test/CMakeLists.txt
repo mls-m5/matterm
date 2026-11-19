@@ -236,13 +236,13 @@ if(BUILD_TESTING)
         add_test(NAME sdl_backend COMMAND sdlbackend_test)
         set_tests_properties(sdl_backend PROPERTIES
             ENVIRONMENT "GLYPH_TEST_FONT=${TEST_FONT_FILE};SDL_VIDEODRIVER=dummy")
-        if(TARGET matterm-demo)
+        if(TARGET matterm-render-demo)
             add_test(NAME glyph_render_smoke
-                COMMAND matterm-demo "${TEST_FONT_FILE}" --smoke-test)
+                COMMAND matterm-render-demo "${TEST_FONT_FILE}" --smoke-test)
             set_tests_properties(glyph_render_smoke PROPERTIES
                 ENVIRONMENT "SDL_VIDEODRIVER=dummy")
             add_test(NAME terminal_model_render_smoke
-                COMMAND matterm-terminal-demo "${TEST_FONT_FILE}" --smoke-test)
+                COMMAND matterm-lib-demo "${TEST_FONT_FILE}" --smoke-test)
             set_tests_properties(terminal_model_render_smoke PROPERTIES
                 ENVIRONMENT "SDL_VIDEODRIVER=dummy")
         endif()
@@ -286,7 +286,7 @@ if(BUILD_TESTING)
             endif()
         endif()
         if(MATTERM_BUNDLE_FONT)
-            foreach(app IN ITEMS matterm matterm-demo matterm-terminal-demo)
+            foreach(app IN ITEMS matterm matterm-render-demo matterm-lib-demo)
                 if(TARGET ${app})
                     add_test(NAME ${app}_default_font COMMAND ${app} --smoke-test)
                     set_tests_properties(${app}_default_font PROPERTIES
