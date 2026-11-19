@@ -18,9 +18,11 @@ files and programs in the virtual file system, or changes a program makes to the
 | Secret-looking files | `~/Downloads` (`ls -a` for `.blush`) holds a love limerick, a "private" poem that ends "You opened it anyway. I knew you would.", `passwords_final_v3.txt` (just "password123"), ASCII hearts and a sunset, and a rom-com poster for two processes sharing a pipe. All sweet and harmless. |
 | The romantic history | `~/.bash_history_romantic` (`ls -a ~`) shows `sudo make love` and its answer; typing `make love` (or with `sudo`) answers the same. `/var/log/feelings.log` and `/etc/motd.love` go with it. |
 | The last poem | The history and the vacation pictures point to `~/.local/share/Trash/files/last_poem.txt`. |
+| Greetings | `hello`, `hi` and `hej` count together: each makes the system grumpier ("Hello again, guest." ... "Is this a test?" ... "I am a Professional Edition. Please act professionally.") for eight steps; any other non-empty command cools it by one step; the eighth is "please kill me..." and the system reboots (a fresh world, "Rebooting the system...", the intro). Table in `eggs.cpp`. |
+| The real crash | `rm -rf /` only warns. With `--no-preserve-root` (also with `sudo`, `-fr`, and either order) it asks "Are you really really sure? (y/n)": anything but `y` is "Wise choice.". `y` wipes the virtual disk, clears the screen, "Looking for boot media...", then "No bootable device -- insert boot disk and press any key" with a blinking cursor and no prompt. After about eight seconds (or at a key once the message is up) it reboots: a fresh world and the intro. |
 | Editors | `vim`, `vi`, `nano`, `emacs`: "There is no editor here". |
-| Quick ones | `42`, `neo`, the fork bomb `:(){ :|:& };:`, `rm -rf --no-preserve-root /`. |
-| rm -rf / | Refused like GNU rm, with a hint about `--no-preserve-root` (which the pretend `rm` does not honor: the world is safe anyway, and `reset` restores it). |
+| Quick ones | `42`, `neo`, the fork bomb `:(){ :|:& };:`. |
+| rm -rf / | Refused like GNU rm, with a hint about `--no-preserve-root`; see "The real crash". |
 
 Clicks: `Egg::Trigger::Click` with `match = "program/word"` fires when a left
 click, through mouse reporting, lands on a word that program drew. The program

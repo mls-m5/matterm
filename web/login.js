@@ -20,16 +20,14 @@
   }
 
   // Film-terminal pips for revealed and typed text (the demo only), made with
-  // WebAudio: nothing to download. Browsers allow sound only after a user
-  // gesture, so the audio context is created at the first key or click. On by
-  // default in the demo page, off in an embedded one; ?sound=1 turns it on
-  // anywhere, ?mute or ?sound=0 off.
+  // WebAudio: nothing to download. Off by default; ?sound=1 starts the page with
+  // them on and the `sound on` command turns them on while it runs (?mute or
+  // ?sound=0 start it off, which is the default). Browsers allow sound only after
+  // a user gesture, so the audio context is created at the first key or click:
+  // typing `sound on` is that gesture.
   window.mattermSoundWanted = (function () {
     const p = pageParams;
-    if (p.has("mute") || p.get("sound") === "0") {
-      return false;
-    }
-    return p.has("sound") || !embed;
+    return p.has("sound") && !p.has("mute") && p.get("sound") !== "0";
   })();
   (function setupSound() {
     let ctx = null;
@@ -54,7 +52,7 @@
       window.addEventListener(name, unlock, { passive: true });
     });
     window.mattermBeep = function (frequency, ms, volume) {
-      if (!window.mattermSoundWanted || !ctx || ctx.state !== "running" || playing > 24) {
+      if (!ctx || ctx.state !== "running" || playing > 24) {
         return;
       }
       const t = ctx.currentTime;

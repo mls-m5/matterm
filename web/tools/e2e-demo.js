@@ -47,7 +47,7 @@ const check = (name, ok, detail) => {
   const info = await text();
   check('neofetch names the system', info.includes('Mattrix OS 6.0 Professional Edition') && info.includes('MATTRIX'),
     JSON.stringify(info.slice(-200)));
-  check('the pips are available', await page.evaluate(() => typeof window.mattermBeep === 'function' && window.mattermSoundWanted === true));
+  check('the pips are available but off by default', await page.evaluate(() => typeof window.mattermBeep === 'function' && window.mattermSoundWanted === false));
   await page.keyboard.type('fire\n', { delay: 30 }); // fire is in the PATH and in the hints.
   await page.waitForTimeout(1200);
   const first = await canvas();
@@ -73,7 +73,7 @@ const check = (name, ok, detail) => {
   const ran = await embedded.evaluate(() => navigator.clipboard.readText());
   check('?cmd runs at the first prompt', ran.includes('uname -a') && ran.includes('6.8.0-mattrix'), JSON.stringify(ran.slice(0, 200)));
   check('an embedded page is silent by default', await embedded.evaluate(() => window.mattermSoundWanted === false));
-  for (const [query, wanted] of [['?demo&embed&sound=1', true], ['?demo&mute', false], ['?demo&sound=0', false]]) {
+  for (const [query, wanted] of [['?demo&sound=1', true], ['?demo&embed&sound=1', true], ['?demo&mute', false], ['?demo&sound=1&mute', false], ['?demo&sound=0', false]]) {
     const sound = await (await browser.newContext({ viewport: { width: 500, height: 300 } })).newPage();
     await sound.goto(base + query);
     await sound.waitForTimeout(500);

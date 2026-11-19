@@ -119,13 +119,16 @@ TEST_CASE(
     auto film = [](bool sound, std::vector<Beep> *out) {
         Heard heard;
         Pc pc(listening(heard, sound));
+        settle(pc);
+        const auto from =
+            pc.raw.size(); // After the welcome, which names the setting.
         pc.run("seq 1 120");
         pc.run("ls");
         settle(pc);
         if (out) {
             *out = heard.beeps;
         }
-        return pc.raw;
+        return pc.raw.substr(from);
     };
     std::vector<Beep> first, second;
     const auto loud = film(true, &first);
@@ -183,6 +186,82 @@ TEST_CASE("The intro types its first line with pips and is silent before") {
     for (const auto &b : heard.beeps) {
         EXPECT(b.frequency >= 300 && b.frequency <= 2000);
     }
+}
+
+TEST_CASE(
+    "sound on|off switches the pips while the demo runs; off is the default") {
+    Heard heard;
+    Config config =
+        listening(heard, false); // A host that can play, starting silent.
+    Pc pc(config);
+    settle(pc);
+    EXPECT(pc.shows("Sound: Off ('sound on' turns it on)"));
+    pc.run("seq 1 60");
+    settle(pc);
+    EXPECT(heard.beeps.empty());
+    pc.run("sound on");
+    settle(pc);
+    EXPECT(pc.shows("Sound: on"));
+    pc.run("clear");
+    pc.run("seq 1 60");
+    settle(pc);
+    EXPECT(!heard.beeps.empty());
+    pc.run("sound off");
+    settle(pc);
+    const auto before = heard.beeps.size();
+    pc.run("seq 1 60");
+    settle(pc);
+    EXPECT(heard.beeps.size() == before);
+    pc.run("sound");
+    settle(pc);
+    EXPECT(pc.shows("Sound: off"));
+    pc.run("sound loud");
+    settle(pc);
+    EXPECT(pc.shows("usage: sound on|off"));
+}
+
+TEST_CASE("The welcome file follows the sound setting, reset goes back to the "
+          "host's") {
+    Heard heard;
+    Pc pc(listening(heard, true));
+    settle(pc);
+    EXPECT(pc.shows("Sound: On ('sound off' turns it off)"));
+    pc.run("sound off");
+    settle(pc);
+    pc.run("clear");
+    pc.run("cat /etc/motd");
+    settle(pc);
+    EXPECT(pc.shows("Sound: Off ('sound on' turns it on)"));
+    pc.run("reset");
+    settle(pc);
+    pc.run("cat /etc/motd");
+    settle(pc);
+    EXPECT(pc.shows("Sound: On ('sound off' turns it off)"));
+}
+
+TEST_CASE("Without a way to play, sound cannot be switched on") {
+    Config config;
+    config.intro = false;
+    config.revealCharsPerSecond = 1250;
+    Pc pc(config); // No onBeep: no audio here.
+    settle(pc);
+    EXPECT(pc.shows("Sound: not available here"));
+    pc.run("sound on");
+    settle(pc);
+    EXPECT(pc.shows("Sound is not available here."));
+    pc.run("echo $?");
+    settle(pc);
+    EXPECT(pc.shows("\n1\n"));
+}
+
+TEST_CASE("help and the welcome mention sound") {
+    Heard heard;
+    Pc pc(listening(heard, false));
+    settle(pc);
+    EXPECT(pc.shows("Try: fire, gradient, neofetch, about, sound on"));
+    pc.run("help");
+    settle(pc);
+    EXPECT(pc.shows("'sound on'"));
 }
 
 TEST_SUIT_END

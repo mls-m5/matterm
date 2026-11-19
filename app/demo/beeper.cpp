@@ -4,7 +4,8 @@
 
 namespace {
 constexpr int kSampleRate = 44100;
-constexpr double kMasterVolume = 0.15; // Pips are small blips; keep them gentle.
+constexpr double kMasterVolume =
+    0.15; // Pips are small blips; keep them gentle.
 } // namespace
 
 Beeper::Beeper()
@@ -22,9 +23,7 @@ Beeper::Beeper()
     SDL_AudioSpec have{};
     // No format changes allowed: SDL converts for the device instead.
     device_ = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
-    if (device_ != 0) {
-        SDL_PauseAudioDevice(device_, 0);
-    }
+    // Stays paused (and quiet for the sound system) until the first pip.
 }
 
 Beeper::~Beeper() {
@@ -41,6 +40,10 @@ void Beeper::play(const fakeos::Beep &beep) {
     SDL_LockAudioDevice(device_);
     synth_->add(beep.frequency, beep.durationMs, beep.volume * kMasterVolume);
     SDL_UnlockAudioDevice(device_);
+    if (!started_) {
+        started_ = true;
+        SDL_PauseAudioDevice(device_, 0);
+    }
 }
 
 void Beeper::callback(void *self, Uint8 *stream, int bytes) {

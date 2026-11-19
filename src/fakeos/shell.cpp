@@ -552,7 +552,14 @@ int Shell::runPipeline(const std::vector<Simple> &pipeline,
 std::string Shell::run(const std::string &line) {
     std::string terminal;
     // Easter eggs see the line first.
-    if (const auto *egg = matchEgg(world_, line)) {
+    const auto *egg = matchEgg(world_, line);
+    // Any other line cools the greetings' mood a little (an empty one does
+    // not).
+    if ((!egg || egg->steps.empty()) &&
+        line.find_first_not_of(" \t") != std::string::npos) {
+        calmMoods(world_);
+    }
+    if (egg) {
         if (applyEgg(world_, *egg, terminal) && egg->replaces) {
             return crlf(terminal);
         }

@@ -65,7 +65,7 @@ matterm-demo [font.ttf] [--font-size N] [--no-intro] [--no-reveal]
 
 The terminal model and the SDL renderer, cell-snapped like the other frontends, with
 mouse reporting for programs that ask for it, selection and the wheel. The cursor
-glides by default; `--sound` plays film-terminal pips (SDL audio, off by default). `exit`
+glides by default; `--sound` plays film-terminal pips from the start (SDL audio; off by default, `sound on` turns them on later). `exit`
 closes the window.
 
 ## In your own terminal

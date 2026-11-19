@@ -932,8 +932,8 @@ int main() {
             return new URLSearchParams(location.search).has("noreveal") ? 0
                                                                         : 1250;
         });
-        // Pips: login.js decides (on in the demo page, off when embedded,
-        // ?sound=1 / ?mute) and plays them with WebAudio after a user gesture.
+        // Pips: off unless ?sound=1; the `sound on` command turns them on, and
+        // login.js plays them with WebAudio after a user gesture.
         pretend.sound =
             EM_ASM_INT({ return window.mattermSoundWanted ? 1 : 0; }) != 0;
         pretend.onBeep = [](const fakeos::Beep &beep) {
