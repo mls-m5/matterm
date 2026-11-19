@@ -1,20 +1,42 @@
-#include "server.h"
+#include "config.h"
 #include <boost/asio/signal_set.hpp>
-#include <charconv>
 #include <csignal>
+#include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <sodium.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace {
-unsigned short portNumber(const std::string &text) {
-    unsigned value = 0;
-    const auto result =
-        std::from_chars(text.data(), text.data() + text.size(), value);
-    if (result.ec != std::errc{} || result.ptr != text.data() + text.size() ||
-        value > 65535)
-        throw std::invalid_argument("Invalid port");
-    return static_cast<unsigned short>(value);
+void usage() {
+    std::cout
+        << "matterm-server [--config PATH] [--print-config] [--listen ADDR] "
+           "[--port N]\n"
+           "  [--origin URL] [--credentials PATH] [--static-dir DIR] "
+           "[--allow-plain-http]\n"
+           "  [-- PROGRAM ARG...]\n"
+           "matterm-server --set-password [--config PATH] [--credentials PATH] "
+           "< password-file\n"
+           "Settings come from built-in defaults, then the config file "
+           "(default\n"
+           "$XDG_CONFIG_HOME/matterm/server.json), then these flags. See "
+           "docs/SERVER_CONFIG.md.\n";
+}
+std::string readPassword() {
+    std::string password;
+    // Bounded stdin, never argv. Stop on LF; CR is a password byte.
+    char c;
+    while (std::cin.get(c) && c != '\n') {
+        if (password.size() == 256)
+            throw std::invalid_argument("Password too long");
+        password += c;
+    }
+    return password;
+}
+bool exists(const std::string &path) {
+    struct stat st {};
+    return ::lstat(path.c_str(), &st) == 0;
 }
 } // namespace
 int main(int argc, char **argv) {
@@ -22,70 +44,49 @@ int main(int argc, char **argv) {
         if (::geteuid() == 0)
             throw std::runtime_error("matterm-server refuses to run as root");
         server::initializeCrypto();
-        server::ServerConfig config;
-        std::string credentials;
-        bool setPassword = false;
-        for (int i = 1; i < argc; ++i) {
-            const std::string option = argv[i];
-            auto value = [&]() -> std::string {
-                if (++i == argc)
-                    throw std::invalid_argument("Missing option value");
-                return argv[i];
-            };
-            if (option == "--listen")
-                config.address = value();
-            else if (option == "--port")
-                config.port = portNumber(value());
-            else if (option == "--origin")
-                config.allowedOrigin = value();
-            else if (option == "--credentials")
-                credentials = value();
-            else if (option == "--static-dir")
-                config.staticDir = value();
-            else if (option == "--allow-plain-http")
-                config.allowPlainHttp = true;
-            else if (option == "--set-password")
-                setPassword = true;
-            else if (option == "--") {
-                config.process.arguments.clear();
-                for (++i; i < argc; ++i)
-                    config.process.arguments.emplace_back(argv[i]);
-                if (config.process.arguments.empty())
-                    throw std::invalid_argument("Missing program after --");
-                break;
-            }
-            else if (option == "--help") {
-                std::cout << "matterm-server [--listen 127.0.0.1] [--port "
-                             "8080] [--origin http://localhost:8080]\n"
-                             "  [--credentials PATH] [--allow-plain-http] "
-                             "[--static-dir DIR] [-- "
-                             "PROGRAM ARG...]\n"
-                             "matterm-server --set-password --credentials PATH "
-                             "< password-file\n";
-                return 0;
-            }
-            else
-                throw std::invalid_argument("Unknown option");
+        const auto commandLine = server::parseCommandLine(
+            std::vector<std::string>(argv + 1, argv + argc));
+        if (commandLine.help) {
+            usage();
+            return 0;
         }
-        if (setPassword) {
-            if (credentials.empty())
+        auto settings = server::resolveSettings(commandLine, std::getenv);
+        if (commandLine.setPassword) {
+            if (settings.credentialsPath.empty())
                 throw std::invalid_argument(
-                    "--set-password requires --credentials PATH");
-            std::string password;
-            // Bounded stdin, never argv. Stop on LF; CR is a password byte.
-            char c;
-            while (std::cin.get(c) && c != '\n') {
-                if (password.size() == 256)
-                    throw std::invalid_argument("Password too long");
-                password += c;
+                    "--set-password needs --credentials PATH, a "
+                    "\"credentials\" setting or a usable config directory");
+            if (settings.credentialsDefaulted) {
+                // The default location may not exist yet.
+                const auto directory =
+                    std::filesystem::path(settings.credentialsPath)
+                        .parent_path();
+                if (!exists(directory.string())) {
+                    std::filesystem::create_directories(directory);
+                    ::chmod(directory.c_str(), 0700);
+                }
             }
-            server::savePassword(credentials, password);
+            auto password = readPassword();
+            server::savePassword(settings.credentialsPath, password);
             sodium_memzero(password.data(), password.size());
             return 0;
         }
-        config.passwordHash = server::loadPasswordHash(credentials);
+        if (!settings.credentialsPath.empty()) {
+            if (settings.credentialsDefaulted &&
+                !exists(settings.credentialsPath))
+                std::clog << "matterm-server: no credentials file at "
+                          << settings.credentialsPath
+                          << "; every login will fail (see --set-password)\n";
+            else
+                settings.server.passwordHash =
+                    server::loadPasswordHash(settings.credentialsPath);
+        }
+        if (commandLine.printConfig) {
+            std::cout << server::printConfig(settings);
+            return 0;
+        }
         boost::asio::io_context io;
-        server::Server listener(io, std::move(config));
+        server::Server listener(io, std::move(settings.server));
         boost::asio::signal_set signals(io, SIGINT, SIGTERM);
         signals.async_wait(
             [&io](const boost::system::error_code &, int) { io.stop(); });
