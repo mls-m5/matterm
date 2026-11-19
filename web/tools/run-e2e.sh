@@ -17,6 +17,7 @@ sleep 1
 url="http://localhost:$port/"
 node "$here/e2e-input.js" "$url" "$password" "$out"
 node "$here/e2e-copy.js" "$url" "$password"
+node "$here/e2e-select.js" "$url" "$password"
 node "$here/e2e-lifecycle.js" "$url" "$password" "$out"
 node "$here/e2e-touch.js" "$url" "$out/touch.png" "$password"
 echo "screenshots in $out"
