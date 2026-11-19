@@ -1,4 +1,60 @@
-# Smooth scrolling / cursor investigation
+# Current handoff
+
+## Repository state (2026-11-19)
+
+- `main` was clean at `db2cb22` before this handoff. That commit updates only
+  the `lib/fast-json` gitlink to `5544003bfa2b909911d52131da657bb4a2fb07bb`.
+  The operator pushed that fast-json commit manually; its presence on GitHub
+  was verified. The locally stored `origin/main` for matterm was `8576897`.
+  This handoff and the gitlink update have not been pushed from this session.
+- Agent2's remaining fast-json integration is `fe6e5e6` (remove the server
+  config syntax workaround and update tests), then `3dd6866` (docs and
+  roadmap). Review and apply them if continuing that task; do not reapply
+  `b2bcae8` (gitlink) or cherry-pick the branch's merge commit. Preserve the
+  unrelated roadmap entries if resolving conflicts. The worktree is
+  `.tmp/agent2` (`agent2-fastjson`).
+- Agent3's CLI help and smooth-cursor documentation are integrated as `c9ae518`.
+  The `Text has zero width` fix is integrated as `8576897`; U+00AD reproduces
+  the SDL_ttf error, but the original session's exact trigger is unknown.
+  The native suite passed 40/40 after that fix. `.tmp/agent3` is still on
+  the original fix commit `5c73679`; its patch is already on `main`.
+
+## Next milestone: browser-to-server test
+
+The browser client, server, login and PTY bridge already exist. The server
+was built in `build/server/` and its 24 tests passed with the new gitlink.
+This environment had no `emcmake` or `build-web/site/`; a full browser login
+and interactive shell were not verified in this handoff.
+
+1. On a machine with the Emscripten SDK, build the client per
+   [web/README.md](web/README.md):
+
+   ```sh
+   emcmake cmake -S web -B build-web \
+     -DMATTERM_FONT=build/assets/fonts/JetBrainsMono-Regular.ttf
+   cmake --build build-web
+   ```
+
+2. If needed, build the server using [docs/SERVER.md](docs/SERVER.md). Create
+   credentials as a non-root user with the documented `--set-password` flow
+   (password via stdin). Serve the generated directory from the same server:
+
+   ```sh
+   build/server/src/server/matterm-server \
+     --credentials "$HOME/.config/matterm/credentials" \
+     --static-dir build-web/site --origin http://localhost:8080
+   ```
+
+3. Open `http://localhost:8080/`, log in, run a command, resize the browser
+   and verify that exiting the shell returns to login. Keep the server on
+   loopback for this trial. For later remote use, validate HTTPS/WSS via a
+   reverse proxy and match the server's allowed origin to the public URL.
+   Do not assume the provisional Podman deployment has been validated.
+
+See [ROADMAP.md](ROADMAP.md) for deferred work: terminal resize/scrollback,
+performance baselines, session multiplexing and custom window chrome.
+
+# Historical handoff: smooth scrolling / cursor investigation
 
 Latest agent3 handoff: the SDL_ttf `Text has zero width` investigation and fix
 are documented in [docs/tasks/zero-width-glyph.md](docs/tasks/zero-width-glyph.md).
@@ -92,11 +148,9 @@ ctest --test-dir build --output-on-failure
   performed. Tests verify startup and existing animation math/rendering, not
   perceived animation quality on the operator's display.
 
-## Planner / integrator next steps
+## Integration outcome
 
-Cherry-pick the CLI/help/documentation commit onto `main` (which already has
-`e097b26`); do not reapply the cursor implementation or the old resize fix.
-Rebuild the executable the operator actually launches. If the intended request
-was animated **live output**, plan that separately: this change does not add it.
-If cursor animation still cannot be seen, collect the exact executable path,
-launch command, build revision and whether the test was native PTY or a demo.
+The CLI/help/documentation commit was applied to `main` as `c9ae518` without
+reapplying cursor gliding or the old resize fix. Animated **live output** remains
+separate future work. Pi Coding Agent draws its own cursor by default; enable
+**Show hardware cursor** in Pi to let matterm animate it.
