@@ -254,6 +254,31 @@ TEST_CASE("Any key skips the intro") {
     EXPECT(!click.sys.inProgram());
 }
 
+TEST_CASE("A start command is typed at the first prompt, once") {
+    Config config;
+    config.intro = false;
+    config.startCommand = "echo started by the page";
+    Pc pc(config);
+    EXPECT(pc.shows("guest@matterm:~$ echo started by the page"));
+    EXPECT(pc.shows("\nstarted by the page"));
+    EXPECT(pc.last() == kPrompt);
+    pc.run("reset"); // A new welcome does not repeat it.
+    pc.run("clear");
+    EXPECT(!pc.shows("started by the page"));
+}
+
+TEST_CASE("A start command can start a program after the intro") {
+    Config config;
+    config.startCommand = "/usr/games/fire";
+    Pc pc(config);
+    pc.advance(300);
+    pc.type("x"); // Skip the intro.
+    EXPECT(pc.sys.inProgram());
+    EXPECT(pc.model.alternateScreen());
+    pc.advance(200);
+    EXPECT(pc.shows("fire   q quit"));
+}
+
 TEST_CASE("The intro adapts to a small terminal") {
     Pc pc(true, 30, 8);
     pc.advance(1500);

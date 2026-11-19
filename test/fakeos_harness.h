@@ -22,6 +22,14 @@ struct Pc {
         apply(sys.start());
         advance(0);
     }
+    // A system with a prepared configuration (its size is that of the model).
+    explicit Pc(Config config)
+        : sys(config)
+        , model(config.columns, config.rows, 200)
+        , parser(model) {
+        apply(sys.start());
+        advance(0);
+    }
     static Config makeConfig(bool intro,
                              int columns,
                              int rows,

@@ -22,6 +22,9 @@ struct Config {
     std::string hostname = "matterm";
     Capabilities capabilities;
     bool intro = true;
+    // Typed and run at the first prompt, as if the visitor had entered it (for
+    // embedding a demo that starts with something to look at). Empty: none.
+    std::string startCommand;
     // The pretend clock starts here (Unix seconds); the default is a fixed
     // date so that output is reproducible.
     std::int64_t unixTime = 1767225600; // 2026-01-01 00:00:00 UTC
@@ -91,6 +94,7 @@ private:
     std::size_t historyIndex_ = 0;
     std::string savedLine_;
     int tabCount_ = 0;
+    bool startCommandRan_ = false;
 };
 
 } // namespace fakeos

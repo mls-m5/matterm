@@ -79,6 +79,16 @@ void System::showWelcome() {
         }
     }
     showPrompt();
+    if (!config_.startCommand.empty() && !startCommandRan_) {
+        // Typed at the first prompt, so it shows the way a visitor's would.
+        startCommandRan_ = true;
+        for (const auto &character : utf8Characters(config_.startCommand)) {
+            if (character.size() > 1 || (unsigned char)character[0] >= 0x20) {
+                insert(character);
+            }
+        }
+        submit();
+    }
 }
 
 std::string System::promptText(std::size_t *width) const {
@@ -90,6 +100,17 @@ std::string System::promptText(std::size_t *width) const {
     else if (home != "/" &&
              where.compare(0, home.size() + 1, home + "/") == 0) {
         where = "~" + where.substr(home.size());
+    }
+    // A long path would leave no room for the line: keep the last two parts.
+    if (where.size() >
+        std::max<std::size_t>(12, std::size_t(world_.columns) / 3)) {
+        const auto last = where.rfind('/');
+        const auto before = last == std::string::npos || last == 0
+                                ? std::string::npos
+                                : where.rfind('/', last - 1);
+        if (before != std::string::npos) {
+            where = "..." + where.substr(before);
+        }
     }
     const std::string plain =
         world_.user + "@" + world_.hostname + ":" + where + "$ ";

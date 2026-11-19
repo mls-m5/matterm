@@ -106,6 +106,18 @@ TEST_CASE("cd, pwd and the prompt follow the directory") {
     EXPECT(pc.shows("cd: README: Not a directory"));
 }
 
+TEST_CASE(
+    "A long path is abbreviated in the prompt so the line keeps its room") {
+    Pc pc(false, 40, 10);
+    pc.run("mkdir -p aaa/bbb/ccc/ddd");
+    pc.run("cd aaa/bbb/ccc/ddd");
+    EXPECT(pc.last() == "guest@matterm:.../ccc/ddd$");
+    pc.run("pwd");
+    EXPECT(pc.shows("/home/guest/aaa/bbb/ccc/ddd"));
+    pc.run("cd");
+    EXPECT(pc.last() == kPrompt);
+}
+
 TEST_CASE("Redirects create, append and read files") {
     Pc pc;
     pc.run("echo hi > f");
