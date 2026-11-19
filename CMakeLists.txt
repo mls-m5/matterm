@@ -58,6 +58,16 @@ add_library(fakeos ${FAKEOS_SOURCES})
 add_library(matterm::fakeos ALIAS fakeos)
 target_compile_features(fakeos PUBLIC cxx_std_17)
 target_include_directories(fakeos PUBLIC src/fakeos)
+# The `about` command prints numbers counted from the repository: a build step
+# writes them to a header (cmake/AboutStats.cmake), so they match what was built.
+set(FAKEOS_ABOUT_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/fakeos_about_stats.h)
+add_custom_target(fakeos_aboutstats
+    COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR} -DOUT=${FAKEOS_ABOUT_HEADER}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/AboutStats.cmake
+    BYPRODUCTS ${FAKEOS_ABOUT_HEADER}
+    COMMENT "Counting the repository for `about`")
+add_dependencies(fakeos fakeos_aboutstats)
+target_include_directories(fakeos PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
 add_library(utf8decoder src/terminal/vt/utf8decoder.cpp)
 add_library(matterm::utf8 ALIAS utf8decoder)

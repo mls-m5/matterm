@@ -2,6 +2,13 @@
 
 #include "programs.h"
 
+#if defined(__has_include)
+#if __has_include("fakeos_about_stats.h")
+#include "fakeos_about_stats.h"
+#define FAKEOS_HAVE_ABOUT_STATS 1
+#endif
+#endif
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -1978,6 +1985,10 @@ const char *const kTv[] = {
     "     "
     "\x05"
     "",
+    "\x02"
+    "     by Mattias Lasersk\xc3\xb6"
+    "ld"
+    "\x05",
 };
 
 int cmdNeofetch(World &w, const Args &, CommandIo &io) {
@@ -2039,13 +2050,87 @@ int cmdNeofetch(World &w, const Args &, CommandIo &io) {
                 }
                 else {
                     left += c;
-                    ++width;
+                    width += ((unsigned char)c & 0xC0) != 0x80; // Code points.
                 }
             }
         }
         left += std::string(width < 27 ? 27 - width : 0, ' ');
         io.out += left + (r < right.size() ? right[r] : "") + "\n";
     }
+    return 0;
+}
+
+int cmdAbout(World &, const Args &, CommandIo &io) {
+    const bool c = io.tty;
+    auto bold = [&](const std::string &text) {
+        return c ? "\x1b[1;36m" + text + "\x1b[0m" : text;
+    };
+    auto strong = [&](const std::string &text) {
+        return c ? "\x1b[1m" + text + "\x1b[0m" : text;
+    };
+    io.out +=
+        strong("about: Mattrix OS 6.0 Professional Edition") +
+        "\n\n"
+        "matterm is a terminal emulator written from scratch, and this is its\n"
+        "demo: a real terminal with a fake operating system.\n\n";
+    io.out +=
+        bold("Technical background") +
+        "\n"
+        "  * C++17. The core is a hand-written VT parser and terminal model "
+        "that do\n"
+        "    no I/O at all: no files, no sockets, no clocks. The same code "
+        "runs in\n"
+        "    every place below.\n"
+        "  * Native on Linux: an SDL2 window and a real PTY with your own "
+        "shell.\n"
+        "  * In the browser: the same code as WebAssembly (Emscripten) on a "
+        "canvas,\n"
+        "    with touch: drag to scroll, pinch to zoom, long press to select.\n"
+        "  * Its own cell renderer with a glyph atlas. An idle page costs next "
+        "to\n"
+        "    nothing: the loop throttles itself when nothing changes.\n"
+        "  * Its own wire protocol, matterm-tty, and a server for it: "
+        "Boost.Beast,\n"
+        "    Argon2id password hashing with libsodium, strict Origin checks "
+        "and a\n"
+        "    script-only Content-Security-Policy.\n"
+        "  * Fuzz tests for the VT parser, the protocol and the server, "
+        "benchmarks,\n"
+        "    and a written security review.\n"
+        "  * This demo is a simulated Unix world in plain C++: a virtual file\n"
+        "    system, a shell and programs. It runs statically in the browser,\n"
+        "    without a server.\n\n";
+#ifdef FAKEOS_HAVE_ABOUT_STATS
+    const auto &n = kAboutStats;
+    io.out +=
+        bold("By the numbers") +
+        " (counted from the repository when this was built)\n"
+        "  " +
+        std::to_string(n.cppFiles) + " files, " + std::to_string(n.cppLines) +
+        " lines of C++ (libraries, apps, benchmarks, this demo)\n"
+        "  " +
+        std::to_string(n.webFiles) + " files, " + std::to_string(n.webLines) +
+        " lines of JavaScript, HTML and CSS for the browser client\n"
+        "  " +
+        std::to_string(n.testCases) + " test cases in " +
+        std::to_string(n.testFiles) + " test files, " +
+        std::to_string(n.testLines) +
+        " lines of tests\n"
+        "  " +
+        std::to_string(n.docFiles) + " documents, " +
+        std::to_string(n.docLines) +
+        " lines of documents\n"
+        "  " +
+        std::to_string(n.demoLines) +
+        " lines of this demo (src/fakeos and app/demo, " +
+        std::to_string(n.demoFiles) + " files)\n\n";
+#else
+    io.out += bold("By the numbers") + "\n  (not available in this build)\n\n";
+#endif
+    io.out += strong("Byggt av Mattias Lasersk\xc3\xb6"
+                     "ld") +
+              "\n"
+              "med Claude, Pi coding agent och OpenAI Codex.\n";
     return 0;
 }
 
@@ -2283,6 +2368,7 @@ const std::vector<CommandInfo> &commands() {
         {"free", cmdFree, false, "show memory"},
         {"less", cmdLess, false, "page through a file"},
         {"neofetch", cmdNeofetch, false, "show the system with a picture"},
+        {"about", cmdAbout, false, "what this is made of, and by whom"},
         {"sysinfo", cmdNeofetch, false, "show the system with a picture"},
         {"top", cmdTop, false, "watch the processes"},
     };

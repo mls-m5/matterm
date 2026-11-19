@@ -42,10 +42,18 @@ add_library(matterm-web-core STATIC
     ${root}/src/transport/scriptedlink.cpp
     ${fakeos_sources}
 )
+# Numbers for the demo's `about` command, counted from the repository by a build
+# step (the same script as the native build).
+set(about_header ${CMAKE_CURRENT_BINARY_DIR}/generated/fakeos_about_stats.h)
+add_custom_target(matterm-web-aboutstats
+    COMMAND ${CMAKE_COMMAND} -DROOT=${root} -DOUT=${about_header}
+            -P ${root}/cmake/AboutStats.cmake
+    BYPRODUCTS ${about_header})
+add_dependencies(matterm-web-core matterm-web-aboutstats)
 target_include_directories(matterm-web-core PUBLIC
     ${root}/src ${root}/src/core ${root}/src/render ${root}/src/terminal
     ${root}/src/terminal/vt ${root}/src/protocol ${root}/src/transport
-    ${root}/src/fakeos
+    ${root}/src/fakeos ${CMAKE_CURRENT_BINARY_DIR}/generated
     ${root}/src/frontend)
 target_compile_options(matterm-web-core PUBLIC ${sdl_flags})
 target_link_options(matterm-web-core PUBLIC ${sdl_flags})

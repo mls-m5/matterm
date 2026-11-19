@@ -109,6 +109,8 @@ if(BUILD_TESTING)
     file(GLOB FAKEOS_TESTS CONFIGURE_DEPENDS fakeos_*_test.cpp)
     add_executable(fakeos_test ${FAKEOS_TESTS} mls-unit-test/test_main.cpp)
     target_link_libraries(fakeos_test PRIVATE matterm::fakeos matterm::vt matterm::transport)
+    # The about command's numbers are re-counted from the sources by its test.
+    target_compile_definitions(fakeos_test PRIVATE MATTERM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     add_test(NAME fakeos COMMAND fakeos_test)
     add_test(NAME fakeos_includes
         COMMAND ${CMAKE_COMMAND} -DFAKEOS_DIR=${PROJECT_SOURCE_DIR}/src/fakeos

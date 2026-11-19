@@ -35,7 +35,7 @@ packaging follow in later milestones.
    false` (builtins) and, as files in `/bin`, `ls cat mkdir touch rm cp mv head
    tail wc grep sort uniq seq yes find tree uname whoami id hostname date env ps
    uptime colors which man cal fortune cowsay rev tac nl tr cut sed printf basename
-   dirname sleep df free less top neofetch sysinfo`. Errors and exit codes follow the real tools;
+   dirname sleep df free less top neofetch sysinfo about`. Errors and exit codes follow the real tools;
    permissions apply (`/etc` belongs to root, `rm /etc/passwd` is refused). `less`
    and `top` are full-screen programs: `less FILE` (or a pipe) pages with
    j/k/Space/b/g/G and the mouse wheel; `top` shows drifting numbers.
@@ -82,6 +82,20 @@ process or platform header or calls such an API.
 host that cannot do something says so and the programs degrade (256 or 16 colors,
 screen clear instead of the alternate screen). Only standard ECMA-48/xterm
 sequences are emitted.
+
+### The `about` command and its numbers
+
+`about` prints the technical background of the project (what it is built from, in
+words that can be checked against the repository) and a block of numbers: lines and
+files of C++, of JavaScript/HTML/CSS, test cases and test files, documents, and the
+size of this demo. The numbers are not typed in: `cmake/AboutStats.cmake` counts the
+repository in a build step (`fakeos_aboutstats`, also in `web/CMakeLists.txt`) and
+writes `fakeos_about_stats.h` into the build directory, so they always match the
+files that were built (newline characters; `lib/`, `matperf/`, the unit-test
+framework and `node_modules` are not counted). `test/fakeos_about_test.cpp` counts
+them again from the sources and compares. It ends with the credit "Byggt av
+Mattias Lasersk\u00f6ld" and the tools used. `neofetch` signs its picture with the
+author's name too. Like all output it appears at a pace when the host asks for it.
 
 ### Pace of the output
 
