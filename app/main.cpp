@@ -238,8 +238,12 @@ int run(const char *font, int fontSize, const char *inputPath, bool smokeTest) {
         lastFrame = now;
         auto frame = model.frame(backend.cellHeight());
         frame.textBlinkVisible = (now / 500) % 2 == 0;
-        frame.cursor.visible = frame.cursor.visible &&
-                               (!frame.cursor.blink || (now / 500) % 2 == 0);
+        frame.cursor.focused =
+            (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_INPUT_FOCUS) != 0;
+        frame.cursor.visible =
+            frame.cursor.visible &&
+            (!frame.cursor.focused || !frame.cursor.blink ||
+             (now / 500) % 2 == 0);
         backend.render(frame);
         backend.present();
     }

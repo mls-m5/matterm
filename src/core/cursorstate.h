@@ -10,5 +10,8 @@ struct CursorState {
     Shape shape = Shape::Underline;
     bool visible = false;
     bool blink = true;
+    // False while the window is inactive: every shape is drawn as a hollow
+    // rectangle. Blinking is the caller's job and normally stops too.
+    bool focused = true;
     Rgb8 color{255, 255, 255};
 };

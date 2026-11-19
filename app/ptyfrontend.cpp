@@ -711,8 +711,13 @@ int runPtyFrontend(const char *font,
             }
         }
         frame.textBlinkVisible = (now / 500) % 2 == 0;
-        frame.cursor.visible = frame.cursor.visible &&
-                               (!frame.cursor.blink || (now / 500) % 2 == 0);
+        frame.cursor.focused =
+            (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_INPUT_FOCUS) != 0;
+        // An inactive window shows a steady hollow cursor.
+        frame.cursor.visible =
+            frame.cursor.visible &&
+            (!frame.cursor.focused || !frame.cursor.blink ||
+             (now / 500) % 2 == 0);
         std::string currentTitle = title;
         if (rejectedInput) {
             currentTitle += " | input queue full/closed";
