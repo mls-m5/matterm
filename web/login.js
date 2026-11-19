@@ -7,6 +7,17 @@
   const canvas = document.getElementById("canvas");
   const terminalWindow = document.getElementById("window");
   const layoutButton = document.getElementById("layout");
+  const pageParams = new URLSearchParams(location.search);
+  // ?embed: the page is shown inside another page (an iframe): edge to edge, no
+  // toggle. ?theme=light|dark: the page colors around the terminal.
+  const embed = pageParams.has("embed");
+  const theme = pageParams.get("theme");
+  if (theme === "light" || theme === "dark") {
+    document.documentElement.dataset.scheme = theme;
+  }
+  if (embed) {
+    document.body.classList.add("embed");
+  }
 
   function start(demo) {
     form.hidden = true;
@@ -14,6 +25,7 @@
     document.body.classList.add("started");
     fitCanvas();
     setupLayout();
+    setupPause();
     // Demo: no server link, so the page runs the built-in simulator.
     if (!demo) {
       window.mattermWs =
@@ -162,7 +174,7 @@
       snapWindow();
       fitCanvas();
     };
-    apply(params.has("fullscreen") || stored === "full");
+    apply(embed || params.has("fullscreen") || stored === "full");
     layoutButton.addEventListener("click", function () {
       const full = document.body.dataset.layout !== "full";
       apply(full);
@@ -253,6 +265,21 @@
   }
   if (!window.ResizeObserver) {
     window.addEventListener("resize", fitCanvas);
+  }
+
+  // A page that is out of view (scrolled away, a hidden tab, an iframe below the
+  // fold) does not need frames: the terminal checks window.mattermPaused.
+  function setupPause() {
+    window.mattermPaused = document.hidden;
+    document.addEventListener("visibilitychange", function () {
+      window.mattermPaused = document.hidden || window.mattermOffscreen === true;
+    });
+    if (window.IntersectionObserver) {
+      new IntersectionObserver(function (entries) {
+        window.mattermOffscreen = !entries[entries.length - 1].isIntersecting;
+        window.mattermPaused = document.hidden || window.mattermOffscreen;
+      }).observe(terminalWindow);
+    }
   }
 
   // ?demo skips the login and runs the in-browser simulator (no server needed).
