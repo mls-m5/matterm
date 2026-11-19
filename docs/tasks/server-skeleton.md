@@ -113,3 +113,24 @@ files, API changes (especially to `PtyProcess`), the commands you ran and their
 results, known limitations, and anything you deferred. Do not push; the
 integrator pushes through the host tool. Commit in small steps, with
 clang-format applied and no build products.
+
+## Review follow-ups (from the integration review of b2ff6ca)
+
+Not blocking; handle when the server and the browser client both work end to
+end.
+
+1. **Prune the rate limiter source table.** `RateLimiter` removes a source only
+   on success. With `maxSources` (4096) reached, `attempt()` returns 3600 s for
+   every new source, so a scan from many addresses can lock the owner out for
+   an hour. Drop entries with no active lockout that have been idle for a
+   while (and never evict an active lockout). Add a test.
+2. **Global attempt budget is a lockout lever.** `globalAttemptsPerHour`
+   counts attempts, not failures, so an attacker can spend it and block the
+   owner (loopback is exempt). Decide whether to count only failures, reserve
+   part of the budget for a known-good source, or accept and document it.
+3. **IPv6 source key.** Callers must key the limiter on the /64 prefix for IPv6,
+   not the full address. Do this where the server builds the source string,
+   and test it.
+4. **Threading.** `SessionStore` and `RateLimiter` have no locking. Keep them
+   on the single `io_context` thread and state that in their headers, or add
+   locking.
