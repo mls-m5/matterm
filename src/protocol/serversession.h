@@ -1,6 +1,7 @@
 #pragma once
 
 #include "message.h"
+#include "protocoltime.h"
 
 #include <chrono>
 #include <cstddef>
@@ -9,10 +10,6 @@
 #include <string_view>
 
 namespace protocol {
-
-// Time is passed in by the caller (milliseconds since any fixed origin), so
-// the state machine has no clock and tests can drive it deterministically.
-using Time = std::chrono::milliseconds;
 
 struct SessionConfig {
     using ms = std::chrono::milliseconds;

@@ -1,0 +1,74 @@
+#pragma once
+
+#include "message.h"
+#include "messagechannel.h"
+#include "terminallink.h"
+#include "protocoltime.h"
+
+#include <functional>
+#include <optional>
+#include <string>
+
+// Client side of one matterm-tty connection (protocol version 1; see
+// docs/PROTOCOL.md). A TerminalLink over a MessageChannel: sends Hello when the
+// channel opens, chunks input, acknowledges parsed output, keeps the
+// connection alive with Ping, and reports exit or failure. Call tick() from the
+// front end's frame or timer loop, at least by nextDeadline().
+class ClientSession final : public TerminalLink {
+public:
+    using ms = std::chrono::milliseconds;
+    struct Config {
+        std::function<protocol::Time()> clock; // Required.
+        int columns = 80;
+        int rows = 24;
+        std::size_t ackThreshold = 16384; // Ack at once past this much output.
+        ms ackInterval{100};              // Otherwise ack at most this late.
+        ms pingInterval{20000};           // Idle time before a Ping.
+        ms pongTimeout{30000};            // Silence after a Ping is fatal.
+        std::size_t maxInputChunk = 4096;
+    };
+    enum class State { Connecting, AwaitWelcome, Running, Exited, Failed };
+
+    // Takes over the channel's events. The channel must outlive the session.
+    ClientSession(MessageChannel &channel, Config config);
+
+    void setEvents(Events events) override;
+    bool sendInput(std::string_view bytes) override;
+    void resize(int columns,
+                int rows,
+                int pixelWidth = 0,
+                int pixelHeight = 0) override;
+    void close() override;
+
+    void tick();
+    std::optional<protocol::Time> nextDeadline() const;
+    State state() const noexcept;
+    const std::string &sessionId() const noexcept;
+    std::uint64_t receivedOffset() const noexcept;
+
+private:
+    void onOpened();
+    void onMessage(std::string_view bytes);
+    void onClosed(int code);
+    void handle(const protocol::Welcome &message);
+    void handle(const protocol::Output &message);
+    void handle(const protocol::Exit &message);
+    void handle(const protocol::Pong &message);
+    void handle(const protocol::Error &message);
+    bool sendMessage(const protocol::ClientMessage &message);
+    void sendAck();
+    void fail(const std::string &reason, int closeCode);
+
+    MessageChannel &channel_;
+    Config config_;
+    Events events_;
+    State state_ = State::Connecting;
+    std::string sessionId_;
+    std::uint64_t received_ = 0;
+    std::uint64_t acked_ = 0;
+    protocol::Time lastAck_{};
+    protocol::Time lastSent_{};
+    protocol::Time lastReceived_{};
+    std::optional<protocol::Time> pingSentAt_;
+    std::uint32_t pingNonce_ = 0;
+};

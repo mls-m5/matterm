@@ -66,6 +66,10 @@ if(BUILD_TESTING)
     target_link_libraries(serversession_test PRIVATE matterm::protocol)
     add_test(NAME server_session COMMAND serversession_test)
 
+    add_executable(clientsession_test clientsession_test.cpp mls-unit-test/test_main.cpp)
+    target_link_libraries(clientsession_test PRIVATE matterm::transport)
+    add_test(NAME client_session COMMAND clientsession_test)
+
     add_executable(scrollviewport_test
         scrollviewport_test.cpp
         mls-unit-test/test_main.cpp
