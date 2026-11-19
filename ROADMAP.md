@@ -127,6 +127,17 @@ Native PTY, remote transport, and simulated streams are alternative adapters;
 none should become a dependency of direct cell rendering. These are recorded
 future goals, not implementation in the current parser slice.
 
+## Configuration, Measurements, and Independent Work
+
+- [x] Document independent-repo task/handoff rules and candidate parallel tasks in docs/PARALLEL_WORK.md.
+- [x] Inspect the local matperf API and document usage/caveats in its repository.
+- [x] Record XDG text configuration, benchmark completion semantics, and deferred pipeline design in docs/SETTINGS_AND_PERFORMANCE.md.
+- [ ] Implement approved 12-byte color-reference layout and dark palette before parallel color consumers.
+- [ ] Select a text configuration parser/schema and implement typed settings, validation, and atomic saving.
+- [ ] Produce first internal/parser and external/stdout measurements before optimizing.
+- [ ] Review matperf concurrency before enabling optional coarse tracing.
+- [ ] Trial one isolated parallel task after agreeing on a base commit/API.
+
 ## References
 
 - Xterm control sequence reference: https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
