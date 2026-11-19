@@ -143,10 +143,18 @@ void handleKey(App &app, const SDL_KeyboardEvent &key) {
     if (mod.control && mod.shift && sym == SDLK_c) {
         // Ctrl+Shift+V (paste) is handled by the page's paste event.
         if (!key.repeat && app.selection && app.selection->valid(*app.model)) {
-            if (const auto text = app.model->copyText(
-                    app.selection->anchor, app.selection->end, 1024 * 1024)) {
+            if (const auto text = app.selection->text(*app.model)) {
                 copyToClipboard(*text);
             }
+            else {
+                setTitle("matterm | copy failed: selection exceeds 1 MiB");
+            }
+        }
+    }
+    else if (mod.control && mod.shift && sym == SDLK_a) {
+        if (!key.repeat) {
+            app.selection = Selection::all(*app.model);
+            app.dragging = false;
         }
     }
     else if (mod.control && mod.shift && sym == SDLK_v) {
@@ -254,7 +262,8 @@ void handleEvent(App &app, const SDL_Event &event) {
             app.heldButton = MouseEvent::Button::None;
         }
     }
-    else if (event.type == SDL_MOUSEMOTION && mouseTracking(app) &&
+    else if (event.type == SDL_MOUSEMOTION && !app.dragging &&
+             mouseTracking(app) &&
              (app.mouseCaptured || (app.parser->modes().mouseTracking ==
                                         TerminalModes::MouseTracking::Any &&
                                     !modifiers(SDL_GetModState()).shift))) {
@@ -268,7 +277,6 @@ void handleEvent(App &app, const SDL_Event &event) {
     }
     else if (event.type == SDL_MOUSEBUTTONDOWN &&
              event.button.button == SDL_BUTTON_LEFT) {
-        app.selection.reset();
         const auto cell = mouseCell(*app.window,
                                     *app.backend,
                                     model,
@@ -277,7 +285,14 @@ void handleEvent(App &app, const SDL_Event &event) {
                                     false);
         app.dragging = cell.has_value();
         if (cell) {
-            app.selection = Selection{*cell, *cell, model.selectionEpoch()};
+            selectAt(app.selection,
+                     model,
+                     *cell,
+                     modifiers(SDL_GetModState()).shift,
+                     event.button.clicks);
+        }
+        else {
+            app.selection.reset();
         }
     }
     else if ((event.type == SDL_MOUSEMOTION && app.dragging) ||
@@ -293,7 +308,7 @@ void handleEvent(App &app, const SDL_Event &event) {
                           release ? event.button.y : event.motion.y,
                           true);
             if (cell) {
-                app.selection->end = *cell;
+                app.selection->extend(model, *cell);
             }
         }
         if (release) {

@@ -96,6 +96,10 @@ public:
     // screen switches and regional row movement invalidate the selection epoch.
     std::size_t firstRetainedRow() const noexcept;
     std::size_t selectionEpoch() const noexcept;
+    // Read retained text without changing the viewport or borrowing a frame.
+    // Invalid row/cell IDs return nullopt/false. A wrapped row joins the next.
+    std::optional<char32_t> textCodePoint(TextCell cell) const noexcept;
+    bool textRowWrapped(std::size_t row) const noexcept;
     // Inclusive endpoints, either order. UTF-8, no newline across soft wraps.
     // Invalid or over-limit ranges return nullopt.
     std::optional<std::string> copyText(TextCell first,

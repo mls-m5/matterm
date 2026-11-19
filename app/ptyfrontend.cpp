@@ -154,7 +154,7 @@ void smoke(SDL_Window &window, SdlBackend &backend, PtySession &session) {
     // Only exercise SDL's in-process test clipboard; don't overwrite a user's
     // desktop clipboard when running this smoke test on a real display.
     if (std::string_view(SDL_GetCurrentVideoDriver()) == "dummy") {
-        if (!selection.copy(model)) {
+        if (!copySelection(selection, model)) {
             throw std::runtime_error("PTY GUI smoke: copy failed");
         }
         const std::unique_ptr<char, decltype(&SDL_free)> clipboard(
@@ -246,7 +246,7 @@ int runPtyFrontend(const char *font,
     SDL_StartTextInput();
     bool running = true;
     bool rejectedInput = false;
-    bool clipboardError = false;
+    std::string clipboardError;
     bool dragging = false;
     std::optional<Selection> selection;
     auto &model = session.model();
@@ -346,7 +346,8 @@ int runPtyFrontend(const char *font,
                     heldButton = MouseEvent::Button::None;
                 }
             }
-            else if (event.type == SDL_MOUSEMOTION && mouseTracking() &&
+            else if (event.type == SDL_MOUSEMOTION && !dragging &&
+                     mouseTracking() &&
                      (mouseCaptured || (session.modes().mouseTracking ==
                                             TerminalModes::MouseTracking::Any &&
                                         !modifiers(SDL_GetModState()).shift))) {
@@ -359,8 +360,7 @@ int runPtyFrontend(const char *font,
             }
             else if (event.type == SDL_MOUSEBUTTONDOWN &&
                      event.button.button == SDL_BUTTON_LEFT) {
-                selection.reset();
-                clipboardError = false;
+                clipboardError.clear();
                 const auto cell = mouseCell(*window,
                                             backend,
                                             model,
@@ -369,7 +369,14 @@ int runPtyFrontend(const char *font,
                                             false);
                 dragging = cell.has_value();
                 if (cell) {
-                    selection = Selection{*cell, *cell, model.selectionEpoch()};
+                    selectAt(selection,
+                             model,
+                             *cell,
+                             modifiers(SDL_GetModState()).shift,
+                             event.button.clicks);
+                }
+                else {
+                    selection.reset();
                 }
             }
             else if ((event.type == SDL_MOUSEMOTION && dragging) ||
@@ -385,7 +392,7 @@ int runPtyFrontend(const char *font,
                                   release ? event.button.y : event.motion.y,
                                   true);
                     if (cell) {
-                        selection->end = *cell;
+                        selection->extend(model, *cell);
                     }
                 }
                 if (event.type == SDL_MOUSEBUTTONUP) {
@@ -473,7 +480,24 @@ int runPtyFrontend(const char *font,
                 else if (mod.control && mod.shift && key == SDLK_c) {
                     if (!event.key.repeat && selection &&
                         selection->valid(model)) {
-                        clipboardError = !selection->copy(model);
+                        const auto text = selection->text(model);
+                        if (!text) {
+                            clipboardError =
+                                "copy failed: selection exceeds 1 MiB";
+                        }
+                        else {
+                            clipboardError =
+                                SDL_SetClipboardText(text->c_str()) == 0
+                                    ? ""
+                                    : "clipboard copy failed";
+                        }
+                    }
+                }
+                else if (mod.control && mod.shift && key == SDLK_a) {
+                    if (!event.key.repeat) {
+                        selection = Selection::all(model);
+                        dragging = false;
+                        clipboardError.clear();
                     }
                 }
                 else if (mod.shift &&
@@ -539,8 +563,8 @@ int runPtyFrontend(const char *font,
         if (rejectedInput) {
             currentTitle += " | input queue full/closed";
         }
-        if (clipboardError) {
-            currentTitle += " | clipboard copy failed";
+        if (!clipboardError.empty()) {
+            currentTitle += " | " + clipboardError;
         }
         SDL_SetWindowTitle(window.get(), currentTitle.c_str());
         backend.render(frame);

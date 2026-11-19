@@ -667,6 +667,22 @@ std::size_t TerminalModel::firstRetainedRow() const noexcept {
 std::size_t TerminalModel::selectionEpoch() const noexcept {
     return impl_->selectionEpoch;
 }
+std::optional<char32_t> TerminalModel::textCodePoint(
+    TextCell cell) const noexcept {
+    const auto &screen = impl_->active();
+    if (cell.row < screen.firstRow ||
+        cell.row - screen.firstRow >= screen.memory.size() ||
+        cell.column >= columns()) {
+        return std::nullopt;
+    }
+    return screen.memory.at(cell.column, cell.row - screen.firstRow).codePoint;
+}
+bool TerminalModel::textRowWrapped(std::size_t row) const noexcept {
+    const auto &screen = impl_->active();
+    return row >= screen.firstRow &&
+           row - screen.firstRow < screen.memory.size() &&
+           screen.softWrap[row - screen.firstRow];
+}
 std::optional<std::string> TerminalModel::copyText(
     TextCell first, TextCell last, std::size_t byteLimit) const {
     if (std::tie(last.row, last.column) < std::tie(first.row, first.column)) {
