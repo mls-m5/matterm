@@ -42,6 +42,7 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [x] Local mouse drag selection and UTF-8 clipboard copy across scrollback, joining soft wraps.
 - [ ] Application mouse input: press/release including right-click, wheel, drag/motion, modifier override for local selection, and SGR reporting.
 - [ ] Local right-click Copy/Paste menu, word selection, and drag auto-scroll.
+- [ ] Smooth cursor animation: glide the cursor between positions instead of jumping (render-side interpolation only; the model keeps exact cell positions; must be optional and cheap when idle).
 - [ ] Design and prototype a borderless SDL window with a custom title bar. Budget substantial GUI design and polish before rollout; keep native decorations as a fallback.
 - [ ] Reproduce prompt and Pi panel color reports; see [Interaction and Compatibility](docs/INTERACTION_AND_COMPATIBILITY.md).
 - [ ] Golden transcripts from real programs, fuzz/property tests, and compatibility fixtures.
