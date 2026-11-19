@@ -39,10 +39,17 @@ services:
     command:
       # Plain HTTP on a non-loopback address inside the container is only
       # acceptable because the port is published on host loopback below.
-      - --listen=0.0.0.0:8080
+      # The server takes "--flag value" pairs only, and exactly one origin
+      # (compared with the Origin and Host headers, so open the page there).
+      - --listen
+      - 0.0.0.0
+      - --port
+      - "8080"
       - --allow-plain-http
-      - --allowed-origin=http://127.0.0.1:8080
-      - --allowed-origin=http://localhost:8080
+      - --origin
+      - http://127.0.0.1:8080
+      - --static-dir
+      - /usr/share/matterm/web
     ports:
       - "127.0.0.1:${MATTERM_PORT:-8080}:8080"
     networks: [isolated]
@@ -55,11 +62,8 @@ services:
       - ${HOME}/.config/matterm:/home/matterm/.config/matterm:ro,Z
       # Lockout counters and session state must persist and be writable.
       - ${HOME}/.local/state/matterm:/home/matterm/.local/state/matterm:rw,Z
-    healthcheck:
-      test: ["CMD", "/usr/local/bin/matterm-server", "--health-check"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
+    # No healthcheck: the server has no health probe mode (the image has no
+    # curl either). Add one when the server gains it.
 
   # One-off: create the config directory and set the passphrase.
   #   podman compose run --rm setup
