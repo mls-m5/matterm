@@ -14,13 +14,14 @@
   parser tests. If these render correctly, capture a minimal VT stream from a
   failing panel and compare emitted codes/resets/erasures with a reference
   terminal. Colon-separated SGR is a known gap, not a confirmed cause.
-  The user later isolated the symptom to Pi's regular layout, which uses the
-  terminal's own scrollback; fullscreen layout shows the colors correctly.
-  Both existing captures include `CSI ? 1049 h` (alternate-screen entry), so
-  neither isolates the failing regular layout. Replay of the GNOME capture
-  preserved the green RGB background in matterm. Next, capture a failing
-  regular-layout panel and check whether the color is absent from the stream
-  or lost around a line erase, wrap, or scroll in the primary screen.
+  Regular layout works in matterm outside Podman, but both regular and
+  fullscreen have shown the symptom inside Podman. Whether the same container
+  works in GNOME Terminal is not yet confirmed. Both existing captures include
+  `CSI ? 1049 h`; replay of the GNOME capture preserved the green RGB
+  background in matterm. Next, use the same interactive container in both
+  terminals: compare `TERM`, `COLORTERM`, `tput colors`, and Pi version, then
+  send literal RGB/indexed colors from inside the container. If those work but
+  Pi's panel does not, capture a failing panel from inside the container.
 - **Braille spinner becomes a replacement glyph.** JetBrains Mono lacks these
   code points; they are three-byte UTF-8, not clusters. Verify Linux Fontconfig
   fallback with the default font and an installed face that covers Braille
