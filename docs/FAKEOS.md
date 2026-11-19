@@ -22,16 +22,21 @@ packaging follow in later milestones.
    Ctrl-A/E/U/K/W/L/C/D, Tab completion (a second Tab lists the choices). The line
    stays on one terminal row; typing past the width is refused.
 4. **Commands**: `cd pwd echo export unset history clear reset exit help true
-   false` (builtins) and `ls cat mkdir touch rm cp mv head tail wc grep sort uniq
-   seq yes find tree uname whoami id hostname date env ps uptime colors which man`
-   (files in `/bin`). Errors and exit codes follow the real tools; permissions
-   apply (`/etc` belongs to root, `rm /etc/passwd` is refused).
+   false` (builtins) and, as files in `/bin`, `ls cat mkdir touch rm cp mv head
+   tail wc grep sort uniq seq yes find tree uname whoami id hostname date env ps
+   uptime colors which man cal fortune cowsay rev tac nl tr cut sed printf basename
+   dirname sleep df free less top`. Errors and exit codes follow the real tools;
+   permissions apply (`/etc` belongs to root, `rm /etc/passwd` is refused). `less`
+   and `top` are full-screen programs: `less FILE` (or a pipe) pages with
+   j/k/Space/b/g/G and the mouse wheel; `top` shows drifting numbers.
 5. **Programs on disk.** Full-screen programs are files too: `/usr/games/fire`
    is a file whose content is `#!builtin fire`. `/usr/games` is not in the
    `PATH`, so `fire` alone is "command not found" until the visitor looks around.
    A program takes the screen (alternate screen, hidden cursor), draws at about
    30 frames per second, and returns to the shell on `q`, Esc or Ctrl-C. What it
-   did to the world stays.
+   did to the world stays. Programs can chain: a program or a click egg may ask
+   for the next one (the red pill leads to the Matrix, which leads back to the
+   intro). Some programs are hidden by a dot (`ls -a /usr/games`).
 
 [FAKEOS_EGGS.md](FAKEOS_EGGS.md) lists the discoveries (spoilers).
 
@@ -58,7 +63,7 @@ process or platform header or calls such an API.
 | `VirtualFs` | `virtualfs.*` | In-memory tree with owners and modes (owner/other only), and limits (2000 nodes, 1 MiB total, 256 KiB per file, depth 32, 255-byte names) so a runaway `yes > f` stops at a limit. |
 | `Shell` | `shell.*` | Tokenizer, expansion, pipelines, redirects, program lookup through the file system, completion. |
 | Commands | `commands.*` | Pure functions `(World&, args, CommandIo&) -> status`; the table says which are builtins and which exist as `/bin` files. |
-| `Program` | `programs.h`, `fire.cpp`, `gradient.cpp`, `intro.cpp` | Full-screen programs: `begin`, `key`, `frame`, `end`, and an optional farewell. They draw into an `AsciiCanvas`. |
+| `Program` | `programs.h`, `fire.cpp`, `gradient.cpp`, `intro.cpp`, `matrix.cpp`, `crumble.cpp`, `less.cpp`, `top.cpp` | Full-screen programs: `begin`, `key`, `frame`, `end`, and an optional farewell. They draw into an `AsciiCanvas`. |
 | `AsciiCanvas` | `canvas.*` | Cell buffer; `flush()` emits only changed cells with the smallest cursor and color updates (an unchanged frame is empty). Colors are reduced to truecolor, 256 or 16 colors per `Capabilities`. |
 | `KeyDecoder` | `keys.*` | Terminal input to keys: UTF-8, control and CSI/SS3 keys, SGR mouse reports, bracketed paste; replies are dropped. |
 | Eggs | `eggs.*` | A table of triggers and effects. |
