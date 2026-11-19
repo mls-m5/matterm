@@ -16,6 +16,26 @@ cmake --build build/server
 ctest --test-dir build/server
 ```
 
+## Credentials (the password file)
+
+The server never stores your password. The "credentials file" holds one line, an
+Argon2id hash of it, and the server compares what you type at login against that
+hash. Create it once, with the helper script, which asks for the password twice
+(nothing is shown, and it never appears on a command line or in the shell
+history) and writes the file with mode 0600:
+
+```
+tools/set-password.sh build/server/src/server/matterm-server
+# writes ~/.config/matterm/credentials (or give another path as 2nd argument)
+```
+
+[docs/examples/credentials.example](examples/credentials.example) shows what the
+file looks like. It is not a working file: the hash is made up, and the server
+refuses it on purpose. Never copy a hash from an example, make your own, and
+keep the file private (the server refuses a file that others can read). To
+change the password, run the script again. Use a long passphrase: the length is
+what makes guessing infeasible.
+
 ## Run
 
 ```

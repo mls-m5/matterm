@@ -65,8 +65,8 @@ fixes, resize duplication, zero-width glyph.
 
 - `docs/tasks/fuzz-tests.md`: fuzz and property tests. Worktree `.tmp/agent2`,
   branch `agent2-fuzz`.
-- `docs/tasks/selection.md`: Shift+click, select all, word and line selection.
-  Worktree `.tmp/agent3`, branch `agent3-selection`.
+- `docs/tasks/url-open.md`: Ctrl+click opens links. Worktree `.tmp/agent3`,
+  branch `agent3-url`. (The selection task is integrated.)
 
 Agents can be reached through the MCP message tools (`list_peers`,
 `send_message`, `receive_messages`); the integrator is the project named by
