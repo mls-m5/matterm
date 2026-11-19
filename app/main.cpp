@@ -235,7 +235,9 @@ int run(const char *font, const char *inputPath, bool smokeTest) {
         model.advanceViewport(double(now - lastFrame) / 1000);
         lastFrame = now;
         auto frame = model.frame(backend.cellHeight());
-        frame.cursor.visible = frame.cursor.visible && (now / 500) % 2 == 0;
+        frame.textBlinkVisible = (now / 500) % 2 == 0;
+        frame.cursor.visible = frame.cursor.visible &&
+                               (!frame.cursor.blink || (now / 500) % 2 == 0);
         backend.render(frame);
         backend.present();
     }

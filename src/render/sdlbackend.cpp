@@ -88,6 +88,7 @@ struct SdlBackend::Impl {
     int textureHeight;
     Batch backgrounds;
     Batch glyphs;
+    Batch decorations;
 
     Impl(SDL_Window &window,
          const std::string &fontPath,
@@ -140,13 +141,15 @@ void SdlBackend::render(const RenderFrame &frame) {
                            s.cellHeight)));
     s.backgrounds.clear();
     s.glyphs.clear();
+    s.decorations.clear();
 
     // Resolve all cache misses before submitting draw calls. The frame's views
     // are consumed synchronously; only copied vertex data survives this call.
     for (std::size_t y = 0; y < rows; ++y) {
         const auto row = frame.cells.row(y);
         for (std::size_t x = 0; x < columns; ++x) {
-            s.atlas.getOrInsert(row.data()[x].codePoint);
+            s.atlas.getOrInsert(row.data()[x].codePoint,
+                                row.data()[x].attributes);
         }
     }
     for (std::size_t y = 0; y < rows; ++y) {
@@ -162,7 +165,31 @@ void SdlBackend::render(const RenderFrame &frame) {
                 float(s.cellWidth),
                 float(s.cellHeight),
                 {cell.background.r, cell.background.g, cell.background.b, 255});
-            const auto glyph = s.atlas.getOrInsert(cell.codePoint);
+            if (hasAttribute(cell.attributes, CellAttribute::Blink) &&
+                !frame.textBlinkVisible) {
+                continue;
+            }
+            Rgb8 foreground = cell.foreground;
+            if (hasAttribute(cell.attributes, CellAttribute::Faint)) {
+                foreground = {
+                    std::uint8_t((int(foreground.r) + cell.background.r) / 2),
+                    std::uint8_t((int(foreground.g) + cell.background.g) / 2),
+                    std::uint8_t((int(foreground.b) + cell.background.b) / 2)};
+            }
+            const SDL_Color ink{foreground.r, foreground.g, foreground.b, 255};
+            if (hasAttribute(cell.attributes, CellAttribute::Underline)) {
+                s.decorations.quad(left,
+                                   top + std::max(0, s.cellHeight - 2),
+                                   float(s.cellWidth),
+                                   1,
+                                   ink);
+            }
+            if (hasAttribute(cell.attributes, CellAttribute::Strike)) {
+                s.decorations.quad(
+                    left, top + s.cellHeight / 2, float(s.cellWidth), 1, ink);
+            }
+            const auto glyph =
+                s.atlas.getOrInsert(cell.codePoint, cell.attributes);
             if (glyph.source.w == 0 || glyph.source.h == 0) {
                 continue;
             }
@@ -171,7 +198,7 @@ void SdlBackend::render(const RenderFrame &frame) {
                 top + s.atlas.ascent() - glyph.bearingY,
                 float(glyph.source.w),
                 float(glyph.source.h),
-                {cell.foreground.r, cell.foreground.g, cell.foreground.b, 255},
+                ink,
                 float(glyph.source.x) / s.textureWidth,
                 float(glyph.source.y) / s.textureHeight,
                 float(glyph.source.x + glyph.source.w) / s.textureWidth,
@@ -191,6 +218,7 @@ void SdlBackend::render(const RenderFrame &frame) {
     } clipReset{s.renderer.get()};
     s.backgrounds.draw(*s.renderer, nullptr);
     s.glyphs.draw(*s.renderer, s.atlas.texture());
+    s.decorations.draw(*s.renderer, nullptr);
 
     const auto &cursor = frame.cursor;
     if (cursor.visible && cursor.column >= 0 && cursor.row >= 0 &&

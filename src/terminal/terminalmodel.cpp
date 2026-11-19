@@ -7,6 +7,7 @@
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 void validateSize(std::size_t columns, std::size_t rows, std::size_t history) {
@@ -59,6 +60,14 @@ struct TerminalModel::Impl {
     std::unique_ptr<Screen> primary;
     std::unique_ptr<Screen> alternate;
     bool useAlternate = false;
+    std::vector<bool> tabStops;
+    static std::vector<bool> defaultTabs(std::size_t width) {
+        std::vector<bool> result(width, false);
+        for (std::size_t x = 8; x < width; x += 8) {
+            result[x] = true;
+        }
+        return result;
+    }
 
     Impl(std::size_t width, std::size_t height, std::size_t history)
         : columns(width)
@@ -67,6 +76,7 @@ struct TerminalModel::Impl {
         validateSize(width, height, history);
         primary = std::make_unique<Screen>(width, height, history);
         alternate = std::make_unique<Screen>(width, height, 0);
+        tabStops = defaultTabs(width);
     }
 
     Screen &active() {
@@ -214,8 +224,15 @@ void TerminalModel::setColors(Rgb8 foreground, Rgb8 background) {
     screen.style.foreground = foreground;
     screen.style.background = background;
 }
+void TerminalModel::setAttributes(CellAttribute attributes) {
+    impl_->active().style.attributes = attributes;
+}
 void TerminalModel::setCursorVisible(bool visible) {
     impl_->active().cursor.visible = visible;
+}
+void TerminalModel::setCursorAppearance(CursorState::Shape shape, bool blink) {
+    impl_->active().cursor.shape = shape;
+    impl_->active().cursor.blink = blink;
 }
 void TerminalModel::saveCursor() {
     auto &screen = impl_->active();
@@ -276,10 +293,7 @@ void TerminalModel::write(std::u32string_view text) {
                        screen.cursor.row);
             continue;
         case U'\t':
-            moveCursor(
-                int(std::min(columns() - 1,
-                             (std::size_t(screen.cursor.column) / 8 + 1) * 8)),
-                screen.cursor.row);
+            tabForward();
             continue;
         default:
             break;
@@ -300,7 +314,10 @@ void TerminalModel::write(std::u32string_view text) {
         screen.memory.at(std::size_t(screen.cursor.column),
                          impl_->start(screen) +
                              std::size_t(screen.cursor.row)) =
-            FChar{ch, screen.style.foreground, screen.style.background};
+            FChar{ch,
+                  screen.style.foreground,
+                  screen.style.background,
+                  screen.style.attributes};
         if (screen.cursor.column + 1 == int(columns())) {
             screen.wrapPending = screen.autoWrap;
         }
@@ -465,6 +482,43 @@ void TerminalModel::setAutoWrap(bool enabled) {
 void TerminalModel::setInsertMode(bool enabled) {
     impl_->active().insert = enabled;
 }
+void TerminalModel::tabForward(int count) {
+    if (count <= 0) {
+        return;
+    }
+    const auto cursor = this->cursor();
+    for (std::size_t x = std::size_t(cursor.column) + 1; x < columns(); ++x) {
+        if (impl_->tabStops[x] && --count == 0) {
+            moveCursor(int(x), cursor.row);
+            return;
+        }
+    }
+    moveCursor(int(columns()) - 1, cursor.row);
+}
+void TerminalModel::tabBackward(int count) {
+    if (count <= 0) {
+        return;
+    }
+    const auto cursor = this->cursor();
+    for (int x = cursor.column - 1; x >= 0; --x) {
+        if (impl_->tabStops[std::size_t(x)] && --count == 0) {
+            moveCursor(x, cursor.row);
+            return;
+        }
+    }
+    moveCursor(0, cursor.row);
+}
+void TerminalModel::setTabStop() {
+    impl_->tabStops[std::size_t(cursor().column)] = true;
+}
+void TerminalModel::clearTabStops(bool all) {
+    if (all) {
+        std::fill(impl_->tabStops.begin(), impl_->tabStops.end(), false);
+    }
+    else {
+        impl_->tabStops[std::size_t(cursor().column)] = false;
+    }
+}
 void TerminalModel::reset() {
     auto replacement =
         std::make_unique<Impl>(columns(), rows(), impl_->scrollback);
@@ -481,6 +535,7 @@ void TerminalModel::setAlternateScreen(bool enabled) {
         screen->cursor = impl_->primary->cursor;
         screen->cursor.column = 0;
         screen->cursor.row = 0;
+        screen->style.attributes = impl_->primary->style.attributes;
         screen->autoWrap = impl_->primary->autoWrap;
         screen->insert = impl_->primary->insert;
         impl_->alternate = std::move(screen);
@@ -495,8 +550,13 @@ void TerminalModel::resize(std::size_t columns, std::size_t rows) {
     auto primary =
         impl_->resized(*impl_->primary, columns, rows, impl_->scrollback);
     auto alternate = impl_->resized(*impl_->alternate, columns, rows, 0);
+    auto tabs = Impl::defaultTabs(columns);
+    for (std::size_t x = 0; x < std::min(columns, this->columns()); ++x) {
+        tabs[x] = impl_->tabStops[x];
+    }
     impl_->primary = std::move(primary);
     impl_->alternate = std::move(alternate);
+    impl_->tabStops.swap(tabs);
     impl_->columns = columns;
     impl_->rows = rows;
 }

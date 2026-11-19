@@ -21,7 +21,7 @@ struct GlyphAtlas::Impl {
                                                              TTF_CloseFont};
     std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)> texture{
         nullptr, SDL_DestroyTexture};
-    std::unordered_map<char32_t, Glyph> glyphs;
+    std::unordered_map<std::uint64_t, Glyph> glyphs;
     int width = 0;
     int height = 0;
     int x = 1;
@@ -71,20 +71,27 @@ GlyphAtlas::GlyphAtlas(SDL_Renderer &renderer,
 
 GlyphAtlas::~GlyphAtlas() = default;
 
-Glyph GlyphAtlas::getOrInsert(char32_t codePoint) {
+Glyph GlyphAtlas::getOrInsert(char32_t codePoint, CellAttribute attributes) {
     if (codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
         throw std::invalid_argument("Invalid Unicode scalar value");
     }
     auto &state = *impl_;
-    if (const auto it = state.glyphs.find(codePoint);
-        it != state.glyphs.end()) {
+    const auto style =
+        attributes & (CellAttribute::Bold | CellAttribute::Italic);
+    const auto key = std::uint64_t(codePoint) | (std::uint64_t(style) << 32);
+    if (const auto it = state.glyphs.find(key); it != state.glyphs.end()) {
         return it->second;
     }
+    TTF_SetFontStyle(
+        state.font.get(),
+        (hasAttribute(style, CellAttribute::Bold) ? TTF_STYLE_BOLD : 0) |
+            (hasAttribute(style, CellAttribute::Italic) ? TTF_STYLE_ITALIC
+                                                        : 0));
     if (!TTF_GlyphIsProvided32(state.font.get(), codePoint)) {
         for (const char32_t replacement : {U'\ufffd', U'?'}) {
             if (TTF_GlyphIsProvided32(state.font.get(), replacement)) {
-                const auto glyph = getOrInsert(replacement);
-                state.glyphs.emplace(codePoint, glyph);
+                const auto glyph = getOrInsert(replacement, attributes);
+                state.glyphs.emplace(key, glyph);
                 return glyph;
             }
         }
@@ -96,7 +103,7 @@ Glyph GlyphAtlas::getOrInsert(char32_t codePoint) {
     Glyph glyph;
     glyph.advanceX = advance;
     if (maxX <= minX || maxY <= minY) {
-        state.glyphs.emplace(codePoint, glyph);
+        state.glyphs.emplace(key, glyph);
         return glyph;
     }
     Surface rendered(TTF_RenderGlyph32_Blended(state.font.get(),
@@ -133,7 +140,7 @@ Glyph GlyphAtlas::getOrInsert(char32_t codePoint) {
     glyph.source = {x, y, pixels->w, pixels->h};
     check(SDL_UpdateTexture(
         state.texture.get(), &glyph.source, pixels->pixels, pixels->pitch));
-    state.glyphs.emplace(codePoint, glyph);
+    state.glyphs.emplace(key, glyph);
     state.x = x + pixels->w + 1;
     state.y = y;
     state.shelfHeight = std::max(shelfHeight, pixels->h);

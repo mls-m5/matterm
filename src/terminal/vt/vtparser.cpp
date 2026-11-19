@@ -63,6 +63,7 @@ struct VtParser::Impl {
         Rgb8 background;
         bool inverse = false;
         bool conceal = false;
+        CellAttribute attributes = CellAttribute::None;
     };
     struct Context {
         Rendition style;
@@ -88,6 +89,7 @@ struct VtParser::Impl {
     std::size_t parameterCount = 0;
     char prefix = 0;
     bool intermediate = false;
+    char intermediateChar = 0;
     char charsetSelector = 0;
     bool osc = false;
     bool discardString = false;
@@ -118,6 +120,7 @@ struct VtParser::Impl {
             foreground = background;
         }
         model.setColors(foreground, background);
+        model.setAttributes(context().style.attributes);
     }
     void save() {
         model.saveCursor();
@@ -206,6 +209,7 @@ struct VtParser::Impl {
         parameters[0] = -1;
         prefix = 0;
         intermediate = false;
+        intermediateChar = 0;
     }
     void beginString(bool isOsc) {
         state = State::String;
@@ -252,6 +256,9 @@ struct VtParser::Impl {
             else if (byte == 'M') {
                 model.reverseIndex();
             }
+            else if (byte == 'H') {
+                model.setTabStop();
+            }
             else if (byte == 'Z') {
                 if (events.reply) {
                     events.reply("\x1b[?1;0c");
@@ -294,6 +301,40 @@ struct VtParser::Impl {
             const int code = value(i, 0, false);
             if (code == 0) {
                 style = defaults;
+            }
+            else if (code == 1) {
+                style.attributes = style.attributes | CellAttribute::Bold;
+            }
+            else if (code == 2) {
+                style.attributes = style.attributes | CellAttribute::Faint;
+            }
+            else if (code == 3) {
+                style.attributes = style.attributes | CellAttribute::Italic;
+            }
+            else if (code == 4) {
+                style.attributes = style.attributes | CellAttribute::Underline;
+            }
+            else if (code == 5 || code == 6) {
+                style.attributes = style.attributes | CellAttribute::Blink;
+            }
+            else if (code == 9) {
+                style.attributes = style.attributes | CellAttribute::Strike;
+            }
+            else if (code == 22) {
+                style.attributes = style.attributes & ~(CellAttribute::Bold |
+                                                        CellAttribute::Faint);
+            }
+            else if (code == 23) {
+                style.attributes = style.attributes & ~CellAttribute::Italic;
+            }
+            else if (code == 24) {
+                style.attributes = style.attributes & ~CellAttribute::Underline;
+            }
+            else if (code == 25) {
+                style.attributes = style.attributes & ~CellAttribute::Blink;
+            }
+            else if (code == 29) {
+                style.attributes = style.attributes & ~CellAttribute::Strike;
             }
             else if (code == 7) {
                 style.inverse = true;
@@ -369,12 +410,24 @@ struct VtParser::Impl {
                     }
                 }
             }
-            // Other attributes (bold, underline, etc.) are not implemented yet.
+            // Unsupported attributes (e.g. double underline) are ignored.
         }
         applyColors();
     }
     void dispatch(unsigned char final) {
         if (intermediate) {
+            if (intermediateChar == ' ' && final == 'q' && prefix == 0 &&
+                parameterCount == 1) {
+                const int style = value(0, 0, false);
+                if (style <= 6) {
+                    const auto shape = style <= 2 ? CursorState::Shape::Block
+                                       : style <= 4
+                                           ? CursorState::Shape::Underline
+                                           : CursorState::Shape::Bar;
+                    model.setCursorAppearance(shape,
+                                              style == 0 || style % 2 == 1);
+                }
+            }
             return;
         }
         if (prefix == '?') {
@@ -393,6 +446,10 @@ struct VtParser::Impl {
                 }
                 else if (parameters[i] == 7) {
                     model.setAutoWrap(final == 'h');
+                }
+                else if (parameters[i] == 12) {
+                    model.setCursorAppearance(model.cursor().shape,
+                                              final == 'h');
                 }
                 else if (parameters[i] == 25) {
                     model.setCursorVisible(final == 'h');
@@ -462,6 +519,19 @@ struct VtParser::Impl {
                 else {
                     model.eraseLine(erase);
                 }
+            }
+            break;
+        }
+        case 'I':
+            model.tabForward(count);
+            break;
+        case 'Z':
+            model.tabBackward(count);
+            break;
+        case 'g': {
+            const int mode = value(0, 0, false);
+            if (mode == 0 || mode == 3) {
+                model.clearTabStops(mode == 3);
             }
             break;
         }
@@ -537,6 +607,7 @@ struct VtParser::Impl {
             return;
         }
         if (byte >= 0x20 && byte <= 0x2f) {
+            intermediateChar = intermediate ? 0 : char(byte);
             intermediate = true;
             return;
         }

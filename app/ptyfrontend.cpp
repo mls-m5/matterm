@@ -277,8 +277,9 @@ int runPtyFrontend(const char *font,
         session.model().advanceViewport(double(now - lastFrame) / 1000);
         lastFrame = now;
         auto frame = session.model().frame(backend.cellHeight());
-        frame.cursor.visible =
-            frame.cursor.visible && !session.finished() && (now / 500) % 2 == 0;
+        frame.textBlinkVisible = (now / 500) % 2 == 0;
+        frame.cursor.visible = frame.cursor.visible && !session.finished() &&
+                               (!frame.cursor.blink || (now / 500) % 2 == 0);
         std::string currentTitle = title;
         if (session.finished()) {
             const auto status = *session.exitStatus();

@@ -234,8 +234,11 @@ Scrolling margins, origin/autowrap/insert modes, character/line insertion and
 deletion, region scrolling, and reverse index are available through the model and
 VT layer. Full-screen scrolls retain primary history; partial-region edits do not.
 Width/height resize resets margins and origin mode to the full screen.
-Wide characters, combining clusters, custom tab stops, and full DEC mode rules
-are not implemented; currently one code point occupies one cell.
+Custom tab stops, bold/italic, underline/strike, faint/blinking text, and cursor
+shape/blink controls are implemented. FChar remains 12 bytes. Wide characters,
+combining clusters, and full DEC mode rules are not implemented; currently one
+code point occupies one cell. Configurable palettes and reported scroll-boundary
+issues are tracked in ROADMAP.md; colors are still resolved to RGB during parsing.
 
 ## Rendering Boundary
 

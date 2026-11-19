@@ -13,6 +13,8 @@ struct Snapshot {
     int column;
     int row;
     bool visible;
+    bool blink;
+    CursorState::Shape shape;
     bool alternate;
     bool applicationCursor;
     bool bracketedPaste;
@@ -26,7 +28,8 @@ struct Snapshot {
     bool operator==(const Snapshot &other) const {
         return text == other.text && colors == other.colors &&
                column == other.column && row == other.row &&
-               visible == other.visible && alternate == other.alternate &&
+               visible == other.visible && blink == other.blink &&
+               shape == other.shape && alternate == other.alternate &&
                history == other.history && replies == other.replies &&
                titles == other.titles &&
                applicationCursor == other.applicationCursor &&
@@ -63,6 +66,8 @@ Snapshot parse(std::string_view bytes,
     result.column = cursor.column;
     result.row = cursor.row;
     result.visible = cursor.visible;
+    result.blink = cursor.blink;
+    result.shape = cursor.shape;
     result.alternate = model.alternateScreen();
     result.applicationCursor = parser.modes().applicationCursor;
     result.bracketedPaste = parser.modes().bracketedPaste;
@@ -76,6 +81,7 @@ Snapshot parse(std::string_view bytes,
         for (std::size_t x = 0; x < model.columns(); ++x) {
             const auto &cell = model.cell(x, y);
             result.text.push_back(cell.codePoint);
+            result.colors.push_back(unsigned(cell.attributes));
             result.colors.push_back(unsigned(cell.foreground.r) << 16 |
                                     unsigned(cell.foreground.g) << 8 |
                                     cell.foreground.b);

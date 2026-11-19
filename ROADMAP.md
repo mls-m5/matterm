@@ -35,7 +35,8 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 
 - [x] Scrolling regions, insert/delete/erase characters and lines, reverse index.
 - [x] Autowrap/origin/insert modes, inverse/conceal, DEC line graphics, RIS, and conservative primary DA.
-- [ ] Full text attributes and configurable tab stops.
+- [x] Bold/italic atlas variants, underline/strike/faint/blink, configurable tab stops, and cursor shape/blink controls.
+- [ ] Remaining attributes and broader conformance testing.
 - [ ] Distinct DEC private mode semantics (47/1047/1048/1049), beyond the initial subset.
 - [ ] Application keypad/mouse modes (application cursor and bracketed paste state/input encoding are implemented).
 - [ ] Golden transcripts from real programs, fuzz/property tests, and compatibility fixtures.
@@ -62,6 +63,25 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [x] Optional integration fixtures for a real Python curses screen (DEC borders/input) and top.
 - [ ] Broader full-screen/editor transcripts and interactive compatibility testing.
 - [x] Keep dangerous OSC actions disabled; any future opt-in requires a security policy.
+
+## Reported Scrolling Issues and Palette Design
+
+- [ ] Reproduce and eliminate the reported blank area above the first row in
+  both primary and alternate mode; check initial padding, viewport bounds, and
+  fractional clipping separately rather than introducing intentional overscroll.
+- [ ] Empty terminal content must not allow scrolling. Distinguish allocated blank
+  screen rows from retained scrollable history; test fresh, cleared, resized,
+  alternate, and post-reset states. Do not discard intentional blank output lines.
+- [ ] Decide explicitly whether alternate-mode wheel input should scroll history,
+  be ignored, or encode application input; currently it sends arrow keys.
+- [ ] Plan configurable palettes: retain default/indexed/RGB color identity in
+  terminal cells rather than eagerly flattening all colors to RGB in the parser.
+- [ ] Define palette ownership, 16/256-color lookup, default foreground/background,
+  theme changes affecting existing cells, inverse/faint rendering, and future OSC
+  palette commands. Keep cell layout compact and the API backend-independent.
+- [ ] Add palette and scroll-boundary regression tests before changing behavior.
+
+These are recorded requests, not fixes or a completed palette implementation.
 
 ## Future Direction: Output to an Existing Terminal (Do Not Implement Yet)
 

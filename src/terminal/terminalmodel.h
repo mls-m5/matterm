@@ -30,7 +30,9 @@ public:
     void setCursor(CursorState cursor);
     void moveCursor(int column, int row);
     void setColors(Rgb8 foreground, Rgb8 background);
+    void setAttributes(CellAttribute attributes);
     void setCursorVisible(bool visible);
+    void setCursorAppearance(CursorState::Shape shape, bool blink);
     // Per-screen save slot: cursor, colors, and pending wrap. Restore clamps
     // coordinates after resize. Calling restore before save is a no-op.
     void saveCursor();
@@ -64,6 +66,10 @@ public:
     void addressCursor(int column, int row);
     void setAutoWrap(bool enabled);
     void setInsertMode(bool enabled);
+    void tabForward(int count = 1);
+    void tabBackward(int count = 1);
+    void setTabStop();
+    void clearTabStops(bool all = false);
     void reset();
 
     // Entry clears/homes the alternate buffer. Repeated entry/exit is a no-op.

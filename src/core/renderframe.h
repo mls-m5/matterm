@@ -15,4 +15,6 @@ struct RenderFrame {
     // height.
     int textHeightPixels = -1;
     ScrollbarState scrollbar{};
+    // Presentation clock is caller-owned, just like cursor blinking.
+    bool textBlinkVisible = true;
 };
