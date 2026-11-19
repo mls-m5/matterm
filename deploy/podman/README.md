@@ -3,8 +3,10 @@
 A locked-down container for testing `matterm-server` on the laptop and later on
 the public server, using the same files. The server does not exist yet
 (docs/WEB_TERMINAL.md, phase 2): the `Containerfile` targets, CMake options and
-the server flags used here (`--listen`, `--allow-plain-http`, `--trusted-proxy`,
-`--allowed-origin`, `--set-password`, `--health-check`) are the planned interface and may change.
+the server flags used here (`--listen`, `--port`, `--allow-plain-http`,
+`--origin`, `--static-dir`, `--set-password`) exist; `--trusted-proxy` and
+`--health-check` do not (test/serversecurity_test.cpp parses these files with the
+real flag parser).
 None of this has been run. The files parse with podman-compose 1.0.3 (Debian 12),
 which needs `-p matterm` (it ignores the `name:` key) and does not support nested
 `${A:-${B}}` defaults, so the host paths are fixed to `~/.config/matterm` and
@@ -31,7 +33,9 @@ the LAN, so the shell cannot download tools or reach other machines.
   Note the shell can read the config directory, including the password hash.
 - Every connection reaches the server from the same (gateway) address, so
   per-address rate limiting cannot tell sources apart here. That is fine for
-  local testing; the public server relies on the host nginx's `X-Forwarded-For`.
+  local testing. The server ignores `X-Forwarded-For` (no `trusted_proxy` yet),
+  so on the public server the nginx `limit_req` on `/login` is the only
+  per-client limit; see docs/SECURITY_REVIEW.md, finding 2.
 
 ### Network isolation (unverified)
 
