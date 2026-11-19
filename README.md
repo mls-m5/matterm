@@ -69,9 +69,13 @@ are tty input, not GUI shortcuts. Close the window or press Ctrl+Shift+Q to quit
 Shift+Page Up/Down and Ctrl+Shift+Home/End navigate scrollback; ordinary navigation
 keys go to the program. Ctrl+Shift+V pastes with control filtering and negotiated
 bracketed paste. Drag with the left mouse button to select text (including
-scrollback), then press Ctrl+Shift+C to copy it. Copy joins soft-wrapped rows
-and retains explicit line breaks. Resize, screen switches, and eviction of a
-selected row clear the selection.
+scrollback), Shift+click to extend from the existing anchor, or Ctrl+Shift+A to
+select all retained history and screen rows. Double click selects a word;
+triple click selects a logical line, including soft wraps. Drag after either to
+extend by whole words/lines. Ctrl+Shift+C copies, joining soft-wrapped rows and
+retaining explicit line breaks. Copies over 1 MiB fail explicitly, without
+truncation. Resize, screen switches, and eviction of a selected row clear the
+selection. See [Selection](docs/SELECTION.md) for word boundaries and details.
 The window closes once the child exits and its PTY output is drained. In
 an interactive shell, Ctrl+D at an empty prompt normally exits that shell.
 

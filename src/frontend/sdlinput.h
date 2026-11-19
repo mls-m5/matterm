@@ -6,12 +6,12 @@
 #include "inputencoder.h"
 #include "sdlbackend.h"
 #include "terminalmodel.h"
+#include "textselection.h"
 
 #include <SDL.h>
 
 #include <algorithm>
 #include <optional>
-#include <tuple>
 
 namespace frontend {
 inline std::optional<InputEncoder::Key> special(SDL_Keycode key) {
@@ -123,47 +123,11 @@ inline InputEncoder::Modifiers modifiers(SDL_Keymod mod) {
             bool(mod & KMOD_CTRL) && !altGr};
 }
 
-struct Selection {
-    TerminalModel::TextCell anchor, end;
-    std::size_t epoch;
-
-    bool valid(const TerminalModel &model) const {
-        return epoch == model.selectionEpoch() &&
-               std::min(anchor.row, end.row) >= model.firstRetainedRow();
-    }
-
-    bool copy(const TerminalModel &model) const {
-        const auto text = model.copyText(anchor, end, 1024 * 1024);
-        return text && SDL_SetClipboardText(text->c_str()) == 0;
-    }
-
-    void apply(const TerminalModel &model, RenderFrame &frame) const {
-        if (!valid(model)) {
-            return;
-        }
-        auto first = anchor;
-        auto last = end;
-        if (std::tie(last.row, last.column) <
-            std::tie(first.row, first.column)) {
-            std::swap(first, last);
-        }
-        const auto viewFirst =
-            model.firstRetainedRow() + model.viewport().firstRow();
-        const auto viewEnd = viewFirst + frame.cells.rows();
-        if (last.row < viewFirst || first.row >= viewEnd) {
-            return;
-        }
-        const auto columns = frame.cells.columns();
-        frame.selectionBegin =
-            first.row < viewFirst
-                ? 0
-                : (first.row - viewFirst) * columns + first.column;
-        frame.selectionEnd =
-            last.row >= viewEnd
-                ? frame.cells.rows() * columns
-                : (last.row - viewFirst) * columns + last.column + 1;
-    }
-};
+inline bool copySelection(const Selection &selection,
+                          const TerminalModel &model) {
+    const auto text = selection.text(model);
+    return text && SDL_SetClipboardText(text->c_str()) == 0;
+}
 
 inline std::optional<TerminalModel::TextCell> mouseCell(
     SDL_Window &window,
