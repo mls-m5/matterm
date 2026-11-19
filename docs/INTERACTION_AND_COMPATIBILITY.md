@@ -21,8 +21,10 @@
   background in matterm. Literal RGB and `PI_TRUE_COLOR=1 pi` worked inside the
   affected container. The native application now advertises `COLORTERM=truecolor`
   without changing TERM. If Podman does not pass it through, use `--env COLORTERM`.
-  Verify the same Pi tool panel without `PI_TRUE_COLOR`; if it still fails with
-  `COLORTERM=truecolor` inside the container, capture that failing panel.
+  The failing session was subsequently confirmed to have `COLORTERM=truecolor`
+  in Pi's process environment, so the hint alone is insufficient. Capture that
+  panel using matterm's `--record-output FILE` (see [PTY.md](PTY.md)), without
+  inserting another PTY via `script`.
 - **Braille spinner becomes a replacement glyph.** JetBrains Mono lacks these
   code points; they are three-byte UTF-8, not clusters. Verify Linux Fontconfig
   fallback with the default font and an installed face that covers Braille

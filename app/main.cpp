@@ -249,6 +249,7 @@ int run(const char *font, int fontSize, const char *inputPath, bool smokeTest) {
 
 int main(int argc, char **argv) {
     const char *inputPath = nullptr;
+    const char *recordPath = nullptr;
     bool smokeTest = false;
     bool ptySmokeTest = false;
     bool showcase = false;
@@ -294,6 +295,10 @@ int main(int argc, char **argv) {
         else if (arg == "--smoke-test") {
             smokeTest = true;
         }
+        else if (arg == "--record-output" && i + 1 < argc && !recordPath &&
+                 std::string_view(argv[i + 1]).substr(0, 2) != "--") {
+            recordPath = argv[++i];
+        }
         else if (arg == "--input" && i + 1 < argc) {
             inputPath = argv[++i];
         }
@@ -302,12 +307,14 @@ int main(int argc, char **argv) {
         }
     }
     if (!valid || (inputPath && smokeTest) ||
+        (recordPath && (inputPath || smokeTest || showcase || ptySmokeTest)) ||
         ((!command.empty() || ptySmokeTest) &&
          (inputPath || smokeTest || showcase)) ||
         (ptySmokeTest && command.empty())) {
         std::cerr
             << "Usage: " << argv[0]
-            << " [font.ttf] [--font-size PIXELS] [--term TERM] [-- COMMAND "
+            << " [font.ttf] [--font-size PIXELS] [--term TERM] "
+               "[--record-output FILE] [-- COMMAND "
                "ARG...]\n"
             << "       " << argv[0]
             << " [font.ttf] [--font-size PIXELS] [--input FILE | --showcase | "
@@ -322,15 +329,19 @@ int main(int argc, char **argv) {
         }
         try {
             const auto font = applicationFontPath(fontOverride);
-            return runPtyFrontend(
-                font.c_str(), fontSize, command, term, ptySmokeTest);
+            return runPtyFrontend(font.c_str(),
+                                  fontSize,
+                                  command,
+                                  term,
+                                  ptySmokeTest,
+                                  recordPath);
         }
         catch (const std::exception &error) {
             std::cerr << error.what() << '\n';
             return 1;
         }
 #else
-        if (!command.empty() || ptySmokeTest) {
+        if (!command.empty() || ptySmokeTest || recordPath) {
             std::cerr << "This build has no native PTY support\n";
             return 1;
         }

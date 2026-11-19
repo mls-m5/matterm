@@ -68,6 +68,7 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [ ] Capability-appropriate TERM/terminfo; do not advertise xterm-256color prematurely.
 - [x] Controlled tty/job-control/resize/exit tests, interactive bash command test, and end-to-end PTY rendering smoke.
 - [x] Close the application window when its PTY session finishes.
+- [x] Opt-in raw PTY output recording for reproducible rendering diagnostics.
 - [x] Optional integration fixtures for a real Python curses screen (DEC borders/input) and top.
 - [ ] Broader full-screen/editor transcripts and interactive compatibility testing.
 - [x] Keep dangerous OSC actions disabled; any future opt-in requires a security policy.

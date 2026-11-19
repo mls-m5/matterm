@@ -70,6 +70,25 @@ text input, not an extra Escape prefix. Shift+Page Up/Down navigates history;
 ordinary page/function/Escape keys go to the child. Ctrl+Shift+V explicitly pastes.
 Ctrl+Shift+Q or closing the window shuts down the session. The window also
 closes automatically once the child is reaped and PTY output is drained.
+
+## Recording native PTY output
+
+```sh
+./build/matterm --record-output build/pi-color.vt
+./build/matterm --input build/pi-color.vt
+```
+
+In the first window, run the application and reproduce the problem; exit the
+shell to finish. The optional flag also works with `-- COMMAND ARG...`. It saves
+raw bytes read from the PTY before parsing, without wrapping the child in another
+PTY. It does not separately record keys or replies sent to the child, but echoed
+input and any sensitive output can appear in the file. Use a fresh filename: the
+file is created with owner-only permissions and will not replace an existing
+file. Capture stops at 64 MiB or a write error; the session continues with a
+warning on stderr. Recording is synchronous; use a local file and leave it off
+for benchmarks. The stream contains no timestamps or resize events; `--input`
+plays it with the current window geometry and does not run the original program.
+Do not commit or share a recording without checking for sensitive content.
 Mouse wheel navigates primary history or sends arrow keys on the alternate screen;
 full mouse reporting/selection is not implemented.
 

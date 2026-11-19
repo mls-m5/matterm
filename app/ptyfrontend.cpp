@@ -9,14 +9,81 @@
 #include <SDL_ttf.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
+#include <fcntl.h>
 #include <iostream>
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <system_error>
 #include <tuple>
+#include <unistd.h>
 
 namespace {
+class OutputRecording {
+public:
+    explicit OutputRecording(const char *path) {
+        if (!path) {
+            return;
+        }
+        fd_ = ::open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+        if (fd_ < 0) {
+            const int error = errno;
+            throw std::system_error(
+                error,
+                std::generic_category(),
+                std::string("Could not create PTY recording: ") + path);
+        }
+        std::cerr << "Recording PTY output to " << path << '\n';
+    }
+    ~OutputRecording() {
+        close();
+    }
+    OutputRecording(const OutputRecording &) = delete;
+    OutputRecording &operator=(const OutputRecording &) = delete;
+
+    void append(std::string_view bytes) {
+        const bool truncated = bytes.size() > remaining_;
+        bytes = bytes.substr(0, remaining_);
+        while (fd_ >= 0 && !bytes.empty()) {
+            const auto count = ::write(fd_, bytes.data(), bytes.size());
+            if (count < 0 && errno == EINTR) {
+                continue;
+            }
+            if (count <= 0) {
+                const std::error_code error(count < 0 ? errno : EIO,
+                                            std::generic_category());
+                std::cerr << "PTY recording stopped: " << error.message()
+                          << '\n';
+                close();
+                return;
+            }
+            remaining_ -= std::size_t(count);
+            bytes.remove_prefix(std::size_t(count));
+        }
+        if (fd_ >= 0 && truncated) {
+            std::cerr << "PTY recording stopped at 64 MiB; the terminal "
+                         "session continues\n";
+            close();
+        }
+    }
+
+private:
+    void close() {
+        if (fd_ >= 0) {
+            if (::close(fd_) < 0) {
+                const std::error_code error(errno, std::generic_category());
+                std::cerr << "PTY recording close failed: " << error.message()
+                          << '\n';
+            }
+            fd_ = -1;
+        }
+    }
+    int fd_ = -1;
+    std::size_t remaining_ = 64 * 1024 * 1024;
+};
+
 struct SdlRuntime {
     SdlRuntime() {
         if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -261,7 +328,9 @@ int runPtyFrontend(const char *font,
                    int fontSize,
                    const std::vector<std::string> &arguments,
                    const std::string &term,
-                   bool smokeTest) {
+                   bool smokeTest,
+                   const char *recordPath) {
+    OutputRecording recording(recordPath);
     std::string title = "matterm";
     // fork/exec before SDL or graphics workers exist. Window dimensions follow
     // immediately after the backend computes drawable-pixel cell metrics.
@@ -274,6 +343,10 @@ int runPtyFrontend(const char *font,
                         }},
                        term,
                        PtyProcess::ColorCapability::TrueColor);
+    if (recordPath) {
+        session.setOutputObserver(
+            [&](std::string_view bytes) { recording.append(bytes); });
+    }
     SdlRuntime runtime;
     std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(
         SDL_CreateWindow("matterm",

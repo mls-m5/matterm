@@ -22,6 +22,7 @@ struct PtySession::Impl {
     TerminalModel model;
     PtyProcess process;
     VtEvents events;
+    std::function<void(std::string_view)> outputObserver;
     std::string pending;
     std::size_t offset = 0;
     bool eof = false;
@@ -72,7 +73,11 @@ struct PtySession::Impl {
             const auto result = process.read(
                 buffer.data(), std::min(buffer.size(), readBudget));
             if (result.state == PtyProcess::ReadState::Data) {
-                parser.feed(std::string_view(buffer.data(), result.count));
+                const std::string_view bytes(buffer.data(), result.count);
+                if (outputObserver) {
+                    outputObserver(bytes);
+                }
+                parser.feed(bytes);
                 readBudget -= result.count;
             }
             else {
@@ -112,6 +117,10 @@ PtySession::PtySession(const std::vector<std::string> &arguments,
     : impl_(std::make_unique<Impl>(
           arguments, columns, rows, std::move(events), term, color)) {}
 PtySession::~PtySession() = default;
+void PtySession::setOutputObserver(
+    std::function<void(std::string_view)> observer) {
+    impl_->outputObserver = std::move(observer);
+}
 TerminalModel &PtySession::model() noexcept {
     return impl_->model;
 }

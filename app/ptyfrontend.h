@@ -8,4 +8,5 @@ int runPtyFrontend(const char *font,
                    int fontSize,
                    const std::vector<std::string> &arguments,
                    const std::string &term,
-                   bool smokeTest);
+                   bool smokeTest,
+                   const char *recordPath);
