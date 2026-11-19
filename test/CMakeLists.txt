@@ -84,6 +84,7 @@ if(BUILD_TESTING)
     target_link_libraries(democontent_test PRIVATE democontent)
     add_test(NAME demo_content COMMAND democontent_test)
 
+    if(TARGET glyphatlas)
     add_executable(glyphatlas_test
         glyphatlas_test.cpp
         mls-unit-test/test_main.cpp
@@ -95,6 +96,7 @@ if(BUILD_TESTING)
         mls-unit-test/test_main.cpp
     )
     target_link_libraries(sdlbackend_test PRIVATE cellbuffer terminalmemory sdlbackend)
+    endif()
 
     if(TARGET ptyprocess)
         add_executable(pty_test_child pty_test_child.cpp)
@@ -153,11 +155,22 @@ if(BUILD_TESTING)
         endforeach()
     endif()
 
+    if(TARGET matterm-server-core)
+        foreach(name IN ITEMS serverauth serverratelimiter serverintegration)
+            if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${name}_test.cpp")
+                add_executable(${name}_test ${name}_test.cpp mls-unit-test/test_main.cpp)
+                target_link_libraries(${name}_test PRIVATE matterm-server-core)
+                add_test(NAME ${name} COMMAND ${name}_test)
+                set_tests_properties(${name} PROPERTIES TIMEOUT 30)
+            endif()
+        endforeach()
+    endif()
+
     set(TEST_FONT_FILE "" CACHE FILEPATH "TrueType font for atlas and rendering tests")
     if(NOT TEST_FONT_FILE AND MATTERM_ASSET_JetBrainsMono-Regular.ttf)
         set(TEST_FONT_FILE "${MATTERM_ASSET_JetBrainsMono-Regular.ttf}")
     endif()
-    if(TEST_FONT_FILE)
+    if(TEST_FONT_FILE AND TARGET glyphatlas)
         if(NOT EXISTS "${TEST_FONT_FILE}")
             message(FATAL_ERROR "TEST_FONT_FILE does not exist: ${TEST_FONT_FILE}")
         endif()
