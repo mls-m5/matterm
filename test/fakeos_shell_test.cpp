@@ -108,7 +108,7 @@ TEST_CASE("cd, pwd and the prompt follow the directory") {
 
 TEST_CASE(
     "A long path is abbreviated in the prompt so the line keeps its room") {
-    Pc pc(false, 40, 10);
+    Pc pc(false, 50, 10);
     pc.run("mkdir -p aaa/bbb/ccc/ddd");
     pc.run("cd aaa/bbb/ccc/ddd");
     EXPECT(pc.last() == "guest@matterm:.../ccc/ddd$");
