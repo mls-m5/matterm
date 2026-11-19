@@ -38,7 +38,9 @@ Open http://localhost:8080/, log in, and the shell appears. `login.js` posts the
 password to `/login` (the session cookie is HttpOnly) and then starts
 `index.js`, which opens `ws(s)://<host>/ws` itself. Without the server, open the
 files from any static HTTP server with `?ws=ws://host:port/ws` to connect, or
-without a parameter for the built-in demo text.
+add `?demo` to run the interactive in-browser simulator (docs/SIMULATOR.md)
+with no server at all. Without a server, the login form is skipped by `?demo`
+only.
 
 ## Check it in a headless browser
 

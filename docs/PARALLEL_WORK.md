@@ -64,8 +64,8 @@ Agents work in separate worktrees with non-overlapping owned paths.
 - `docs/tasks/server-config.md`: JSON configuration for `matterm-server`.
   The hardening task is finished and integrated. Whoever takes this task
   rebases onto `main` first. Worktree `.tmp/agent2` (or `.tmp/agent3` if idle).
-- `docs/tasks/scripted-link.md`: `ScriptedLink` terminal simulator.
-  Worktree `.tmp/agent3`, branch `agent3-scripted`.
+- `docs/tasks/scripted-link.md`: done and integrated (worktree `.tmp/agent3`
+  is free).
 
 The integrator (main session) owns the browser client in `web/` and integration.
 Integrate by cherry-picking in dependency order and running the full suite.
