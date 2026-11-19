@@ -222,6 +222,28 @@ TEST_CASE(
               1);
 }
 
+TEST_CASE("OSC color queries use the active palette without changing it") {
+    TerminalModel model(8, 2);
+    Palette palette;
+    palette.foreground = {1, 2, 3};
+    palette.background = {37, 65, 49};
+    palette.colors[255] = {255, 128, 0};
+    std::string replies;
+    VtParser parser(
+        model,
+        {[&](std::string_view bytes) { replies += bytes; }, {}, &palette});
+    parser.feed("\x1b]10;?\x07\x1b]11;?\x1b");
+    parser.feed("\\\x1b]4;255;?\x07\x1b]4;256;?\x07\x1b]4;-1;?\x07"
+                "\x1b]4;255;rgb:00/00/00\x07\x1b]11;rgb:ff/ff/ff\x07X");
+    EXPECT_EQ(replies,
+              std::string("\x1b]10;rgb:0101/0202/0303\x1b\\"
+                          "\x1b]11;rgb:2525/4141/3131\x1b\\"
+                          "\x1b]4;255;rgb:ffff/8080/0000\x1b\\"));
+    EXPECT_EQ(palette.background.r, 37);
+    EXPECT_EQ(palette.colors[255].r, 255);
+    EXPECT_EQ(model.cell(0, 0).codePoint, U'X');
+}
+
 TEST_CASE("OSC titles and DSR replies are explicit events not rendered text") {
     TerminalModel model(10, 4);
     std::vector<std::string> replies, titles;

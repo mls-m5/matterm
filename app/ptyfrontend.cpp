@@ -332,6 +332,7 @@ int runPtyFrontend(const char *font,
                    const char *recordPath) {
     OutputRecording recording(recordPath);
     std::string title = "matterm";
+    const Palette palette;
     // fork/exec before SDL or graphics workers exist. Window dimensions follow
     // immediately after the backend computes drawable-pixel cell metrics.
     PtySession session(arguments,
@@ -340,7 +341,8 @@ int runPtyFrontend(const char *font,
                        {{},
                         [&](std::string_view value) {
                             title = "matterm | " + std::string(value);
-                        }},
+                        },
+                        &palette},
                        term,
                        PtyProcess::ColorCapability::TrueColor);
     if (recordPath) {
@@ -520,6 +522,7 @@ int runPtyFrontend(const char *font,
         session.model().advanceViewport(double(now - lastFrame) / 1000);
         lastFrame = now;
         auto frame = model.frame(backend.cellHeight());
+        frame.palette = &palette;
         if (selection) {
             if (selection->valid(model)) {
                 selection->apply(model, frame);

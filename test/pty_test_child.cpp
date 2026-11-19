@@ -73,7 +73,8 @@ int main(int argc, char **argv) {
         }
         return 0;
     }
-    if (std::strcmp(argv[1], "vt") == 0) {
+    const bool queryColors = std::strcmp(argv[1], "colors") == 0;
+    if (queryColors || std::strcmp(argv[1], "vt") == 0) {
         termios settings{};
         if (tcgetattr(0, &settings) < 0) {
             return 97;
@@ -81,6 +82,16 @@ int main(int argc, char **argv) {
         cfmakeraw(&settings);
         if (tcsetattr(0, TCSANOW, &settings) < 0) {
             return 98;
+        }
+        if (queryColors) {
+            std::printf("\x1b]11;?\x07");
+            std::fflush(stdout);
+            for (const char expected : "\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\") {
+                if (expected && std::getchar() != expected) {
+                    return 101;
+                }
+            }
+            return 0;
         }
         std::printf("\x1b[2J\x1b[H\x1b[32mmatterm PTY\x1b[0m\r\n\x1b[6n");
         std::fflush(stdout);
