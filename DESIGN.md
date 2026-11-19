@@ -11,8 +11,9 @@ proportions; SdlBackend clips shifted text and draws a right-hand scrollbar.
 CellBuffer remains available as a CPU-only scratch surface. A separate
 matterm-terminal-demo now uses TerminalModel for writing, cursor/erase operations,
 primary history, and an isolated alternate screen. A separate matterm application
-now consumes the initial VT parser through built-in/file streams. PTY integration
-and text clusters are not implemented yet.
+now consumes VT streams from a real Linux PTY or optional built-in/file sources.
+Native input, resize, process lifecycle, and parser replies are connected. Text
+clusters and complete VT compatibility are not implemented yet.
 
 ## Library and Application Boundaries
 
@@ -25,8 +26,8 @@ rendering library interface. Keep it usable independently of terminal emulation.
   exercises its direct API and renders through matterm::renderer. It has no shell.
 - matterm::vt provides the incremental UTF-8/VT subset; the separate matterm
   frontend uses it without changing either demo. It calls model operations,
-  rather than duplicating terminal behavior. PTY ownership and input encoding
-  are later application/adapter stages.
+  rather than duplicating terminal behavior. Linux PTY ownership lives in
+  src/platform/posix/; portable InputEncoder is part of the terminal library.
 - A future standalone memory viewer can use a separate adapter to feed cells to
   the renderer without using the terminal emulator. Current CellGridView borrows
   same-process storage. Shared-memory/IPC support needs a defined layout, lifetime,
@@ -42,7 +43,7 @@ src/core/, graphical backends in src/render/, screen semantics in src/terminal/,
 and byte-stream decoding/parsing in src/terminal/vt/. The decoder is separately
 linkable as matterm::utf8; the model does not require it. Both existing demos must
 retain their behavior; the separate matterm application hosts VT integration and
-will later connect PTY/process adapters. docs/VT.md defines the supported subset.
+also connects the separate native PTY/process adapter. docs/VT.md defines the supported subset.
 
 A deferred reverse-direction backend could turn the same drawing/cell API into
 ANSI/VT output for an existing terminal, potentially replacing ncurses for clients.
@@ -313,7 +314,8 @@ measurements justify them; no performance target has been verified yet.
    title/reply events. Tests include every split point, byte feeds, bounded
    recovery, and deterministic arbitrary input. The matterm frontend renders
    built-in or file streams and has its own headless integration test.
-9. Continue broader terminal compatibility and the isolated POSIX PTY/session
-   adapter using ROADMAP.md. No shell or program input transport exists yet.
-   Keep both demos unchanged. Browser loop/remote/simulation and reverse terminal
+9. The Linux PtyProcess/PtySession adapters now support a real shell, nonblocking
+   bounded I/O, input encoding, replies, resize, and controlled shutdown. Tests
+   include a real interactive bash command and the full PTY-to-SDL path. Continue
+   broader VT/editor compatibility using ROADMAP.md; keep both demos unchanged. Browser loop/remote/simulation and reverse terminal
    output backends are documented future directions, not current implementations.
