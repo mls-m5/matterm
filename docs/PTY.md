@@ -53,5 +53,20 @@ exec failure, shutdown/reaping, parser replies, and complete output draining.
 A separate interactive bash test uses --noprofile --norc, sends a command, and
 checks its output and exit status. Rendering/GPU behavior is tested separately.
 
-The portable demos remain unchanged. See ROADMAP.md for application integration,
-remaining VT compatibility, and future web transports.
+## Native Application
+
+The separate matterm application launches a shell on Linux by default. `-- PROGRAM
+ARG...` selects a command; `--term NAME` overrides the conservative vt100 default.
+`--showcase` and `--input FILE` select transport-free VT viewing instead. The child
+starts before SDL initialization; the real cell size then triggers model/PTY resize.
+
+Special keys/Ctrl/Meta and UTF-8 text are encoded to the PTY. AltGr is treated as
+text input, not an extra Escape prefix. Shift+Page Up/Down navigates history;
+ordinary page/function/Escape keys go to the child. Ctrl+Shift+V explicitly pastes.
+Ctrl+Shift+Q/window close shuts down; exited sessions keep the last rendered frame.
+Mouse wheel navigates primary history or sends arrow keys on the alternate screen;
+full mouse reporting/selection is not implemented.
+
+A separate GUI smoke test verifies the real child -> PTY -> parser -> model -> SDL
+path, including a status-query reply back to the child. Both portable demos remain
+unchanged. See ROADMAP.md for remaining compatibility and future web transports.

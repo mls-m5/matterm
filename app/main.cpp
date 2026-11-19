@@ -1,12 +1,16 @@
 #include "render/sdlbackend.h"
 #include "terminal/terminalmodel.h"
 #include "terminal/vt/vtparser.h"
+#ifdef MATTERM_HAS_PTY
+#include "ptyfrontend.h"
+#endif
 
 #include <SDL.h>
 #include <SDL_ttf.h>
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -242,10 +246,30 @@ int run(const char *font, const char *inputPath, bool smokeTest) {
 int main(int argc, char **argv) {
     const char *inputPath = nullptr;
     bool smokeTest = false;
+    bool ptySmokeTest = false;
+    bool showcase = false;
+    std::string term = "vt100";
+    std::vector<std::string> command;
     bool valid = argc >= 2;
     for (int i = 2; i < argc && valid; ++i) {
         const std::string_view arg = argv[i];
-        if (arg == "--smoke-test") {
+        if (arg == "--") {
+            while (++i < argc) {
+                command.emplace_back(argv[i]);
+            }
+            valid = !command.empty();
+            break;
+        }
+        else if (arg == "--showcase") {
+            showcase = true;
+        }
+        else if (arg == "--pty-smoke-test") {
+            ptySmokeTest = true;
+        }
+        else if (arg == "--term" && i + 1 < argc) {
+            term = argv[++i];
+        }
+        else if (arg == "--smoke-test") {
             smokeTest = true;
         }
         else if (arg == "--input" && i + 1 < argc) {
@@ -255,10 +279,37 @@ int main(int argc, char **argv) {
             valid = false;
         }
     }
-    if (!valid || (inputPath && smokeTest)) {
+    if (!valid || (inputPath && smokeTest) ||
+        ((!command.empty() || ptySmokeTest) &&
+         (inputPath || smokeTest || showcase)) ||
+        (ptySmokeTest && command.empty())) {
         std::cerr << "Usage: " << argv[0]
-                  << " /path/to/font.ttf [--input FILE | --smoke-test]\n";
+                  << " /path/to/font.ttf [--term TERM] [-- COMMAND ARG...]\n"
+                  << "       " << argv[0]
+                  << " /path/to/font.ttf [--input FILE | --showcase | "
+                     "--smoke-test]\n";
         return 1;
+    }
+    if (!inputPath && !smokeTest && !showcase) {
+#ifdef MATTERM_HAS_PTY
+        if (command.empty()) {
+            const char *shell = std::getenv("SHELL");
+            command = {shell && *shell ? shell : "/bin/sh", "-i"};
+        }
+        try {
+            return runPtyFrontend(argv[1], command, term, ptySmokeTest);
+        }
+        catch (const std::exception &error) {
+            std::cerr << error.what() << '\n';
+            return 1;
+        }
+#else
+        if (!command.empty() || ptySmokeTest) {
+            std::cerr << "This build has no native PTY support\n";
+            return 1;
+        }
+        std::cerr << "PTY disabled: showing the VT showcase instead\n";
+#endif
     }
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         std::cerr << SDL_GetError() << '\n';

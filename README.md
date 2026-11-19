@@ -41,12 +41,30 @@ The demo retains up to 256 rows in reusable 16-row blocks. Controls:
 - Wheel / Page Up/Down scroll; Ctrl+Home/End selects oldest history/live output.
 - Escape exits. This is not a shell or a complete editor/terminal emulator.
 
-## VT Frontend (Separate `matterm` Program)
+## Native Terminal (Separate `matterm` Program)
 
-The existing demos keep their behavior. A third program, `matterm`, uses the
-incremental VT parser and shows a built-in VT stream, or reads a regular UTF-8/VT
-file in bounded chunks. It is the start of the emulator application, **not yet a
-shell/PTY terminal**. Keyboard input is not sent to a child program yet.
+Both existing demos keep their behavior. On Linux, `matterm` now starts an
+interactive shell through a real PTY by default (`$SHELL -i`, or `/bin/sh -i`).
+Use `-- COMMAND ARG...` to run a specific program without implicit shell quoting.
+The native PTY starts before SDL workers and is resized after font metrics are known.
+
+```sh
+./build/matterm /path/to/font.ttf
+./build/matterm /path/to/font.ttf -- /bin/bash --noprofile --norc -i
+./build/matterm /path/to/font.ttf --showcase
+```
+
+In native terminal mode, Escape/function keys go to the program. Ctrl+C and Ctrl+D
+are tty input, not GUI shortcuts. Close the window or press Ctrl+Shift+Q to quit.
+Shift+Page Up/Down and Ctrl+Shift+Home/End navigate scrollback; ordinary navigation
+keys go to the program. Ctrl+Shift+V pastes with control filtering and negotiated
+bracketed paste. Selection/copy is not implemented; Ctrl+Shift+C is reserved.
+After child exit the last frame remains visible with exit status in the title.
+
+TERM defaults conservatively to `vt100`; `--term NAME` overrides it. Compatibility
+is still incomplete: do not assume full xterm/Vim support or advertise richer
+capabilities blindly. Use `--showcase` for the built-in VT stream, or `--input FILE`
+for regular-file playback:
 
 ```sh
 printf '\033[31mHello from VT\033[0m\r\n' > /tmp/matterm.vt
@@ -56,8 +74,8 @@ printf '\033[31mHello from VT\033[0m\r\n' > /tmp/matterm.vt
 Wheel/Page Up/Down and Home/End navigate history; Space pauses file playback;
 Escape exits. Without `--input`, it displays a parsed startup showcase. Supported
 commands, bounds, callbacks, and limitations are documented in [docs/VT.md](docs/VT.md).
-Native PTY/session libraries are now implemented and tested separately; GUI
-attachment is the next application step. See [docs/PTY.md](docs/PTY.md) and
+Native PTY/session and GUI integration are implemented, including parser replies,
+keyboard input, resize, process cleanup, and bounded I/O. See [docs/PTY.md](docs/PTY.md) and
 [ROADMAP.md](ROADMAP.md).
 
 ## Build and Run
@@ -148,8 +166,10 @@ cmake -S . -B build/lib-only -DMATTERM_BUILD_DEMO=OFF -DMATTERM_BUILD_APP=OFF -D
 cmake --build build/lib-only
 ```
 
-The new `matterm` frontend uses the model/parser libraries; the future PTY and
-input-encoding adapters will connect it to child programs. A standalone memory viewer could also
+The `matterm` application connects model/parser libraries to `matterm::session`
+on Linux. `matterm::pty` and the session adapter are separately linkable; disable
+native support with `-DMATTERM_ENABLE_PTY=OFF` for portable builds. Without native
+support, the app defaults to the VT showcase. A standalone memory viewer could also
 feed cell views into it. Currently views borrow memory in the same process;
 attaching to shared memory or another process will need an explicit adapter and
 synchronization protocol, not raw cross-process pointers.
@@ -209,7 +229,7 @@ The terminal demo uses it instead of platform-dependent SDL/iconv conversions.
 It is Unicode decoding only, not a VT parser.
 
 Use the separate `VtParser` for ANSI/VT byte streams, not UTF-32 `write()`.
-The supported VT subset is limited; no PTY exists yet.
+The supported VT subset is limited; the Linux PTY is a separate optional adapter.
 Wide characters, combining clusters, scrolling margins, and full DEC mode rules
 are not implemented; currently one code point occupies one cell.
 
@@ -237,8 +257,8 @@ The alternate screen is available to library clients as well as the terminal
 demo. The renderer has no terminal mode logic: the model supplies the active view
 and hides the alternate screen's scrollbar. The demo keeps equal column counts
 in both modes so hiding the sidebar does not itself resize the primary screen.
-Actual Vim support still requires broader VT compatibility, input encoding, and
-PTY integration.
+Full-screen/editor compatibility still needs broader VT support; having a PTY and
+alternate screen alone does not imply complete Vim compatibility.
 
 ## Design and Roadmap
 

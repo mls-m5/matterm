@@ -40,7 +40,7 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [ ] Golden transcripts from real programs, fuzz/property tests, and compatibility fixtures.
 - [ ] Wide cells, combining clusters, shaping, and font fallback.
 
-## 4. POSIX PTY Adapter (Not Part of the First Parser Slice)
+## 4. POSIX PTY Adapter (Implemented on Linux)
 
 - [x] src/platform/posix/: isolated PtyProcess with start/read/write/resize/pollExit.
 - [x] forkpty session, controlling-terminal, stdio setup, and pre-exec error reporting.
@@ -54,10 +54,11 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 ## 5. Terminal Application
 
 - [x] Separate matterm executable using the same model/parser libraries (VT frontend only so far).
-- [ ] TerminalSession joins PTY output -> parser -> model -> renderer.
-- [ ] Keyboard/text/paste -> input encoder -> PTY; parser replies use the same queued output path.
+- [x] PtySession joins PTY output -> parser -> model -> renderer.
+- [x] Keyboard/text/paste -> input encoder -> PTY; parser replies share the queued output path.
 - [ ] Capability-appropriate TERM/terminfo; do not advertise xterm-256color prematurely.
-- [ ] Shell, job-control, resize, alternate-screen, and exit integration tests.
+- [x] Controlled tty/job-control/resize/exit tests, interactive bash command test, and end-to-end PTY rendering smoke.
+- [ ] Broader full-screen/editor transcripts and interactive compatibility testing.
 - [x] Keep dangerous OSC actions disabled; any future opt-in requires a security policy.
 
 ## Future Direction: Output to an Existing Terminal (Do Not Implement Yet)

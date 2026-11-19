@@ -123,6 +123,12 @@ if(BUILD_TESTING)
                 COMMAND matterm "${TEST_FONT_FILE}" --smoke-test)
             set_tests_properties(vt_frontend_render_smoke PROPERTIES
                 ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+            if(TARGET ptysession)
+                add_test(NAME pty_frontend_render_smoke
+                    COMMAND matterm "${TEST_FONT_FILE}" --pty-smoke-test -- $<TARGET_FILE:pty_test_child> vt)
+                set_tests_properties(pty_frontend_render_smoke PROPERTIES
+                    ENVIRONMENT "SDL_VIDEODRIVER=dummy" TIMEOUT 15)
+            endif()
         endif()
     else()
         message(STATUS "Set TEST_FONT_FILE to enable font-dependent atlas and rendering tests")

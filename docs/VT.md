@@ -102,11 +102,11 @@ Do not advertise full VT100/xterm compatibility or Vim support.
 ## Applications and Next Steps
 
 Both existing demos remain unchanged. The separate `matterm` application is an
-initial VT frontend: it shows a built-in VT stream or reads a regular file in
-4 KiB chunks per GUI frame. It does not launch a child, attach to a TTY, or accept
-keyboard input for a program yet. Replies are captured but have no transport;
-OSC titles only update the GUI title. Shell access requires the later PTY/session
-and input-encoding stages in ROADMAP.md.
+native terminal on Linux: a bounded PtySession feeds the parser, and replies join
+the same outbound queue as keyboard input. See PTY.md for lifecycle and input
+semantics. `--showcase` and `--input FILE` retain transport-free VT/file viewing;
+file mode reads at most 4 KiB per GUI frame and does not send replies anywhere.
+OSC titles only update the GUI title. Both original demos retain their behavior.
 
 Tests compare complete input against every split point and byte-at-a-time feeds,
 check model state/colors/events, and exercise malformed/oversized/truncated input.
