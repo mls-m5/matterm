@@ -75,8 +75,15 @@ Checked with `tools/e2e-input.js` and `tools/e2e-copy.js`. Headless Chromium
 cannot produce a real Ctrl+Shift+V paste, so that test dispatches the `paste`
 event instead.
 
+## HiDPI
+
+The canvas backing store is sized in device pixels (`devicePixelRatio`) and the
+font is scaled by the same ratio, so text keeps its CSS size and is sharp on
+scaled screens. Mouse positions map correctly (checked at ratio 1 and 2). Changing
+the browser zoom after load needs a reload for the font size to follow.
+
 ## Known gaps
 
 Copied text keeps trailing spaces of the selected line (the same model code as
-the native terminal). Touch input, HiDPI scaling, the `open URL` roadmap item,
+the native terminal). Touch input, the `open URL` roadmap item,
 and a font choice other than the bundled one are not done.
