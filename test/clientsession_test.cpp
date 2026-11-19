@@ -161,6 +161,72 @@ struct Loopback : SessionHost {
 
 TEST_SUIT_BEGIN(ClientSession)
 
+TEST_CASE("Replay resets the fake frontend before output and acknowledges "
+          "absolute offsets") {
+    std::string order;
+    ClientSession::Config config;
+    config.replay = true;
+    config.sessionId = "00112233445566778899aabbccddeeff";
+    config.resumeOffset = 12;
+    config.resetForReplay = [&] { order += "reset;"; };
+    Fixture f(config);
+    f.session.setEvents(
+        {[&](std::string_view bytes) { order += bytes; }, {}, {}});
+    f.channel.opened();
+    const auto hello = std::get<Hello>(f.channel.messages().front());
+    EXPECT_EQ(hello.sessionId, config.sessionId);
+    EXPECT_EQ(hello.resumeOffset, std::uint64_t(12));
+    EXPECT_EQ(hello.features, featureReplay);
+    f.channel.deliver(Welcome{1, config.sessionId, 20, 3, featureReplay});
+    f.channel.deliver(Output{20, "output"});
+    EXPECT_EQ(order, std::string("reset;output"));
+    EXPECT_EQ(f.session.receivedOffset(), std::uint64_t(26));
+    f.advance(100);
+    EXPECT_EQ(std::get<Ack>(f.channel.messages().back()).consumedOffset,
+              std::uint64_t(26));
+}
+TEST_CASE("Exact resume keeps frontend state; malformed or unnegotiated replay "
+          "fails closed") {
+    for (unsigned mode = 0; mode < 5; ++mode) {
+        unsigned resets = 0;
+        ClientSession::Config config;
+        config.replay = mode != 1;
+        config.sessionId = "00112233445566778899aabbccddeeff";
+        config.resumeOffset = 40;
+        if (mode != 2)
+            config.resetForReplay = [&] { ++resets; };
+        Fixture f(config);
+        f.channel.opened();
+        auto welcome = Welcome{1, config.sessionId, 40, 1, featureReplay};
+        if (mode == 2)
+            welcome.flags = 3;
+        if (mode == 3)
+            welcome.flags = 0x80;
+        if (mode == 4)
+            welcome.sessionId = "other";
+        f.channel.deliver(welcome);
+        if (mode == 0) {
+            EXPECT(f.session.state() == ClientSession::State::Running);
+            EXPECT_EQ(resets, 0u);
+        }
+        else
+            EXPECT(f.session.state() == ClientSession::State::Failed);
+    }
+}
+TEST_CASE("A hostile replay offset cannot wrap the output counter") {
+    ClientSession::Config config;
+    config.replay = true;
+    config.sessionId = "00112233445566778899aabbccddeeff";
+    config.resumeOffset = ~std::uint64_t(0);
+    Fixture f(config);
+    f.channel.opened();
+    f.channel.deliver(
+        Welcome{1, config.sessionId, config.resumeOffset, 1, featureReplay});
+    f.channel.deliver(Output{config.resumeOffset, "x"});
+    EXPECT(f.session.state() == ClientSession::State::Failed);
+    EXPECT_EQ(f.session.receivedOffset(), config.resumeOffset);
+}
+
 TEST_CASE("Opening the channel sends Hello with the configured size") {
     ClientSession::Config config;
     config.columns = 100;
