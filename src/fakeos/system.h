@@ -79,8 +79,8 @@ private:
     std::unique_ptr<Program> program_;
     std::string programName_; // The builtin that runs, not the file's name.
     std::string pendingText_; // Shown after the program ends (click eggs).
+    std::uint64_t programSerial_ = 0; // Changes whenever a program starts.
     bool programBegun_ = false;
-    bool programIsIntro_ = false;
     Time now_{0}, base_{0}, nextFrame_{0};
     bool started_ = false;
     std::string out_;

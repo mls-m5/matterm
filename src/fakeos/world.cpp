@@ -28,7 +28,7 @@ const char *kMotd =
 
 const char *kPlan =
     "Things to try, when there is time:\n"
-    "  - the old games in /usr/games\n"
+    "  - the old games in /usr/games (some are shy: ls -a)\n"
     "  - the magic word, the one from the cave\n"
     "  - never run rm -rf / (the system calls it dangerous, and it is right)\n";
 
@@ -130,6 +130,12 @@ void seedWorld(World &world) {
     }
     fs.put(
         "/usr/games/fire", "#!builtin fire\n", "root", 0755, base - 30 * day);
+    // A shy one, hidden by its dot.
+    fs.put("/usr/games/.crumble",
+           "#!builtin crumble\n",
+           "root",
+           0755,
+           base - 30 * day);
     world.env = {{"HOME", "/home/" + user},
                  {"USER", user},
                  {"LOGNAME", user},

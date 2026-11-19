@@ -61,7 +61,6 @@ Reaction System::take() {
 Reaction System::start() {
     started_ = true;
     if (config_.intro && findProgram("intro")) {
-        programIsIntro_ = true;
         launch("intro", {});
     }
     else {
@@ -410,6 +409,7 @@ void System::launch(const std::string &name,
         return;
     }
     program_ = info->make(args);
+    ++programSerial_;
     programName_ = name;
     programBegun_ = false;
     canvas_.resize(world_.columns, world_.rows);
@@ -423,6 +423,7 @@ void System::launch(const std::string &name,
 }
 
 void System::endProgram() {
+    const bool wasIntro = programName_ == "intro";
     out_ += world_.caps.alternateScreen
                 ? kLeaveApp
                 : (std::string(kClearScreen) + "\x1b[?25h");
@@ -444,13 +445,13 @@ void System::endProgram() {
     if (world_.launch) { // A program (or a click egg) asked for the next one.
         const auto request = *world_.launch;
         world_.launch.reset();
+        world_.programInput = request.input;
         launch(request.name, request.args);
         if (program_) {
             return;
         }
     }
-    if (programIsIntro_) {
-        programIsIntro_ = false;
+    if (wasIntro) {
         showWelcome();
     }
     else {
@@ -480,12 +481,16 @@ Reaction System::input(std::string_view bytes) {
             break;
         }
         if (program_) {
+            const auto serial = programSerial_;
             if (key.is(Key::Type::Mouse) && key.press && !key.motion &&
                 key.button == 0) {
                 clicked(key);
             }
-            if (program_) {
+            // The click may have ended the program (and started the next one,
+            // which has not seen this key).
+            if (program_ && serial == programSerial_) {
                 program_->key(world_, key);
+                nextFrame_ = now_; // Show the effect of the key at once.
                 if (program_->finished()) {
                     endProgram();
                 }

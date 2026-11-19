@@ -36,7 +36,10 @@ struct World {
     struct Launch {
         std::string name;
         std::vector<std::string> args;
+        std::string input; // Text for the program (a pager's file), if any.
     };
+    // The text handed to the program that is starting (read in its begin()).
+    std::string programInput;
     std::optional<Launch> launch;
 
     std::int64_t unixNow() const {
