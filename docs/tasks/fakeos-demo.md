@@ -237,6 +237,43 @@ optionally talk to a thin relay for multi-user features. Keep the core free of
 assumptions that would block that (no globals, injected time and randomness,
 input and output as byte streams).
 
+## Finish the demo (current assignment)
+
+The owner wants the demo finished: milestones 2 to 4, in this order, reporting after
+each. The integrator separately handles the GitHub Pages pipeline and the static
+`demo.html` page (generated from `web/shell.html`, same files as the browser
+client); do not build packaging or CI yourself, but keep the web demo working with
+only static files (no server) and tell the integrator what the page needs.
+
+- **Milestone 2**: native `matterm-demo` (SDL window through the model/renderer,
+  with the framed/cell-snapped behavior of the other frontends, `--no-intro`),
+  optional `--tty`, click easter eggs (`Egg::Trigger` for mouse clicks via
+  mouse reporting).
+- **Milestone 3**: more commands, more animations and easter eggs, including the
+  Matrix egg below; the files and programs that lead to them.
+- **Milestone 4**: polish and tests (determinism per seed, e2e in `e2e-demo.js`),
+  `docs/FAKEOS_EGGS.md` (spoilers), README for the demo including the iframe
+  embedding snippet and the `?embed`/`?nointro` parameters.
+
+### The Matrix egg (owner's spec)
+
+Somewhere in the virtual file system the visitor can find something that refers to
+*The Matrix* (a file, a program or a note; hidden well enough to be a discovery,
+reachable by normal exploration, with a hint trail). Following it triggers, as one
+scripted sequence inside the same world:
+
+1. The screen goes black.
+2. The text `Hello, Neo.` appears (typed out) with a blinking cursor.
+3. After a pause: `Follow the white rabbit.`
+4. Green characters rain down the screen like the Matrix digital rain (columns of
+   falling glyphs with a bright head and fading tail; seeded randomness; resizes
+   correctly; any key skips).
+5. After a while the rain ends and the visitor returns to the **intro animation**,
+   which then leads to the shell prompt again (the world keeps its changes).
+
+Timing is data (named constants), the whole sequence is a `Program`, and it is
+tested deterministically with the fake clock like the other animations.
+
 ## Handoff
 
 As in docs/PARALLEL_WORK.md: full commit SHAs in dependency order per milestone,
