@@ -26,7 +26,7 @@ target_include_directories(terminalmodel PUBLIC src/terminal)
 target_link_libraries(terminalmodel PUBLIC terminalmemory)
 
 # Wire protocol for remote terminals: pure data and codec, no I/O.
-add_library(ttyprotocol src/protocol/message.cpp)
+add_library(ttyprotocol src/protocol/message.cpp src/protocol/serversession.cpp)
 add_library(matterm::protocol ALIAS ttyprotocol)
 target_compile_features(ttyprotocol PUBLIC cxx_std_17)
 target_include_directories(ttyprotocol PUBLIC src/protocol)

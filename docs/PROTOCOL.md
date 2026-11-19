@@ -146,7 +146,7 @@ Client                                   Server
 ```
 
 Server states: `AwaitHello` (only `Hello` is accepted), `Running` (everything
-except `Hello`), `Closing` (nothing is accepted). Client states mirror this:
+except `Hello`), `Closing` (after `Close`: later messages are ignored while the process ends). Client states mirror this:
 `Hello` is sent immediately after the upgrade; `Input` and `Resize` may be sent
 before `Welcome` arrives and are queued by the server. Any message that is not
 valid in the current state is `BadMessage`.
@@ -276,6 +276,11 @@ A mouse press in SGR encoding (the terminal enabled mode 1006) is an ordinary
 - The decoder is a pure function of one complete message, so it can be driven
   by a fuzzer and by round-trip tests for every message, plus the examples above
   as golden vectors.
-- The state machine (`AwaitHello`, `Running`, `Closing`), timers, and flow
-  control live in a transport-independent session class so they can be tested
-  with a fake clock and an in-memory transport.
+- The server-side state machine (`AwaitHello`, `Running`, `Closing`), timers, flow
+  control, resize coalescing, and rate limits are implemented as
+  `protocol::ServerSession` (`src/protocol/serversession.h`). It takes time as a
+  parameter and talks to its environment through a `SessionHost` interface
+  (send, close transport, start/resize/terminate process, write input), so the
+  tests drive it with a fake host and no clock or sockets. The host reads at most
+  `outputBudget()` bytes from the PTY at a time, calls `tick()` by `nextDeadline()`,
+  and must report process exit only after the PTY output was drained.
