@@ -112,6 +112,7 @@ std::string SessionStore::issue() {
     digest_ = digest(token);
     created_ = touched_ = now_();
     claimed_ = false;
+    ++generation_;
     return token;
 }
 bool SessionStore::valid(std::string_view token, bool touch) {
@@ -134,6 +135,19 @@ bool SessionStore::claim(std::string_view token) {
     if (!valid(token) || claimed_)
         return false;
     claimed_ = true;
+    return true;
+}
+bool SessionStore::attachedValid(std::uint64_t generation, bool touch) {
+    if (generation != generation_ || digest_.empty() || !claimed_)
+        return false;
+    const auto now = now_();
+    if (now - created_ >= config_.absoluteTimeout ||
+        now - touched_ >= config_.idleTimeout) {
+        revoke();
+        return false;
+    }
+    if (touch)
+        touched_ = now;
     return true;
 }
 void SessionStore::revoke() {
