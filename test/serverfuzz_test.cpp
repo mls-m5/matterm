@@ -46,7 +46,13 @@ std::string quoteJson(std::string_view bytes) {
     static constexpr char digits[] = "0123456789abcdef";
     std::string result = "\"";
     for (unsigned char c : bytes) {
-        if (c < 32) {
+        const auto shortAt =
+            std::string_view("\b\f\n\r\t").find(static_cast<char>(c));
+        if (shortAt != std::string_view::npos) {
+            result += '\\';
+            result += std::string_view("bfnrt")[shortAt];
+        }
+        else if (c < 32) {
             result += "\\u00";
             result += digits[c >> 4];
             result += digits[c & 15];
@@ -99,6 +105,18 @@ TEST_CASE("Password mutations terminate and accepted results round-trip") {
             EXPECT(check(!server::parsePassword(bytes + "x"), trial, bytes));
         }
     }
+}
+TEST_CASE("Password round-trip respects the encoded body limit") {
+    std::string bytes = "{\"password\":\"";
+    for (unsigned i = 0; i < 100; ++i)
+        bytes += "\\n";
+    bytes += "\"}";
+    const auto password = server::parsePassword(bytes);
+    EXPECT(check(password && password->size() == 100, 0, bytes));
+    EXPECT(check(server::parsePassword("{\"password\":" + quoteJson(*password) +
+                                       "}") == password,
+                 0,
+                 bytes));
 }
 TEST_CASE("Password JSON rejects raw controls, invalid UTF-8, bad escapes and "
           "duplicate fields") {

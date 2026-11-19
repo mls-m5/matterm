@@ -53,6 +53,7 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [ ] Design and prototype a borderless SDL window with a custom title bar. Budget substantial GUI design and polish before rollout; keep native decorations as a fallback.
 - [ ] Reproduce prompt and Pi panel color reports; see [Interaction and Compatibility](docs/INTERACTION_AND_COMPATIBILITY.md).
 - [ ] Golden transcripts from real programs, fuzz/property tests, and compatibility fixtures.
+  - [x] Bounded seeded codec/session, VT chunking/model-invariant, and server auth/config property tests in the normal suite; reject malformed JSON string encodings found by them. Recorded golden transcripts, coverage-guided fuzzing and broader compatibility fixtures remain open.
 - [x] Use optional Fontconfig system font fallback on Linux for missing glyphs, including Braille.
 - [x] Verify the Fontconfig-enabled build and Braille fallback with installed system fonts.
 - [x] Reproduce and fix an SDL_ttf `Text has zero width` exit: U+00AD soft hyphen has nonempty glyph metrics but zero rendered text width with DejaVu/SDL_ttf 2.20.1. The atlas now measures the selected font/style before rasterizing and caches zero-width text as an empty glyph, preserving advance and other error propagation. Regression tests cover styles, caching and atlas failures. The exact trigger of the original session is unconfirmed; see `docs/tasks/zero-width-glyph.md`.
