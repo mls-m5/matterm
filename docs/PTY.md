@@ -10,11 +10,10 @@ This is a native adapter, not a remote-shell server or a process sandbox.
 - forkpty establishes the child session, controlling terminal, and stdio.
 - Arguments, executable PATH resolution, and environment storage are prepared
   before fork. The child uses execve and reports exec errors through a CLOEXEC pipe.
-- TERM defaults conservatively to vt100. Inherited COLORTERM/COLUMNS/LINES
+- TERM defaults to xterm-256color. Inherited COLORTERM/COLUMNS/LINES
   are removed so they cannot falsely override the chosen capabilities or size.
   The native application explicitly advertises `COLORTERM=truecolor`; generic
-  PTY library clients can opt in. This does not imply VT100 conformance or
-  change the terminfo entry selected by TERM.
+  PTY library clients can opt in. TERM is not changed by that choice.
 - The master is nonblocking and close-on-exec. Callers queue partial writes.
 - Initial winsize is supplied to forkpty. TIOCSWINSZ handles resize, including the
   tty driver's SIGWINCH delivery to the foreground process group.
@@ -61,7 +60,7 @@ Rendering/GPU behavior is tested separately.
 ## Native Application
 
 The separate matterm application launches a shell on Linux by default. `-- PROGRAM
-ARG...` selects a command; `--term NAME` overrides the conservative vt100 default.
+ARG...` selects a command; `--term NAME` overrides the xterm-256color default.
 `--showcase` and `--input FILE` select transport-free VT viewing instead. The child
 starts before SDL initialization; the real cell size then triggers model/PTY resize.
 

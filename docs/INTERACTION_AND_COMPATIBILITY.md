@@ -2,8 +2,9 @@
 
 ## Color and font reports
 
-- **Shell prompt appears white.** matterm still defaults to `TERM=vt100`;
-  that terminfo description does not advertise colors. Compare `TERM` and
+- **Shell prompt appears white.** matterm used to default to `TERM=vt100`;
+  that terminfo description does not advertise colors, so Debian/Ubuntu's bashrc
+  left the prompt uncolored. The default is now `xterm-256color`. Compare `TERM` and
   `tput colors` in matterm, GNOME Terminal, and inside/outside tmux. Test
   `matterm --term xterm-256color` before deciding on a new default or a dedicated
   terminfo entry. Check which prompt rule suppresses color; do not override

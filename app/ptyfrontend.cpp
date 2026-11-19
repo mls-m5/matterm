@@ -161,6 +161,47 @@ std::optional<InputEncoder::Key> special(SDL_Keycode key) {
         return std::nullopt;
     }
 }
+// Keypad keys that application keypad mode (DECKPAM) reports as SS3 codes.
+std::optional<char> keypadKey(SDL_Keycode key) {
+    if (key >= SDLK_KP_1 && key <= SDLK_KP_9) {
+        return char('1' + (key - SDLK_KP_1));
+    }
+    switch (key) {
+    case SDLK_KP_0:
+        return '0';
+    case SDLK_KP_PERIOD:
+        return '.';
+    case SDLK_KP_PLUS:
+        return '+';
+    case SDLK_KP_MINUS:
+        return '-';
+    case SDLK_KP_MULTIPLY:
+        return '*';
+    case SDLK_KP_DIVIDE:
+        return '/';
+    case SDLK_KP_COMMA:
+        return ',';
+    case SDLK_KP_EQUALS:
+        return '=';
+    case SDLK_KP_ENTER:
+        return '\r';
+    default:
+        return std::nullopt;
+    }
+}
+std::optional<InputEncoder::MouseEvent::Button> mouseButton(Uint8 button) {
+    using Button = InputEncoder::MouseEvent::Button;
+    switch (button) {
+    case SDL_BUTTON_LEFT:
+        return Button::Left;
+    case SDL_BUTTON_MIDDLE:
+        return Button::Middle;
+    case SDL_BUTTON_RIGHT:
+        return Button::Right;
+    default:
+        return std::nullopt;
+    }
+}
 InputEncoder::Modifiers modifiers(SDL_Keymod mod) {
     const bool altGr = (mod & KMOD_RALT) != 0;
     return {bool(mod & KMOD_SHIFT),
@@ -332,7 +373,8 @@ int runPtyFrontend(const char *font,
                    const char *recordPath) {
     OutputRecording recording(recordPath);
     std::string title = "matterm";
-    const Palette palette;
+    const Palette defaultPalette;
+    Palette palette;
     // fork/exec before SDL or graphics workers exist. Window dimensions follow
     // immediately after the backend computes drawable-pixel cell metrics.
     PtySession session(arguments,
@@ -342,7 +384,19 @@ int runPtyFrontend(const char *font,
                         [&](std::string_view value) {
                             title = "matterm | " + std::string(value);
                         },
-                        &palette},
+                        &palette,
+                        [&](std::size_t index, Rgb8 color) {
+                            palette.colors[index] = color;
+                        },
+                        [&](std::optional<std::size_t> index) {
+                            if (index) {
+                                palette.colors[*index] =
+                                    defaultPalette.colors[*index];
+                            }
+                            else {
+                                palette.colors = defaultPalette.colors;
+                            }
+                        }},
                        term,
                        PtyProcess::ColorCapability::TrueColor);
     if (recordPath) {
@@ -392,8 +446,47 @@ int runPtyFrontend(const char *font,
             session.model().followTail();
         }
     };
+    // Application mouse reporting. Shift hands the mouse back to selection
+    // unless a reported press is still held.
+    using MouseEvent = InputEncoder::MouseEvent;
+    bool mouseCaptured = false;
+    MouseEvent::Button heldButton = MouseEvent::Button::None;
+    std::optional<std::pair<int, int>> lastMouseCell;
+    const auto sendMouse = [&](MouseEvent::Type type,
+                               MouseEvent::Button button,
+                               int x,
+                               int y,
+                               bool clamp,
+                               bool dedupe) {
+        const auto cell = mouseCell(*window, backend, model, x, y, clamp);
+        if (!cell) {
+            return;
+        }
+        const auto first = model.firstRetainedRow() + model.viewport().firstRow();
+        MouseEvent report;
+        report.type = type;
+        report.button = button;
+        report.modifiers = modifiers(SDL_GetModState());
+        report.column = int(cell->column);
+        report.row = cell->row >= first ? int(cell->row - first) : 0;
+        if (dedupe &&
+            lastMouseCell == std::make_pair(report.column, report.row)) {
+            return;
+        }
+        lastMouseCell = std::make_pair(report.column, report.row);
+        const auto bytes = InputEncoder::mouse(report, session.modes());
+        if (!bytes.empty() && !session.finished()) {
+            rejectedInput = !session.send(bytes);
+        }
+    };
+    const auto mouseTracking = [&] {
+        return session.modes().mouseTracking !=
+               TerminalModes::MouseTracking::Off;
+    };
+    bool skipText = false;
     Uint64 lastFrame = SDL_GetTicks64();
     while (running) {
+        skipText = false;
         resize();
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -402,9 +495,51 @@ int runPtyFrontend(const char *font,
             }
             else if (event.type == SDL_TEXTINPUT) {
                 const auto mod = modifiers(SDL_GetModState());
-                if (!mod.control) {
+                if (skipText) {
+                    skipText = false;
+                }
+                else if (!mod.control) {
                     send(InputEncoder::text(event.text.text, mod.alt));
                 }
+            }
+            else if (event.type == SDL_MOUSEBUTTONDOWN && mouseTracking() &&
+                     !modifiers(SDL_GetModState()).shift &&
+                     mouseButton(event.button.button)) {
+                mouseCaptured = true;
+                heldButton = *mouseButton(event.button.button);
+                lastMouseCell.reset();
+                sendMouse(MouseEvent::Type::Press,
+                          heldButton,
+                          event.button.x,
+                          event.button.y,
+                          false,
+                          false);
+            }
+            else if (event.type == SDL_MOUSEBUTTONUP && mouseCaptured &&
+                     mouseButton(event.button.button)) {
+                const auto button = *mouseButton(event.button.button);
+                sendMouse(MouseEvent::Type::Release,
+                          button,
+                          event.button.x,
+                          event.button.y,
+                          true,
+                          false);
+                if (button == heldButton) {
+                    mouseCaptured = false;
+                    heldButton = MouseEvent::Button::None;
+                }
+            }
+            else if (event.type == SDL_MOUSEMOTION && mouseTracking() &&
+                     (mouseCaptured ||
+                      (session.modes().mouseTracking ==
+                           TerminalModes::MouseTracking::Any &&
+                       !modifiers(SDL_GetModState()).shift))) {
+                sendMouse(MouseEvent::Type::Motion,
+                          heldButton,
+                          event.motion.x,
+                          event.motion.y,
+                          mouseCaptured,
+                          true);
             }
             else if (event.type == SDL_MOUSEBUTTONDOWN &&
                      event.button.button == SDL_BUTTON_LEFT) {
@@ -442,8 +577,19 @@ int runPtyFrontend(const char *font,
                 }
             }
             else if (event.type == SDL_WINDOWEVENT &&
-                     event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
-                dragging = false;
+                     (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST ||
+                      event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)) {
+                const bool gained =
+                    event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED;
+                if (!gained) {
+                    dragging = false;
+                    mouseCaptured = false;
+                    heldButton = MouseEvent::Button::None;
+                }
+                const auto report = InputEncoder::focus(gained, session.modes());
+                if (!report.empty() && !session.finished()) {
+                    rejectedInput = !session.send(report);
+                }
             }
             else if (event.type == SDL_MOUSEWHEEL) {
                 double amount = event.wheel.preciseY != 0 ? event.wheel.preciseY
@@ -451,7 +597,33 @@ int runPtyFrontend(const char *font,
                 if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) {
                     amount = -amount;
                 }
-                if (session.model().alternateScreen()) {
+                if (mouseTracking() && !modifiers(SDL_GetModState()).shift) {
+                    int x = 0, y = 0;
+                    SDL_GetMouseState(&x, &y);
+                    const auto button =
+                        event.wheel.x != 0 && event.wheel.y == 0
+                            ? (amount > 0 ? MouseEvent::Button::WheelRight
+                                          : MouseEvent::Button::WheelLeft)
+                        : amount > 0 ? MouseEvent::Button::WheelUp
+                                     : MouseEvent::Button::WheelDown;
+                    if (button == MouseEvent::Button::WheelLeft ||
+                        button == MouseEvent::Button::WheelRight) {
+                        amount = event.wheel.preciseX != 0
+                                     ? event.wheel.preciseX
+                                     : event.wheel.x;
+                    }
+                    const int steps = std::clamp(
+                        int(std::ceil(std::abs(amount))), 1, 10);
+                    for (int i = 0; i < steps; ++i) {
+                        sendMouse(MouseEvent::Type::Press,
+                                  button,
+                                  x,
+                                  y,
+                                  true,
+                                  false);
+                    }
+                }
+                else if (session.model().alternateScreen()) {
                     const auto key = amount > 0 ? InputEncoder::Key::Up
                                                 : InputEncoder::Key::Down;
                     for (int i = 0;
@@ -501,6 +673,12 @@ int runPtyFrontend(const char *font,
                 }
                 else if (mod.control && mod.shift && key == SDLK_END) {
                     session.model().followTail();
+                }
+                else if (session.modes().applicationKeypad &&
+                         keypadKey(key)) {
+                    skipText = true;
+                    send(InputEncoder::keypad(
+                        *keypadKey(key), mod, session.modes()));
                 }
                 else if (const auto encoded = special(key)) {
                     send(InputEncoder::key(*encoded, mod, session.modes()));

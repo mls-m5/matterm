@@ -253,7 +253,7 @@ int main(int argc, char **argv) {
     bool smokeTest = false;
     bool ptySmokeTest = false;
     bool showcase = false;
-    std::string term = "vt100";
+    std::string term = "xterm-256color";
     std::vector<std::string> command;
     const char *fontOverride = nullptr;
     int fontSize = 18;

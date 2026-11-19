@@ -8,6 +8,7 @@
 #include <array>
 #include <charconv>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -65,6 +66,7 @@ struct VtParser::Impl {
     bool osc = false;
     bool discardString = false;
     std::string controlString;
+    char32_t lastPainted = 0;
 
     Impl(TerminalModel &model,
          VtEvents events,
@@ -148,9 +150,13 @@ struct VtParser::Impl {
                 }
             }
         }
+        if (!text.empty()) {
+            lastPainted = text.back();
+        }
         model.write(text);
     }
     void resetTerminal() {
+        lastPainted = 0;
         model.reset();
         primary = Context{defaults, defaults, false};
         alternate = Context{defaults, defaults, false};
@@ -233,6 +239,108 @@ struct VtParser::Impl {
         reply += "\x1b\\";
         events.reply(reply);
     }
+    static std::optional<std::size_t> parseIndex(std::string_view text) {
+        unsigned index = 0;
+        const auto end = text.data() + text.size();
+        const auto parsed = std::from_chars(text.data(), end, index);
+        if (text.empty() || parsed.ec != std::errc{} || parsed.ptr != end ||
+            index > 255) {
+            return std::nullopt;
+        }
+        return std::size_t(index);
+    }
+    // Accepts rgb:R/G/B with 1-4 hex digits per channel, and #RGB/#RRGGBB/...
+    static std::optional<Rgb8> parseColor(std::string_view text) {
+        const auto scale = [](std::string_view hex) -> std::optional<int> {
+            unsigned value = 0;
+            const auto end = hex.data() + hex.size();
+            const auto parsed = std::from_chars(hex.data(), end, value, 16);
+            if (hex.empty() || hex.size() > 4 || parsed.ec != std::errc{} ||
+                parsed.ptr != end) {
+                return std::nullopt;
+            }
+            const unsigned maximum = (1u << (4 * hex.size())) - 1;
+            return int((value * 255 + maximum / 2) / maximum);
+        };
+        std::array<std::string_view, 3> parts;
+        if (text.substr(0, 4) == "rgb:") {
+            text.remove_prefix(4);
+            for (std::size_t i = 0; i < 3; ++i) {
+                const auto slash = text.find('/');
+                if ((i < 2) != (slash != std::string_view::npos)) {
+                    return std::nullopt;
+                }
+                parts[i] = text.substr(0, slash);
+                text.remove_prefix(slash == std::string_view::npos
+                                       ? text.size()
+                                       : slash + 1);
+            }
+        }
+        else if (text.size() > 1 && text[0] == '#' && (text.size() - 1) % 3 == 0 &&
+                 text.size() <= 13) {
+            const auto width = (text.size() - 1) / 3;
+            for (std::size_t i = 0; i < 3; ++i) {
+                parts[i] = text.substr(1 + i * width, width);
+            }
+        }
+        else {
+            return std::nullopt;
+        }
+        const auto r = scale(parts[0]), g = scale(parts[1]), b = scale(parts[2]);
+        if (!r || !g || !b) {
+            return std::nullopt;
+        }
+        return Rgb8{std::uint8_t(*r), std::uint8_t(*g), std::uint8_t(*b)};
+    }
+    // OSC 4;index;spec[;index;spec...]: set colors, or query with "?".
+    void paletteRequest(std::string_view data) {
+        data.remove_prefix(2);
+        while (!data.empty()) {
+            const auto first = data.find(';');
+            if (first == std::string_view::npos) {
+                return;
+            }
+            const auto second = data.find(';', first + 1);
+            const auto index = parseIndex(data.substr(0, first));
+            const auto spec = data.substr(first + 1, second == std::string_view::npos
+                                                         ? std::string_view::npos
+                                                         : second - first - 1);
+            if (index) {
+                if (spec == "?") {
+                    reportColor("4;" + std::to_string(*index) + ";?");
+                }
+                else if (const auto color = parseColor(spec);
+                         color && events.setPaletteColor) {
+                    events.setPaletteColor(*index, *color);
+                }
+            }
+            if (second == std::string_view::npos) {
+                return;
+            }
+            data.remove_prefix(second + 1);
+        }
+    }
+    void paletteReset(std::string_view data) {
+        data.remove_prefix(3);
+        if (!events.resetPaletteColor) {
+            return;
+        }
+        if (data.empty() || data == ";") {
+            events.resetPaletteColor(std::nullopt);
+            return;
+        }
+        data.remove_prefix(1); // The ';' after 104.
+        while (!data.empty()) {
+            const auto semicolon = data.find(';');
+            if (const auto index = parseIndex(data.substr(0, semicolon))) {
+                events.resetPaletteColor(*index);
+            }
+            if (semicolon == std::string_view::npos) {
+                return;
+            }
+            data.remove_prefix(semicolon + 1);
+        }
+    }
     void endString() {
         if (osc && !discardString) {
             const std::string_view data = controlString;
@@ -240,6 +348,12 @@ struct VtParser::Impl {
                 if (events.title) {
                     events.title(data.substr(2));
                 }
+            }
+            else if (data.substr(0, 2) == "4;") {
+                paletteRequest(data);
+            }
+            else if (data == "104" || data.substr(0, 4) == "104;") {
+                paletteReset(data);
             }
             else {
                 reportColor(data);
@@ -272,6 +386,9 @@ struct VtParser::Impl {
             }
             else if (byte == 'c') {
                 resetTerminal();
+            }
+            else if (byte == '=' || byte == '>') {
+                modes.applicationKeypad = byte == '=';
             }
             else if (byte == 'M') {
                 model.reverseIndex();
@@ -439,8 +556,44 @@ struct VtParser::Impl {
         }
         applyColors();
     }
+    static TerminalModes::MouseTracking mouseTrackingFor(int mode) {
+        using Tracking = TerminalModes::MouseTracking;
+        return mode == 9      ? Tracking::Press
+               : mode == 1000 ? Tracking::Normal
+               : mode == 1002 ? Tracking::Drag
+               : mode == 1003 ? Tracking::Any
+                              : Tracking::Off;
+    }
+    static TerminalModes::MouseEncoding mouseEncodingFor(int mode) {
+        using Encoding = TerminalModes::MouseEncoding;
+        return mode == 1005   ? Encoding::Utf8
+               : mode == 1006 ? Encoding::Sgr
+               : mode == 1015 ? Encoding::Urxvt
+                              : Encoding::X10;
+    }
+    // DECSTR: soft reset of modes and rendition; screen contents are kept.
+    void softReset() {
+        primary.style = defaults;
+        alternate.style = defaults;
+        primary.hasSaved = alternate.hasSaved = false;
+        for (auto *context : {&primary, &alternate}) {
+            context->g0Graphics = context->g1Graphics = context->useG1 = false;
+        }
+        modes = {};
+        model.setInsertMode(false);
+        model.setOriginMode(false);
+        model.setAutoWrap(true);
+        model.setScrollRegion(0, int(model.rows()) - 1);
+        model.setCursorVisible(true);
+        model.setCursorAppearance(model.cursor().shape, true);
+        applyColors();
+    }
     void dispatch(unsigned char final) {
         if (intermediate) {
+            if (intermediateChar == '!' && final == 'p' && prefix == 0) {
+                softReset();
+                return;
+            }
             if (intermediateChar == ' ' && final == 'q' && prefix == 0 &&
                 parameterCount == 1) {
                 const int style = value(0, 0, false);
@@ -479,8 +632,38 @@ struct VtParser::Impl {
                 else if (parameters[i] == 25) {
                     model.setCursorVisible(final == 'h');
                 }
-                else if (parameters[i] == 1049) {
+                else if (parameters[i] == 1049 || parameters[i] == 47 ||
+                         parameters[i] == 1047) {
                     alternateMode(final == 'h');
+                }
+                else if (parameters[i] == 1048) {
+                    if (final == 'h') {
+                        save();
+                    }
+                    else {
+                        restore();
+                    }
+                }
+                else if (parameters[i] == 1004) {
+                    modes.focusReporting = final == 'h';
+                }
+                else if (const auto tracking = mouseTrackingFor(parameters[i]);
+                         tracking != TerminalModes::MouseTracking::Off) {
+                    if (final == 'h') {
+                        modes.mouseTracking = tracking;
+                    }
+                    else if (modes.mouseTracking == tracking) {
+                        modes.mouseTracking = TerminalModes::MouseTracking::Off;
+                    }
+                }
+                else if (const auto encoding = mouseEncodingFor(parameters[i]);
+                         encoding != TerminalModes::MouseEncoding::X10) {
+                    if (final == 'h') {
+                        modes.mouseEncoding = encoding;
+                    }
+                    else if (modes.mouseEncoding == encoding) {
+                        modes.mouseEncoding = TerminalModes::MouseEncoding::X10;
+                    }
                 }
             }
             return;
@@ -592,6 +775,12 @@ struct VtParser::Impl {
             break;
         case 'm':
             sgr();
+            break;
+        case 'b':
+            if (lastPainted) {
+                model.write(std::u32string(
+                    std::size_t(std::min(count, 65535)), lastPainted));
+            }
             break;
         case 's':
             save();

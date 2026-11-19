@@ -51,6 +51,13 @@ margins/origin to the full screen; applications can re-establish them on SIGWINC
 | `CSI m` | SGR subset below |
 | `ESC 7` / `8`, `CSI s` / `u` | Shared per-screen saved cursor/rendition slot, including pending wrap |
 | `CSI ? 1 h/l`, `CSI ? 2004 h/l` | Application cursor and bracketed paste input modes |
+| `CSI ? 9/1000/1002/1003 h/l`, `CSI ? 1005/1006/1015 h/l` | Mouse tracking (press / press+release / drag / any motion) and X10, UTF-8, SGR, or urxvt report encoding; reports are built by `InputEncoder::mouse` |
+| `CSI ? 1004 h/l` | Focus in/out reporting (`CSI I` / `CSI O`) via `InputEncoder::focus` |
+| `ESC =`, `ESC >` | Application keypad on/off; `InputEncoder::keypad` sends SS3 codes |
+| `CSI Ps b` | REP: repeat the last printed character |
+| `CSI ! p` | DECSTR soft reset: modes, rendition, margins and charsets; screen contents stay |
+| `CSI ? 47/1047 h/l`, `CSI ? 1048 h/l` | Alternate screen (same policy as 1049) and cursor save/restore |
+| `OSC 4;i;spec`, `OSC 104[;i...]` | Set or reset palette entries through `VtEvents` callbacks (`rgb:` and `#rrggbb` specs); the client decides whether to honor them |
 | `CSI ? 25 h/l` | Cursor visibility without clearing pending wrap |
 | `CSI ? 1049 h/l` | Initial alternate-screen policy below |
 | `CSI 5 n`, `CSI 6 n` | Status/cursor reply; cursor row is origin-relative when enabled |
@@ -114,7 +121,7 @@ The future compatibility layer may need finer-grained DEC/ANSI state handling.
   and retains completed rendition/model state. `resetInput()` drops pending input
   without inserting a replacement and also retains completed state.
 - Raw eight-bit C1 control forms, secondary/extended device attributes, erase
-  history mode 3, application keypad, and mouse reporting are
+  history mode 3, left/right margins (`?69`), and OSC 10/11 color setting are
   not supported yet. Primary DA does not imply full VT100 conformance.
 Do not advertise full VT100/xterm compatibility or Vim support.
 

@@ -53,7 +53,17 @@ struct PtySession::Impl {
                           this->events.title(title);
                       }
                   },
-                  this->events.palette}) {
+                  this->events.palette,
+                  [this](std::size_t index, Rgb8 color) {
+                      if (this->events.setPaletteColor) {
+                          this->events.setPaletteColor(index, color);
+                      }
+                  },
+                  [this](std::optional<std::size_t> index) {
+                      if (this->events.resetPaletteColor) {
+                          this->events.resetPaletteColor(index);
+                      }
+                  }}) {
         model.eraseDisplay(TerminalModel::EraseMode::All);
     }
     bool send(std::string_view bytes) {

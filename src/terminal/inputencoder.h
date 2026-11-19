@@ -42,6 +42,38 @@ public:
         bool control = false;
     };
 
+    // Mouse report input. Coordinates are zero-based text cells.
+    struct MouseEvent {
+        enum class Type { Press, Release, Motion };
+        enum class Button {
+            Left,
+            Middle,
+            Right,
+            None, // Motion with no button held.
+            WheelUp,
+            WheelDown,
+            WheelLeft,
+            WheelRight
+        };
+        Type type = Type::Press;
+        Button button = Button::Left;
+        Modifiers modifiers;
+        int column = 0;
+        int row = 0;
+    };
+
+    // Returns empty when the event should not be reported under the current
+    // tracking/encoding modes (including coordinates the encoding cannot
+    // express). Wheel events have no release.
+    static std::string mouse(const MouseEvent &event,
+                             const TerminalModes &modes);
+    // Focus in/out report when focusReporting was negotiated, else empty.
+    static std::string focus(bool gained, const TerminalModes &modes);
+    // Keypad key ('0'..'9', '+', '-', '*', '/', '.', ',', '=' or '\r' for
+    // Enter). Application keypad mode sends SS3 sequences, else the character.
+    static std::string keypad(char key,
+                              Modifiers modifiers,
+                              const TerminalModes &modes);
     static std::string key(Key key,
                            Modifiers modifiers,
                            const TerminalModes &modes);
