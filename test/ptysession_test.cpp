@@ -88,4 +88,49 @@ TEST_CASE("Interactive bash executes input with a real controlling terminal") {
 
 #endif
 
+#ifdef MATTERM_TEST_PYTHON
+TEST_CASE("A real curses program draws DEC borders and reads keyboard input") {
+    PtySession session(
+        {MATTERM_TEST_PYTHON, MATTERM_TEST_CURSES_SCRIPT}, 80, 24);
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    const std::u32string marker = U"CURSES_SESSION";
+    bool found = false;
+    while (!found && std::chrono::steady_clock::now() < deadline) {
+        session.pump();
+        found = true;
+        for (std::size_t x = 0; x < marker.size(); ++x) {
+            found =
+                found && session.model().cell(x + 2, 1).codePoint == marker[x];
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT(found);
+    EXPECT(session.model().cell(0, 0).codePoint == U'┌');
+    EXPECT(session.send("q"));
+    finish(session);
+    EXPECT_EQ(session.exitStatus()->code, 0);
+}
+#endif
+
+#ifdef MATTERM_TEST_TOP
+TEST_CASE("Top paints a full-screen frame and exits on keyboard input") {
+    PtySession session({MATTERM_TEST_TOP, "-d", "0.1"}, 80, 24);
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    bool found = false;
+    while (!found && std::chrono::steady_clock::now() < deadline) {
+        session.pump();
+        found = session.model().cell(0, 0).codePoint == U't' &&
+                session.model().cell(1, 0).codePoint == U'o' &&
+                session.model().cell(2, 0).codePoint == U'p';
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT(found);
+    EXPECT(session.send("q"));
+    finish(session);
+    EXPECT_EQ(session.exitStatus()->code, 0);
+}
+#endif
+
 TEST_SUIT_END

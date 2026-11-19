@@ -51,7 +51,10 @@ Controlled children verify controlling tty ownership on all stdio descriptors,
 initial size, termios input, Ctrl+C delivery, SIGWINCH/resize, nonblocking reads,
 exec failure, shutdown/reaping, parser replies, and complete output draining.
 A separate interactive bash test uses --noprofile --norc, sends a command, and
-checks its output and exit status. Rendering/GPU behavior is tested separately.
+checks its output and exit status. When available, optional tests run a real
+Python curses screen (including DEC borders and keyboard input) and top. These
+are integration smoke tests, not comprehensive editor compatibility claims.
+Rendering/GPU behavior is tested separately.
 
 ## Native Application
 

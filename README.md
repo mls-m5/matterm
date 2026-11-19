@@ -230,7 +230,11 @@ It is Unicode decoding only, not a VT parser.
 
 Use the separate `VtParser` for ANSI/VT byte streams, not UTF-32 `write()`.
 The supported VT subset is limited; the Linux PTY is a separate optional adapter.
-Wide characters, combining clusters, scrolling margins, and full DEC mode rules
+Scrolling margins, origin/autowrap/insert modes, character/line insertion and
+deletion, region scrolling, and reverse index are available through the model and
+VT layer. Full-screen scrolls retain primary history; partial-region edits do not.
+Width/height resize resets margins and origin mode to the full screen.
+Wide characters, combining clusters, custom tab stops, and full DEC mode rules
 are not implemented; currently one code point occupies one cell.
 
 ## Rendering Boundary

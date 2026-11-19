@@ -314,7 +314,11 @@ measurements justify them; no performance target has been verified yet.
    title/reply events. Tests include every split point, byte feeds, bounded
    recovery, and deterministic arbitrary input. The matterm frontend renders
    built-in or file streams and has its own headless integration test.
-9. The Linux PtyProcess/PtySession adapters now support a real shell, nonblocking
+9. Scrolling margins, origin/autowrap/insert modes, character/line editing,
+   reverse index, DEC line graphics, inverse/conceal, RIS, and conservative primary
+   DA now extend the initial parser/model. Tests include optional real curses
+   and top clients. Resize currently resets margins/origin to full screen.
+10. The Linux PtyProcess/PtySession adapters now support a real shell, nonblocking
    bounded I/O, input encoding, replies, resize, and controlled shutdown. Tests
    include a real interactive bash command and the full PTY-to-SDL path. Continue
    broader VT/editor compatibility using ROADMAP.md; keep both demos unchanged. Browser loop/remote/simulation and reverse terminal

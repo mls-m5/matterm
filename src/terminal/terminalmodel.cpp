@@ -3,6 +3,8 @@
 #include "terminalmemory.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 
@@ -24,10 +26,17 @@ struct TerminalModel::Impl {
         CursorState cursor;
         FChar style;
         bool wrapPending = false;
+        int scrollTop = 0;
+        int scrollBottom = 0;
+        bool origin = false;
+        bool autoWrap = true;
+        bool insert = false;
         CursorState savedCursor;
         FChar savedStyle;
         bool savedWrap = false;
         bool hasSavedCursor = false;
+        bool savedOrigin = false;
+        bool savedAutoWrap = true;
 
         Screen(std::size_t columns,
                std::size_t rows,
@@ -36,6 +45,7 @@ struct TerminalModel::Impl {
             : memory(columns, rows + history)
             , style(fill) {
             cursor.visible = true;
+            scrollBottom = int(rows) - 1;
             for (std::size_t i = 0; i < rows; ++i) {
                 memory.append(FStringView{}, fill);
             }
@@ -81,6 +91,44 @@ struct TerminalModel::Impl {
         }
     }
 
+    void copyRow(Screen &screen, int destination, int source) {
+        auto *data =
+            &screen.memory.at(0, start(screen) + std::size_t(destination));
+        const auto row = screen.memory.row(start(screen) + std::size_t(source));
+        std::memmove(data, row.data(), columns * sizeof(FChar));
+    }
+    void shiftRows(
+        Screen &screen, int top, int bottom, int count, bool up, bool history) {
+        if (count <= 0) {
+            return;
+        }
+        count = std::min(count, bottom - top + 1);
+        if (up && history && top == 0 && bottom == int(rows) - 1) {
+            for (int i = 0; i < count; ++i) {
+                screen.memory.append(FStringView{}, blank(screen));
+            }
+            screen.viewport.rowsAppended(std::size_t(count),
+                                         screen.memory.size());
+            return;
+        }
+        if (up) {
+            for (int y = top; y <= bottom - count; ++y) {
+                copyRow(screen, y, y + count);
+            }
+            for (int y = bottom - count + 1; y <= bottom; ++y) {
+                fillRow(screen, std::size_t(y), 0, columns);
+            }
+        }
+        else {
+            for (int y = bottom; y >= top + count; --y) {
+                copyRow(screen, y, y - count);
+            }
+            for (int y = top; y < top + count; ++y) {
+                fillRow(screen, std::size_t(y), 0, columns);
+            }
+        }
+    }
+
     std::unique_ptr<Screen> resized(const Screen &old,
                                     std::size_t width,
                                     std::size_t height,
@@ -99,6 +147,10 @@ struct TerminalModel::Impl {
         result->savedStyle = old.savedStyle;
         result->savedWrap = old.savedWrap;
         result->hasSavedCursor = old.hasSavedCursor;
+        result->savedOrigin = old.savedOrigin;
+        result->savedAutoWrap = old.savedAutoWrap;
+        result->autoWrap = old.autoWrap;
+        result->insert = old.insert;
         result->cursor = old.cursor;
         result->cursor.column = std::min(old.cursor.column, int(width) - 1);
         const auto removed = rows > height ? rows - height : 0;
@@ -171,6 +223,8 @@ void TerminalModel::saveCursor() {
     screen.savedStyle = screen.style;
     screen.savedWrap = screen.wrapPending;
     screen.hasSavedCursor = true;
+    screen.savedOrigin = screen.origin;
+    screen.savedAutoWrap = screen.autoWrap;
 }
 void TerminalModel::restoreCursor() {
     auto &screen = impl_->active();
@@ -182,8 +236,14 @@ void TerminalModel::restoreCursor() {
         std::clamp(screen.cursor.column, 0, int(columns()) - 1);
     screen.cursor.row = std::clamp(screen.cursor.row, 0, int(rows()) - 1);
     screen.style = screen.savedStyle;
-    screen.wrapPending =
-        screen.savedWrap && screen.cursor.column == int(columns()) - 1;
+    screen.origin = screen.savedOrigin;
+    screen.autoWrap = screen.savedAutoWrap;
+    if (screen.origin) {
+        screen.cursor.row = std::clamp(
+            screen.cursor.row, screen.scrollTop, screen.scrollBottom);
+    }
+    screen.wrapPending = screen.savedWrap && screen.autoWrap &&
+                         screen.cursor.column == int(columns()) - 1;
 }
 void TerminalModel::carriageReturn() {
     auto &screen = impl_->active();
@@ -193,12 +253,12 @@ void TerminalModel::carriageReturn() {
 void TerminalModel::lineFeed() {
     auto &screen = impl_->active();
     screen.wrapPending = false;
-    if (screen.cursor.row + 1 < int(rows())) {
-        ++screen.cursor.row;
+    if (screen.cursor.row == screen.scrollBottom) {
+        impl_->shiftRows(
+            screen, screen.scrollTop, screen.scrollBottom, 1, true, true);
     }
-    else {
-        screen.memory.append(FStringView{}, impl_->blank(screen));
-        screen.viewport.rowsAppended(1, screen.memory.size());
+    else if (screen.cursor.row + 1 < int(rows())) {
+        ++screen.cursor.row;
     }
 }
 void TerminalModel::write(std::u32string_view text) {
@@ -234,12 +294,15 @@ void TerminalModel::write(std::u32string_view text) {
             carriageReturn();
             lineFeed();
         }
+        if (screen.insert) {
+            insertCharacters(1);
+        }
         screen.memory.at(std::size_t(screen.cursor.column),
                          impl_->start(screen) +
                              std::size_t(screen.cursor.row)) =
             FChar{ch, screen.style.foreground, screen.style.background};
         if (screen.cursor.column + 1 == int(columns())) {
-            screen.wrapPending = true;
+            screen.wrapPending = screen.autoWrap;
         }
         else {
             ++screen.cursor.column;
@@ -270,6 +333,144 @@ void TerminalModel::eraseDisplay(EraseMode mode) {
         }
     }
 }
+void TerminalModel::eraseCharacters(int count) {
+    if (count <= 0) {
+        return;
+    }
+    auto &screen = impl_->active();
+    const auto x = std::size_t(screen.cursor.column);
+    impl_->fillRow(screen,
+                   std::size_t(screen.cursor.row),
+                   x,
+                   x + std::min(std::size_t(count), columns() - x));
+    screen.wrapPending = false;
+}
+void TerminalModel::insertCharacters(int count) {
+    if (count <= 0) {
+        return;
+    }
+    auto &screen = impl_->active();
+    const auto x = std::size_t(screen.cursor.column);
+    const auto size = std::min(std::size_t(count), columns() - x);
+    auto *row = &screen.memory.at(
+        0, impl_->start(screen) + std::size_t(screen.cursor.row));
+    const auto moving = columns() - x - size;
+    if (moving) {
+        std::memmove(row + x + size, row + x, moving * sizeof(FChar));
+    }
+    impl_->fillRow(screen, std::size_t(screen.cursor.row), x, x + size);
+    screen.wrapPending = false;
+}
+void TerminalModel::deleteCharacters(int count) {
+    if (count <= 0) {
+        return;
+    }
+    auto &screen = impl_->active();
+    const auto x = std::size_t(screen.cursor.column);
+    const auto size = std::min(std::size_t(count), columns() - x);
+    auto *row = &screen.memory.at(
+        0, impl_->start(screen) + std::size_t(screen.cursor.row));
+    const auto moving = columns() - x - size;
+    if (moving) {
+        std::memmove(row + x, row + x + size, moving * sizeof(FChar));
+    }
+    impl_->fillRow(
+        screen, std::size_t(screen.cursor.row), columns() - size, columns());
+    screen.wrapPending = false;
+}
+void TerminalModel::insertLines(int count) {
+    auto &screen = impl_->active();
+    if (screen.cursor.row >= screen.scrollTop &&
+        screen.cursor.row <= screen.scrollBottom) {
+        impl_->shiftRows(screen,
+                         screen.cursor.row,
+                         screen.scrollBottom,
+                         count,
+                         false,
+                         false);
+    }
+    screen.wrapPending = false;
+}
+void TerminalModel::deleteLines(int count) {
+    auto &screen = impl_->active();
+    if (screen.cursor.row >= screen.scrollTop &&
+        screen.cursor.row <= screen.scrollBottom) {
+        impl_->shiftRows(
+            screen, screen.cursor.row, screen.scrollBottom, count, true, false);
+    }
+    screen.wrapPending = false;
+}
+void TerminalModel::scrollUp(int count) {
+    auto &screen = impl_->active();
+    impl_->shiftRows(
+        screen, screen.scrollTop, screen.scrollBottom, count, true, true);
+    screen.wrapPending = false;
+}
+void TerminalModel::scrollDown(int count) {
+    auto &screen = impl_->active();
+    impl_->shiftRows(
+        screen, screen.scrollTop, screen.scrollBottom, count, false, false);
+    screen.wrapPending = false;
+}
+void TerminalModel::reverseIndex() {
+    auto &screen = impl_->active();
+    if (screen.cursor.row == screen.scrollTop) {
+        impl_->shiftRows(
+            screen, screen.scrollTop, screen.scrollBottom, 1, false, false);
+    }
+    else if (screen.cursor.row > 0) {
+        --screen.cursor.row;
+    }
+    screen.wrapPending = false;
+}
+bool TerminalModel::setScrollRegion(int top, int bottom) {
+    if (top < 0 || bottom >= int(rows()) || top > bottom ||
+        (top == bottom && rows() != 1)) {
+        return false;
+    }
+    auto &screen = impl_->active();
+    screen.scrollTop = top;
+    screen.scrollBottom = bottom;
+    addressCursor(0, 0);
+    return true;
+}
+int TerminalModel::scrollTop() const noexcept {
+    return impl_->active().scrollTop;
+}
+int TerminalModel::scrollBottom() const noexcept {
+    return impl_->active().scrollBottom;
+}
+void TerminalModel::setOriginMode(bool enabled) {
+    impl_->active().origin = enabled;
+    addressCursor(0, 0);
+}
+bool TerminalModel::originMode() const noexcept {
+    return impl_->active().origin;
+}
+void TerminalModel::addressCursor(int column, int row) {
+    const auto &screen = impl_->active();
+    const int top = screen.origin ? screen.scrollTop : 0;
+    const int bottom = screen.origin ? screen.scrollBottom : int(rows()) - 1;
+    const auto y = std::clamp(
+        std::int64_t(row) + top, std::int64_t(top), std::int64_t(bottom));
+    moveCursor(column, int(y));
+}
+void TerminalModel::setAutoWrap(bool enabled) {
+    auto &screen = impl_->active();
+    if (screen.autoWrap != enabled) {
+        screen.wrapPending = false;
+    }
+    screen.autoWrap = enabled;
+}
+void TerminalModel::setInsertMode(bool enabled) {
+    impl_->active().insert = enabled;
+}
+void TerminalModel::reset() {
+    auto replacement =
+        std::make_unique<Impl>(columns(), rows(), impl_->scrollback);
+    impl_ = std::move(replacement);
+}
+
 void TerminalModel::setAlternateScreen(bool enabled) {
     if (enabled == impl_->useAlternate) {
         return;
@@ -280,6 +481,8 @@ void TerminalModel::setAlternateScreen(bool enabled) {
         screen->cursor = impl_->primary->cursor;
         screen->cursor.column = 0;
         screen->cursor.row = 0;
+        screen->autoWrap = impl_->primary->autoWrap;
+        screen->insert = impl_->primary->insert;
         impl_->alternate = std::move(screen);
     }
     impl_->useAlternate = enabled;

@@ -45,6 +45,26 @@ public:
     void lineFeed();
     void eraseLine(EraseMode mode = EraseMode::ToEnd);
     void eraseDisplay(EraseMode mode = EraseMode::ToEnd);
+    void eraseCharacters(int count = 1);
+    void insertCharacters(int count = 1);
+    void deleteCharacters(int count = 1);
+    void insertLines(int count = 1);
+    void deleteLines(int count = 1);
+    void scrollUp(int count = 1);
+    void scrollDown(int count = 1);
+    void reverseIndex();
+
+    // Inclusive zero-based margins; invalid regions leave state unchanged.
+    bool setScrollRegion(int top, int bottom);
+    int scrollTop() const noexcept;
+    int scrollBottom() const noexcept;
+    void setOriginMode(bool enabled);
+    bool originMode() const noexcept;
+    // VT addressing is relative to margins only when origin mode is enabled.
+    void addressCursor(int column, int row);
+    void setAutoWrap(bool enabled);
+    void setInsertMode(bool enabled);
+    void reset();
 
     // Entry clears/homes the alternate buffer. Repeated entry/exit is a no-op.
     // Primary cells, history, cursor, colors, and viewport survive switching.
@@ -54,7 +74,8 @@ public:
 
     // Positive dimensions only. No reflow: width clips/pads; height shrink
     // keeps bottom screen rows (primary top rows become history); growth adds
-    // blanks. Preserves both buffers. Allocation failure leaves both unchanged.
+    // blanks. Preserves both buffers; resets margins/origin to full screen.
+    // Allocation failure leaves both unchanged.
     void resize(std::size_t columns, std::size_t rows);
 
     void scrollBy(double rows);

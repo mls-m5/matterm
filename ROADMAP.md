@@ -33,8 +33,9 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 
 ## 3. Broader Terminal Semantics
 
-- [ ] Scrolling regions, insert/delete/erase characters and lines, reverse index.
-- [ ] Full text attributes, configurable tab stops, autowrap/origin modes.
+- [x] Scrolling regions, insert/delete/erase characters and lines, reverse index.
+- [x] Autowrap/origin/insert modes, inverse/conceal, DEC line graphics, RIS, and conservative primary DA.
+- [ ] Full text attributes and configurable tab stops.
 - [ ] Distinct DEC private mode semantics (47/1047/1048/1049), beyond the initial subset.
 - [ ] Application keypad/mouse modes (application cursor and bracketed paste state/input encoding are implemented).
 - [ ] Golden transcripts from real programs, fuzz/property tests, and compatibility fixtures.
@@ -58,6 +59,7 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [x] Keyboard/text/paste -> input encoder -> PTY; parser replies share the queued output path.
 - [ ] Capability-appropriate TERM/terminfo; do not advertise xterm-256color prematurely.
 - [x] Controlled tty/job-control/resize/exit tests, interactive bash command test, and end-to-end PTY rendering smoke.
+- [x] Optional integration fixtures for a real Python curses screen (DEC borders/input) and top.
 - [ ] Broader full-screen/editor transcripts and interactive compatibility testing.
 - [x] Keep dangerous OSC actions disabled; any future opt-in requires a security policy.
 

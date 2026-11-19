@@ -27,24 +27,32 @@ client responsibilities. Consume model frame views before feeding more bytes.
 
 All escape sequences below use seven-bit `ESC` introducers, not raw C1 bytes.
 CSI parameter coordinates are one-based; omitted/zero movement parameters use one.
-Movement clamps to the screen. No scrolling margins or origin mode exist yet.
+Movement clamps to the screen or origin-mode margins. Resize currently resets
+margins/origin to the full screen; applications can re-establish them on SIGWINCH.
 
 | Input | Behavior |
 |---|---|
 | UTF-8 text | Incremental decoding; invalid input becomes U+FFFD; one code point per cell |
 | CR / LF / BS / HT | Existing model operations; LF preserves column; tab stops every eight columns |
-| `ESC D`, `ESC E` | Index / next line (LF / CR LF) |
+| `ESC D`, `ESC E`, `ESC M` | Index / next line / reverse index |
+| `ESC c` | Reset model/buffers/rendition/input modes (RIS) |
+| `ESC ( B/0`, `ESC ) B/0`, SI/SO | ASCII or DEC line graphics in G0/G1 |
 | `CSI A B C D` | Relative cursor up/down/right/left |
 | `CSI E F` | Relative line movement and column zero |
 | `CSI G`, `CSI d`, `CSI H` / `f` | Column, row, or row/column positioning |
 | `CSI a`, `CSI e` | Relative right/down aliases |
 | `CSI J`, `CSI K` | Display/line erase modes 0, 1, 2 using current colors; history is retained |
-| `CSI m` | Color SGR subset below |
+| `CSI @`, `CSI P`, `CSI X` | Insert/delete/erase characters |
+| `CSI L`, `CSI M` | Insert/delete lines within the cursor-to-bottom margin |
+| `CSI S`, `CSI T`, `CSI r` | Scroll region up/down and set inclusive margins |
+| `CSI 4 h/l`, `CSI ? 6 h/l`, `CSI ? 7 h/l` | Insert, origin, and autowrap modes |
+| `CSI m` | SGR subset below |
 | `ESC 7` / `8`, `CSI s` / `u` | Shared per-screen saved cursor/rendition slot, including pending wrap |
 | `CSI ? 1 h/l`, `CSI ? 2004 h/l` | Application cursor and bracketed paste input modes |
 | `CSI ? 25 h/l` | Cursor visibility without clearing pending wrap |
 | `CSI ? 1049 h/l` | Initial alternate-screen policy below |
-| `CSI 5 n`, `CSI 6 n` | Emit status `CSI 0 n` or one-based cursor report `CSI row;column R` through reply callback |
+| `CSI 5 n`, `CSI 6 n` | Status/cursor reply; cursor row is origin-relative when enabled |
+| `CSI c`, `ESC Z` | Conservative primary DA reply `CSI ? 1;0 c` (VT100 class, no advanced options) |
 | `OSC 0;title`, `OSC 2;title` | Optional title event, terminated by BEL or `ESC \` |
 
 ### Color SGR
@@ -53,6 +61,8 @@ Movement clamps to the screen. No scrolling margins or origin mode exist yet.
 - 30-37 / 40-47: normal palette foreground/background.
 - 90-97 / 100-107: bright palette foreground/background.
 - 39 / 49: default foreground/background.
+- 7 / 27: inverse on/off; 8 / 28: conceal on/off. Logical colors are retained,
+  while effective cell colors are resolved before storage.
 - `38;5;n` / `48;5;n`: 256-color index (0-255).
 - `38;2;r;g;b` / `48;2;r;g;b`: RGB components (0-255).
 
@@ -61,7 +71,7 @@ grayscale ramp. Defaults are independently configurable. Invalid known color
 groups are consumed without changing that color. An unknown extended-color format
 stops the remaining SGR parameters to avoid reinterpreting its payload.
 
-Bold, underline, inverse, blinking text, and other attributes are ignored, not
+Bold, italic, underline, blinking text, and other attributes are ignored, not
 implemented. Colon-separated SGR is unsupported and the entire CSI is discarded.
 
 ### Initial Alternate-Screen Policy
@@ -89,14 +99,14 @@ The future compatibility layer may need finer-grained DEC/ANSI state handling.
 - CAN/SUB cancel an in-progress sequence. ESC restarts an escape/CSI sequence.
   Inside control strings, malformed embedded escapes make the string non-actionable
   and it remains discarded until BEL/ST or cancellation.
-- Unknown escape/CSI commands are consumed without painting their bytes. Character
-  set designators are consumed but character-set switching is not implemented.
+- Unknown escape/CSI commands are consumed without painting their bytes. ASCII
+  and DEC line-graphics G0/G1 designators are supported; other charsets are ignored.
 - `finish()` replaces incomplete text UTF-8, discards incomplete control sequences,
   and retains completed rendition/model state. `resetInput()` drops pending input
   without inserting a replacement and also retains completed state.
-- Raw eight-bit C1 control forms, device attributes queries, terminal reset, erase
-  history mode 3, margins, insertion/deletion, and input-mode negotiation are not
-  supported yet (application cursor and bracketed paste negotiation are exceptions).
+- Raw eight-bit C1 control forms, secondary/extended device attributes, erase
+  history mode 3, custom tab stops, application keypad, and mouse reporting are
+  not supported yet. Primary DA does not imply full VT100 conformance.
 Do not advertise full VT100/xterm compatibility or Vim support.
 
 ## Applications and Next Steps

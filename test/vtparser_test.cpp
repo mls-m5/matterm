@@ -14,6 +14,11 @@ struct Snapshot {
     int row;
     bool visible;
     bool alternate;
+    bool applicationCursor;
+    bool bracketedPaste;
+    bool origin;
+    int top;
+    int bottom;
     std::size_t history;
     std::vector<std::string> replies;
     std::vector<std::string> titles;
@@ -23,7 +28,11 @@ struct Snapshot {
                column == other.column && row == other.row &&
                visible == other.visible && alternate == other.alternate &&
                history == other.history && replies == other.replies &&
-               titles == other.titles;
+               titles == other.titles &&
+               applicationCursor == other.applicationCursor &&
+               bracketedPaste == other.bracketedPaste &&
+               origin == other.origin && top == other.top &&
+               bottom == other.bottom;
     }
 };
 
@@ -55,6 +64,11 @@ Snapshot parse(std::string_view bytes,
     result.row = cursor.row;
     result.visible = cursor.visible;
     result.alternate = model.alternateScreen();
+    result.applicationCursor = parser.modes().applicationCursor;
+    result.bracketedPaste = parser.modes().bracketedPaste;
+    result.origin = model.originMode();
+    result.top = model.scrollTop();
+    result.bottom = model.scrollBottom();
     result.history = model.historySize();
     // Screen cells plus oldest visible page catch both scroll and update
     // errors.
@@ -263,6 +277,8 @@ TEST_CASE("Whole input every split and one-byte chunks yield identical state "
         "A\x1b]2;cancel\x1a"
         "B",
         "\x1b[38;5;196;48;5;240mred\x1b[0mreset\x1b[2K",
+        "\x1b[2;4r\x1b[?6h\x1b[2;2H\x1b[L\x1b[M\x1b[?1h\x1b[?2004h",
+        "\x1b(0lqqk\x1b(B\x1b[7mreverse\x1b[27m\x1b[2@X\x1b[P\x1b[X",
         "partial\xc3",
         "partial\x1b[38;2;",
         "partial\x1b]2;title\x1b"};
