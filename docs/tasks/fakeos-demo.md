@@ -176,10 +176,33 @@ Decided by the owner:
   cell is mapped to the text that was drawn there. Not needed for milestone 1,
   but keep the `Program` interface able to receive mouse reports (they arrive as
   input bytes).
-- **Possible merge with `matterm-terminal-demo`**: the owner considers folding this
-  concept into the existing terminal demo executable. Do not decide now; keep the
-  core a library with no I/O so either host can use it, and note in the report
-  what overlaps.
+- **Naming and the native demo window** (decided in principle; do the renames in
+  the native-host milestone, as a separate commit):
+  - the new showcase becomes `matterm-demo`: an SDL window that runs the fakeos
+    core through the matterm model/renderer (the "native app" host);
+  - the current renderer-only `matterm-demo` is renamed `matterm-lib-demo`;
+  - `matterm-terminal-demo` (the model's direct API, no escape sequences) stays as
+    it is. Agents.md, README.md, docs/FONTS.md and CMake mention the old names and
+    must be updated together with the rename (the owner authorizes this change to
+    the earlier "keep matterm-demo standalone" rule).
+  - `matterm-fakeos` (the raw-tty program that runs inside any terminal) stays a
+    separate target.
+- **Intro animation**: opening the demo (web and native window) plays a short intro
+  animation (title/logo reveal in the ASCII style of the other animations) before
+  the shell prompt appears. Any key or click skips it; `?nointro` (web) and
+  `--no-intro` (native) turn it off; it is part of milestone 1 and uses the same
+  animation core, with seeded randomness so tests are deterministic.
+- **Embedding in a homepage**: the static demo must be usable inside another
+  page, as an `<iframe src=".../demo.html">` (simplest, isolated) and, if cheap, a
+  small script that mounts it into a `<div>`. Requirements: the demo page is
+  static and hosted *separately* from `matterm-server` (never frame the real
+  terminal; the server keeps refusing framing), carries no cookies or secrets,
+  is responsive to the iframe size (the framed window layout from
+  docs/tasks/window-frame.md can be switched off by a query parameter, e.g.
+  `?embed`), accepts parameters for the intro (`?nointro`), a starting command and
+  the theme, pauses when not visible (IntersectionObserver; the idle throttling
+  already keeps hidden/idle cost low), and documents the recommended `sandbox` and
+  `allow` attributes. Document the embedding snippet in the README of the demo.
 
 Still open:
 
