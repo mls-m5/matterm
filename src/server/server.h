@@ -22,6 +22,17 @@ struct ServerConfig {
     // files, read once at startup, are served by exact name; "/" is
     // index.html. Empty: only a placeholder page is served.
     std::string staticDir;
+    // Per-connection protocol limits (hello, idle and acknowledgement
+    // timeouts).
+    protocol::SessionConfig session;
+    // Deadline for an unauthenticated connection to deliver its request and
+    // receive the response (slow clients are dropped, however slowly they
+    // send).
+    std::chrono::milliseconds requestTimeout{5000};
+    // WebSocket transport deadlines. The handshake timeout also bounds the
+    // closing handshake; the idle timeout fires when nothing is received.
+    std::chrono::milliseconds webSocketHandshakeTimeout{5000};
+    std::chrono::milliseconds webSocketIdleTimeout{60000};
 };
 // A single io_context thread owns every connection and the authentication
 // state. Construct/start as an unprivileged user; destroy after io_context.run

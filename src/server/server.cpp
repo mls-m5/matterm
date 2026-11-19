@@ -96,13 +96,13 @@ public:
               shared_->config.process,
               [this](std::string bytes) { send(std::move(bytes)); },
               [this](int code) { close(code); })
-        , session_({}, host_) {
+        , session_(shared_->config.session, host_) {
         const auto address = beast::get_lowest_layer(socket_)
                                  .socket()
                                  .remote_endpoint()
                                  .address();
-        source_ = address.to_string();
-        loopback_ = address.is_loopback();
+        source_ = sourceKey(address);
+        loopback_ = peerIsLoopback(address);
         parser_.header_limit(8192);
         parser_.body_limit(512);
         // Count last: a throwing constructor never runs the destructor.
@@ -115,7 +115,8 @@ public:
             --shared_->unauthenticated;
     }
     void start() {
-        beast::get_lowest_layer(socket_).expires_after(std::chrono::seconds(5));
+        beast::get_lowest_layer(socket_).expires_after(
+            shared_->config.requestTimeout);
         http::async_read(
             socket_.next_layer(),
             buffer_,
@@ -265,7 +266,9 @@ private:
             compression.client_enable = false;
             socket_.set_option(compression);
             socket_.set_option(ws::stream_base::timeout{
-                std::chrono::seconds(5), std::chrono::seconds(60), false});
+                shared_->config.webSocketHandshakeTimeout,
+                shared_->config.webSocketIdleTimeout,
+                false});
             socket_.set_option(
                 ws::stream_base::decorator([](ws::response_type &reply) {
                     reply.set(http::field::sec_websocket_protocol,
