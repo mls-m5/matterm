@@ -145,12 +145,13 @@ TEST_CASE("Inverse conceal and reset colors use logical rather than already "
     TerminalModel model(10, 2);
     VtParser parser(model, {}, {1, 2, 3}, {4, 5, 6});
     parser.feed("\x1b[7mA\x1b[27mB\x1b[8mC\x1b[28mD");
-    EXPECT_EQ(model.cell(0, 0).foreground.r, 4);
-    EXPECT_EQ(model.cell(0, 0).background.r, 1);
-    EXPECT_EQ(model.cell(1, 0).foreground.r, 1);
-    EXPECT_EQ(model.cell(2, 0).foreground.r, 4);
-    EXPECT_EQ(model.cell(2, 0).background.r, 4);
-    EXPECT_EQ(model.cell(3, 0).foreground.r, 1);
+    const Palette palette;
+    EXPECT_EQ(palette.resolve(model.cell(0, 0)).foreground.r, 4);
+    EXPECT_EQ(palette.resolve(model.cell(0, 0)).background.r, 1);
+    EXPECT_EQ(palette.resolve(model.cell(1, 0)).foreground.r, 1);
+    EXPECT_EQ(palette.resolve(model.cell(2, 0)).foreground.r, 4);
+    EXPECT_EQ(palette.resolve(model.cell(2, 0)).background.r, 4);
+    EXPECT_EQ(palette.resolve(model.cell(3, 0)).foreground.r, 1);
 }
 
 TEST_CASE("CSI insertion erasure scrolling and reverse index dispatch to model "
@@ -208,7 +209,7 @@ TEST_CASE("SGR text attributes are compact saved and restored independently") {
     EXPECT(hasAttribute(flags, CellAttribute::Underline));
     EXPECT(hasAttribute(flags, CellAttribute::Strike));
     EXPECT(hasAttribute(flags, CellAttribute::Blink));
-    EXPECT(model.cell(1, 0).attributes == CellAttribute::None);
+    EXPECT(model.cell(1, 0).style() == CellAttribute::None);
     EXPECT(model.cell(3, 0).codePoint == U'D');
     EXPECT(hasAttribute(model.cell(3, 0).attributes, CellAttribute::Bold));
     EXPECT(hasAttribute(model.cell(3, 0).attributes, CellAttribute::Underline));
@@ -216,7 +217,7 @@ TEST_CASE("SGR text attributes are compact saved and restored independently") {
     EXPECT(hasAttribute(model.cell(4, 0).attributes, CellAttribute::Bold));
     model.moveCursor(0, 1);
     model.eraseLine(TerminalModel::EraseMode::All);
-    EXPECT(model.cell(0, 1).attributes == CellAttribute::None);
+    EXPECT(model.cell(0, 1).style() == CellAttribute::None);
     EXPECT_EQ(sizeof(FChar), std::size_t(12));
 }
 

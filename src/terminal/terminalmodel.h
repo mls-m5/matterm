@@ -30,6 +30,8 @@ public:
     void setCursor(CursorState cursor);
     void moveCursor(int column, int row);
     void setColors(Rgb8 foreground, Rgb8 background);
+    void setColorReferences(ColorReference foreground,
+                            ColorReference background);
     void setAttributes(CellAttribute attributes);
     void setCursorVisible(bool visible);
     void setCursorAppearance(CursorState::Shape shape, bool blink);

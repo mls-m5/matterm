@@ -50,9 +50,7 @@ struct PtySession::Impl {
                       if (this->events.title) {
                           this->events.title(title);
                       }
-                  }},
-                 {220, 225, 245},
-                 {14, 17, 22}) {
+                  }}) {
         model.eraseDisplay(TerminalModel::EraseMode::All);
     }
     bool send(std::string_view bytes) {

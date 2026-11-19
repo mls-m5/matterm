@@ -89,6 +89,7 @@ struct SdlBackend::Impl {
     Batch backgrounds;
     Batch glyphs;
     Batch decorations;
+    Palette defaultPalette;
 
     Impl(SDL_Window &window,
          const std::string &fontPath,
@@ -114,6 +115,7 @@ SdlBackend::~SdlBackend() = default;
 
 void SdlBackend::render(const RenderFrame &frame) {
     auto &s = *impl_;
+    const auto &palette = frame.palette ? *frame.palette : s.defaultPalette;
     int width, height;
     check(SDL_GetRendererOutputSize(s.renderer.get(), &width, &height));
     if (!std::isfinite(frame.verticalOffsetPixels) ||
@@ -159,23 +161,20 @@ void SdlBackend::render(const RenderFrame &frame) {
             const float left = float(x) * s.cellWidth;
             const float top =
                 float(y) * s.cellHeight + frame.verticalOffsetPixels;
-            s.backgrounds.quad(
-                left,
-                top,
-                float(s.cellWidth),
-                float(s.cellHeight),
-                {cell.background.r, cell.background.g, cell.background.b, 255});
+            const auto colors = palette.resolve(cell);
+            s.backgrounds.quad(left,
+                               top,
+                               float(s.cellWidth),
+                               float(s.cellHeight),
+                               {colors.background.r,
+                                colors.background.g,
+                                colors.background.b,
+                                255});
             if (hasAttribute(cell.attributes, CellAttribute::Blink) &&
                 !frame.textBlinkVisible) {
                 continue;
             }
-            Rgb8 foreground = cell.foreground;
-            if (hasAttribute(cell.attributes, CellAttribute::Faint)) {
-                foreground = {
-                    std::uint8_t((int(foreground.r) + cell.background.r) / 2),
-                    std::uint8_t((int(foreground.g) + cell.background.g) / 2),
-                    std::uint8_t((int(foreground.b) + cell.background.b) / 2)};
-            }
+            const Rgb8 foreground = colors.foreground;
             const SDL_Color ink{foreground.r, foreground.g, foreground.b, 255};
             if (hasAttribute(cell.attributes, CellAttribute::Underline)) {
                 s.decorations.quad(left,
@@ -205,7 +204,11 @@ void SdlBackend::render(const RenderFrame &frame) {
                 float(glyph.source.y + glyph.source.h) / s.textureHeight);
         }
     }
-    check(SDL_SetRenderDrawColor(s.renderer.get(), 14, 17, 22, 255));
+    check(SDL_SetRenderDrawColor(s.renderer.get(),
+                                 palette.background.r,
+                                 palette.background.g,
+                                 palette.background.b,
+                                 255));
     check(SDL_RenderClear(s.renderer.get()));
     const SDL_Rect textClip{0, 0, textWidth, textHeight};
     check(SDL_RenderSetClipRect(s.renderer.get(), &textClip));

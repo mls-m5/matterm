@@ -111,7 +111,7 @@ void smoke(SDL_Window &window, SdlBackend &backend, PtySession &session) {
     }
     auto &model = session.model();
     if (model.cell(0, 0).codePoint != U'm' ||
-        model.cell(0, 0).foreground.g != 205 ||
+        Palette{}.resolve(model.cell(0, 0)).foreground.g != 154 ||
         model.cell(0, 1).codePoint != U'R') {
         throw std::runtime_error(
             "PTY GUI smoke: parsed child output/reply missing");

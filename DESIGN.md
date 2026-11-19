@@ -80,6 +80,15 @@ CellBuffer provides draw(x, y, text) for direct matrix clients. TerminalModel
 instead writes directly to its TerminalMemory screen rows and exposes a borrowed
 RenderFrame, without a separate visible-cell copy. Neither API requires the other.
 
+## Current Palette Contract
+
+See docs/COLORS.md: FChar remains 12 bytes with RGB payloads at offsets 4/7 and
+style/color-kind bits at offset 10. Parser output retains logical default/indexed/
+RGB colors; renderer Palette lookup precedes inverse/conceal/faint. The native
+terminal uses dark symbolic defaults. Caller-owned palettes can recolor existing
+cells without changing stored text. Persistent configuration remains future work.
+Independent agent handoff and benchmark/settings plans are documented separately.
+
 ## Compact Cells and Text Clusters
 
 FChar should have a small, fixed layout without pointers or per-cell allocations:

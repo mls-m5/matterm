@@ -77,7 +77,7 @@ TEST_CASE("Backend renders independent rows and per-cell backgrounds") {
     EXPECT_EQ(fixture.pixel(w + 1, 1), Uint32(0x14b432));
     EXPECT_EQ(fixture.pixel(1, h + 1), Uint32(0x0a14d2));
     EXPECT_EQ(fixture.pixel(w + 1, h + 1), Uint32(0x5a5046));
-    EXPECT_EQ(fixture.pixel(w * 3, 1), Uint32(0x0e1116));
+    EXPECT_EQ(fixture.pixel(w * 3, 1), Uint32(0x1e1e1e));
     backend.present();
 }
 
@@ -96,7 +96,7 @@ TEST_CASE("Backend renders a history view across ring and block boundaries") {
     fixture.backend->render({memory.view(1, 2), {}});
     EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x1e0000));
     EXPECT_EQ(fixture.pixel(0, h), Uint32(0x280000));
-    EXPECT_EQ(fixture.pixel(0, h * 2), Uint32(0x0e1116));
+    EXPECT_EQ(fixture.pixel(0, h * 2), Uint32(0x1e1e1e));
 }
 
 TEST_CASE("Fractional rows are clipped to text bounds and cannot cover the "
@@ -116,7 +116,7 @@ TEST_CASE("Fractional rows are clipped to text bounds and cannot cover the "
     fixture.backend->render(frame);
     EXPECT_EQ(fixture.pixel(0, 0), Uint32(0xc81e28));
     EXPECT_EQ(fixture.pixel(0, h - shift), Uint32(0x14b432));
-    EXPECT_EQ(fixture.pixel(0, h + 1), Uint32(0x0e1116));
+    EXPECT_EQ(fixture.pixel(0, h + 1), Uint32(0x1e1e1e));
     EXPECT_EQ(fixture.pixel(312, 1), Uint32(0x191d24));
     EXPECT_EQ(fixture.pixel(312, 130), Uint32(0x6e7a8e));
     EXPECT_EQ(fixture.pixel(319, 130), Uint32(0x191d24));
@@ -129,7 +129,7 @@ TEST_CASE("Fractional rows are clipped to text bounds and cannot cover the "
     EXPECT_EQ(fixture.pixel(312, 130), Uint32(0x6e7a8e));
     frame.textHeightPixels = 0;
     fixture.backend->render(frame);
-    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x0e1116));
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x1e1e1e));
     frame.textHeightPixels = h;
     frame.scrollbar.visible = false;
     fixture.backend->render(frame);
@@ -155,7 +155,7 @@ TEST_CASE(
     frame.verticalOffsetPixels = 1;
     EXPECT_THROW(fixture.backend->render(frame), std::invalid_argument);
     fixture.backend->render({});
-    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x0e1116));
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x1e1e1e));
 }
 
 TEST_CASE("Glyph geometry uses the cell foreground color") {
@@ -216,7 +216,7 @@ TEST_CASE(
     }
     fixture.backend->present(); // No borrowed cell storage is needed here.
     fixture.backend->render({});
-    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x0e1116));
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x1e1e1e));
     EXPECT_GT(fixture.backend->columns(), 0);
     EXPECT_GT(fixture.backend->rows(), 0);
 }
@@ -258,6 +258,26 @@ TEST_CASE(
     fixture.backend->render(frame);
     EXPECT_EQ(fixture.pixel(1, fixture.backend->cellHeight() - 2),
               Uint32(0x14c828));
+}
+
+TEST_CASE("A new palette recolors existing frame cells without touching their "
+          "storage") {
+    Fixture fixture;
+    CellBuffer cells(2, 1);
+    cells.at(0, 0).setBackground(ColorReference::indexed(1));
+    cells.at(1, 0).setBackground(ColorReference::defaultColor());
+    Palette palette;
+    palette.colors[1] = {10, 20, 30};
+    palette.background = {40, 50, 60};
+    RenderFrame frame{cells.view(), {}};
+    frame.palette = &palette;
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x0a141e));
+    EXPECT_EQ(fixture.pixel(fixture.backend->cellWidth(), 0), Uint32(0x28323c));
+    palette.colors[1] = {70, 80, 90};
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x46505a));
+    EXPECT_EQ(cells.at(0, 0).backgroundColor().value.r, 1);
 }
 
 TEST_SUIT_END

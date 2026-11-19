@@ -2,6 +2,7 @@
 
 #include "cellgridview.h"
 #include "cursorstate.h"
+#include "palette.h"
 #include "scrollbarstate.h"
 
 // All views are borrowed for the duration of RenderBackend::render only.
@@ -17,4 +18,6 @@ struct RenderFrame {
     ScrollbarState scrollbar{};
     // Presentation clock is caller-owned, just like cursor blinking.
     bool textBlinkVisible = true;
+    // Borrowed during render only. Null selects the backend's dark default.
+    const Palette *palette = nullptr;
 };

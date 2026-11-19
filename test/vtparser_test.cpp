@@ -141,12 +141,14 @@ TEST_CASE("SGR supports basic bright indexed RGB and configurable defaults") {
     VtParser parser(model, {}, {10, 20, 30}, {40, 50, 60});
     parser.feed("\x1b[31;44mA\x1b[92;104mB\x1b[38;5;196;48;5;232mC"
                 "\x1b[38;2;1;2;3;48;2;4;5;6mD\x1b[39;49mE\x1b[31mF\x1b[mG");
-    EXPECT_EQ(model.cell(0, 0).foreground.r, 205);
-    EXPECT_EQ(model.cell(0, 0).background.b, 238);
-    EXPECT_EQ(model.cell(1, 0).foreground.g, 255);
-    EXPECT_EQ(model.cell(1, 0).background.r, 92);
-    EXPECT_EQ(model.cell(2, 0).foreground.r, 255);
-    EXPECT_EQ(model.cell(2, 0).background.r, 8);
+    EXPECT(model.cell(0, 0).foregroundColor().kind ==
+           ColorReference::Kind::Indexed);
+    EXPECT_EQ(model.cell(0, 0).foregroundColor().value.r, 1);
+    EXPECT_EQ(model.cell(0, 0).backgroundColor().value.r, 4);
+    EXPECT_EQ(model.cell(1, 0).foregroundColor().value.r, 10);
+    EXPECT_EQ(model.cell(1, 0).backgroundColor().value.r, 12);
+    EXPECT_EQ(model.cell(2, 0).foregroundColor().value.r, 196);
+    EXPECT_EQ(model.cell(2, 0).backgroundColor().value.r, 232);
     EXPECT_EQ(model.cell(3, 0).foreground.b, 3);
     EXPECT_EQ(model.cell(3, 0).background.b, 6);
     EXPECT_EQ(model.cell(4, 0).foreground.g, 20);
@@ -166,7 +168,7 @@ TEST_CASE(
                 "7\x1b[?25l\x1b[H\x1b[32mX\x1b"
                 "8D");
     EXPECT(model.cell(0, 1).codePoint == U'D');
-    EXPECT_EQ(model.cell(0, 1).foreground.r, 205);
+    EXPECT_EQ(model.cell(0, 1).foregroundColor().value.r, 1);
     EXPECT(model.cursor().visible);
     parser.feed("\x1b[s\x1b[3;3H\x1b[uE");
     EXPECT(model.cell(1, 1).codePoint == U'E');
@@ -196,8 +198,9 @@ TEST_CASE(
     EXPECT(model.cell(std::size_t(cursor.column), std::size_t(cursor.row))
                .codePoint == U'Z');
     EXPECT_EQ(model.cell(std::size_t(cursor.column), std::size_t(cursor.row))
-                  .foreground.r,
-              205);
+                  .foregroundColor()
+                  .value.r,
+              1);
 }
 
 TEST_CASE("OSC titles and DSR replies are explicit events not rendered text") {
@@ -246,7 +249,8 @@ TEST_CASE(
     const std::u32string expected = U"ABCDE";
     for (std::size_t x = 0; x < expected.size(); ++x) {
         EXPECT(model.cell(x, 0).codePoint == expected[x]);
-        EXPECT_EQ(model.cell(x, 0).foreground.g, 255);
+        EXPECT(model.cell(x, 0).foregroundColor().kind ==
+               ColorReference::Kind::Default);
     }
 }
 
@@ -328,10 +332,9 @@ TEST_CASE("OSC length boundary is exact and excessive parameters never apply "
         sgr += "0;";
     }
     parser.feed(sgr + "31mA");
-    EXPECT_EQ(model.cell(0, 0).foreground.r, 205);
+    EXPECT_EQ(model.cell(0, 0).foregroundColor().value.r, 1);
     parser.feed(sgr + "0;32mB"); // 33 parameters: ignore the entire sequence.
-    EXPECT_EQ(model.cell(1, 0).foreground.r, 205);
-    EXPECT_EQ(model.cell(1, 0).foreground.g, 0);
+    EXPECT_EQ(model.cell(1, 0).foregroundColor().value.r, 1);
 }
 
 TEST_SUIT_END
