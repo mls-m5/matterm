@@ -438,6 +438,10 @@ int runPtyFrontend(const char *font,
             break;
         }
         session.pump();
+        // Wait for both child exit and PTY EOF, so pump can drain final output.
+        if (session.finished()) {
+            break;
+        }
         const auto now = SDL_GetTicks64();
         session.model().advanceViewport(double(now - lastFrame) / 1000);
         lastFrame = now;
@@ -452,16 +456,9 @@ int runPtyFrontend(const char *font,
             }
         }
         frame.textBlinkVisible = (now / 500) % 2 == 0;
-        frame.cursor.visible = frame.cursor.visible && !session.finished() &&
+        frame.cursor.visible = frame.cursor.visible &&
                                (!frame.cursor.blink || (now / 500) % 2 == 0);
         std::string currentTitle = title;
-        if (session.finished()) {
-            const auto status = *session.exitStatus();
-            currentTitle +=
-                status.signal
-                    ? " | terminated by signal " + std::to_string(status.signal)
-                    : " | exited " + std::to_string(status.code);
-        }
         if (rejectedInput) {
             currentTitle += " | input queue full/closed";
         }

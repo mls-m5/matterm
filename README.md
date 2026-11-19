@@ -62,7 +62,8 @@ bracketed paste. Drag with the left mouse button to select text (including
 scrollback), then press Ctrl+Shift+C to copy it. Copy joins soft-wrapped rows
 and retains explicit line breaks. Resize, screen switches, and eviction of a
 selected row clear the selection.
-After child exit the last frame remains visible with exit status in the title.
+The window closes once the child exits and its PTY output is drained. In
+an interactive shell, Ctrl+D at an empty prompt normally exits that shell.
 
 TERM defaults conservatively to `vt100`; `--term NAME` overrides it. Compatibility
 is still incomplete: do not assume full xterm/Vim support or advertise richer
