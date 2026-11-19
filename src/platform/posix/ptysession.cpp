@@ -33,9 +33,10 @@ struct PtySession::Impl {
          int columns,
          int rows,
          VtEvents events,
-         const std::string &term)
+         const std::string &term,
+         PtyProcess::ColorCapability color)
         : model(validated(columns), validated(rows), 1000)
-        , process(arguments, columns, rows, term)
+        , process(arguments, columns, rows, term, color)
         , events(std::move(events))
         , parser(model,
                  {[this](std::string_view bytes) {
@@ -106,9 +107,10 @@ PtySession::PtySession(const std::vector<std::string> &arguments,
                        int columns,
                        int rows,
                        VtEvents events,
-                       const std::string &term)
+                       const std::string &term,
+                       PtyProcess::ColorCapability color)
     : impl_(std::make_unique<Impl>(
-          arguments, columns, rows, std::move(events), term)) {}
+          arguments, columns, rows, std::move(events), term, color)) {}
 PtySession::~PtySession() = default;
 TerminalModel &PtySession::model() noexcept {
     return impl_->model;

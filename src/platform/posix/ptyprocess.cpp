@@ -64,7 +64,8 @@ std::string executable(const std::string &command) {
     throw std::system_error(ENOENT, std::generic_category(), command);
 }
 
-std::vector<std::string> environment(const std::string &term) {
+std::vector<std::string> environment(const std::string &term,
+                                     PtyProcess::ColorCapability color) {
     std::vector<std::string> result;
     for (char **entry = environ; entry && *entry; ++entry) {
         const std::string value = *entry;
@@ -77,6 +78,9 @@ std::vector<std::string> environment(const std::string &term) {
         result.push_back(value);
     }
     result.push_back("TERM=" + term);
+    if (color == PtyProcess::ColorCapability::TrueColor) {
+        result.emplace_back("COLORTERM=truecolor");
+    }
     return result;
 }
 } // namespace
@@ -135,7 +139,8 @@ struct PtyProcess::Impl {
     void start(const std::vector<std::string> &arguments,
                int columns,
                int rows,
-               const std::string &term) {
+               const std::string &term,
+               ColorCapability color) {
         dimensions(columns, rows);
         if (arguments.empty() || arguments[0].empty() || term.empty() ||
             term.find('\0') != std::string::npos) {
@@ -148,7 +153,7 @@ struct PtyProcess::Impl {
             }
         }
         const auto path = executable(arguments[0]);
-        auto env = environment(term);
+        auto env = environment(term, color);
         std::vector<char *> argv, envp;
         for (const auto &argument : arguments) {
             argv.push_back(const_cast<char *>(argument.c_str()));
@@ -229,9 +234,10 @@ struct PtyProcess::Impl {
 PtyProcess::PtyProcess(const std::vector<std::string> &arguments,
                        int columns,
                        int rows,
-                       const std::string &term)
+                       const std::string &term,
+                       ColorCapability color)
     : impl_(std::make_unique<Impl>()) {
-    impl_->start(arguments, columns, rows, term);
+    impl_->start(arguments, columns, rows, term, color);
 }
 PtyProcess::~PtyProcess() = default;
 PtyProcess::ReadResult PtyProcess::read(char *buffer, std::size_t capacity) {

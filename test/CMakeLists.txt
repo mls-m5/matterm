@@ -177,6 +177,11 @@ if(BUILD_TESTING)
                     COMMAND matterm "${TEST_FONT_FILE}" -- /bin/sh -c "exit 0")
                 set_tests_properties(pty_frontend_closes_on_exit PROPERTIES
                     ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software" TIMEOUT 5)
+                add_test(NAME pty_frontend_advertises_truecolor
+                    COMMAND matterm "${TEST_FONT_FILE}" --term xterm-256color -- /bin/sh -c
+                        "test \"$COLORTERM\" = truecolor && test \"$TERM\" = xterm-256color")
+                set_tests_properties(pty_frontend_advertises_truecolor PROPERTIES
+                    ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software;COLORTERM=stale" TIMEOUT 5)
             endif()
         endif()
         if(MATTERM_BUNDLE_FONT)
