@@ -57,16 +57,17 @@ A first trial should use one bounded task (for example benchmark fixtures) and
 review its integration cost before expanding the fanout. Large terminal semantic
 changes should not run in parallel with changes to the same model/parser API.
 
-## Active Server-Track Tasks
+## Active Tasks
 
-Two agents may work at the same time; their owned paths do not overlap.
+Agents work in separate worktrees with non-overlapping owned paths.
 
-- `docs/tasks/server-hardening.md`: rate limiter, sessions, shutdown review.
-  Worktree `.tmp/agent2`, branch `agent2-hardening`.
 - `docs/tasks/server-config.md`: JSON configuration for `matterm-server`.
-  Worktree `.tmp/agent3`, branch `agent3-config`.
+  The hardening task is finished and integrated. Whoever takes this task
+  rebases onto `main` first. Worktree `.tmp/agent2` (or `.tmp/agent3` if idle).
+- `docs/tasks/scripted-link.md`: `ScriptedLink` terminal simulator.
+  Worktree `.tmp/agent3`, branch `agent3-scripted`.
 
-The integrator (main session) owns serving the browser client from the server.
+The integrator (main session) owns the browser client in `web/` and integration.
 Integrate by cherry-picking in dependency order and running the full suite.
 
 ## Environment Notes for Agents
