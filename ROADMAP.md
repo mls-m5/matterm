@@ -36,20 +36,20 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [ ] Scrolling regions, insert/delete/erase characters and lines, reverse index.
 - [ ] Full text attributes, configurable tab stops, autowrap/origin modes.
 - [ ] Distinct DEC private mode semantics (47/1047/1048/1049), beyond the initial subset.
-- [ ] Application cursor/keypad modes and bracketed paste state/input encoding.
+- [ ] Application keypad/mouse modes (application cursor and bracketed paste state/input encoding are implemented).
 - [ ] Golden transcripts from real programs, fuzz/property tests, and compatibility fixtures.
 - [ ] Wide cells, combining clusters, shaping, and font fallback.
 
 ## 4. POSIX PTY Adapter (Not Part of the First Parser Slice)
 
-- [ ] src/platform/posix/: isolated PtyProcess with start/read/write/resize/pollExit.
-- [ ] forkpty or equivalent session, controlling-terminal, and stdio setup.
-- [ ] Nonblocking master I/O, partial writes, EAGAIN/EINTR, EOF/Linux EIO handling.
-- [ ] Bounded read/write work per GUI frame and queued outgoing bytes.
-- [ ] Initial winsize and TIOCSWINSZ on cell-size changes; rely on tty SIGWINCH behavior.
-- [ ] Child exit/reaping, descriptor cleanup, and explicit shutdown policy.
-- [ ] Preserve termios/foreground process-group semantics: do not simulate Ctrl+C/echo in the renderer.
-- [ ] Tests with controlled child processes before launching a real interactive shell.
+- [x] src/platform/posix/: isolated PtyProcess with start/read/write/resize/pollExit.
+- [x] forkpty session, controlling-terminal, stdio setup, and pre-exec error reporting.
+- [x] Nonblocking master I/O, partial writes, EAGAIN/EINTR, EOF/Linux EIO handling.
+- [x] Bounded session read/write work and queued outgoing bytes.
+- [x] Initial winsize and TIOCSWINSZ on cell-size changes; tty SIGWINCH delivery tested.
+- [x] Child exit/reaping, descriptor cleanup, and explicit shutdown policy.
+- [x] Preserve termios/foreground process-group semantics; Ctrl+C delivery tested.
+- [x] Controlled-child tests plus an interactive bash command/exit test.
 
 ## 5. Terminal Application
 

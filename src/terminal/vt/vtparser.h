@@ -1,6 +1,7 @@
 #pragma once
 
 #include "rgb8.h"
+#include "terminalmodes.h"
 #include "vtevents.h"
 
 #include <memory>
@@ -33,6 +34,7 @@ public:
     // Discard pending input without replacement, retaining completed model
     // state.
     void resetInput() noexcept;
+    const TerminalModes &modes() const noexcept;
 
 private:
     struct Impl;

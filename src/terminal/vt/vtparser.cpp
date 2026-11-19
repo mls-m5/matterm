@@ -74,6 +74,7 @@ struct VtParser::Impl {
     Context primary;
     Context alternate;
     Utf8Decoder utf8;
+    TerminalModes modes;
     State state = State::Ground;
     std::array<int, maxParameters> parameters{};
     std::size_t parameterCount = 0;
@@ -298,7 +299,13 @@ struct VtParser::Impl {
                 return;
             }
             for (std::size_t i = 0; i < parameterCount; ++i) {
-                if (parameters[i] == 25) {
+                if (parameters[i] == 1) {
+                    modes.applicationCursor = final == 'h';
+                }
+                else if (parameters[i] == 2004) {
+                    modes.bracketedPaste = final == 'h';
+                }
+                else if (parameters[i] == 25) {
                     model.setCursorVisible(final == 'h');
                 }
                 else if (parameters[i] == 1049) {
@@ -534,6 +541,9 @@ void VtParser::finish() {
         impl_->model.write(impl_->utf8.finish());
     }
     impl_->resetInput();
+}
+const TerminalModes &VtParser::modes() const noexcept {
+    return impl_->modes;
 }
 void VtParser::resetInput() noexcept {
     impl_->resetInput();

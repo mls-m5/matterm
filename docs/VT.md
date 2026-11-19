@@ -41,6 +41,7 @@ Movement clamps to the screen. No scrolling margins or origin mode exist yet.
 | `CSI J`, `CSI K` | Display/line erase modes 0, 1, 2 using current colors; history is retained |
 | `CSI m` | Color SGR subset below |
 | `ESC 7` / `8`, `CSI s` / `u` | Shared per-screen saved cursor/rendition slot, including pending wrap |
+| `CSI ? 1 h/l`, `CSI ? 2004 h/l` | Application cursor and bracketed paste input modes |
 | `CSI ? 25 h/l` | Cursor visibility without clearing pending wrap |
 | `CSI ? 1049 h/l` | Initial alternate-screen policy below |
 | `CSI 5 n`, `CSI 6 n` | Emit status `CSI 0 n` or one-based cursor report `CSI row;column R` through reply callback |
@@ -95,7 +96,8 @@ The future compatibility layer may need finer-grained DEC/ANSI state handling.
   without inserting a replacement and also retains completed state.
 - Raw eight-bit C1 control forms, device attributes queries, terminal reset, erase
   history mode 3, margins, insertion/deletion, and input-mode negotiation are not
-  supported yet. Do not advertise full VT100/xterm compatibility or Vim support.
+  supported yet (application cursor and bracketed paste negotiation are exceptions).
+Do not advertise full VT100/xterm compatibility or Vim support.
 
 ## Applications and Next Steps
 
