@@ -9,7 +9,11 @@ enum class CellAttribute : std::uint16_t {
     Underline = 1 << 2,
     Strike = 1 << 3,
     Faint = 1 << 4,
-    Blink = 1 << 5
+    Blink = 1 << 5,
+    Inverse = 1 << 6,
+    Conceal = 1 << 7
+    // Bits 8..11 belong to FChar's foreground/background color kinds.
+    // Bits 12..15 remain reserved.
 };
 constexpr CellAttribute operator|(CellAttribute a, CellAttribute b) noexcept {
     return CellAttribute(std::uint16_t(a) | std::uint16_t(b));

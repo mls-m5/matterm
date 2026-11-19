@@ -15,37 +15,6 @@ constexpr std::size_t maxParameters = 32;
 constexpr int maxParameter = 1000000;
 constexpr std::size_t maxString = 2048;
 
-Rgb8 indexedColor(int index) {
-    static constexpr std::array<Rgb8, 16> colors{{{0, 0, 0},
-                                                  {205, 0, 0},
-                                                  {0, 205, 0},
-                                                  {205, 205, 0},
-                                                  {0, 0, 238},
-                                                  {205, 0, 205},
-                                                  {0, 205, 205},
-                                                  {229, 229, 229},
-                                                  {127, 127, 127},
-                                                  {255, 0, 0},
-                                                  {0, 255, 0},
-                                                  {255, 255, 0},
-                                                  {92, 92, 255},
-                                                  {255, 0, 255},
-                                                  {0, 255, 255},
-                                                  {255, 255, 255}}};
-    if (index < 16) {
-        return colors[std::size_t(index)];
-    }
-    if (index >= 232) {
-        const auto level = std::uint8_t(8 + 10 * (index - 232));
-        return {level, level, level};
-    }
-    static constexpr std::array<std::uint8_t, 6> levels{
-        0, 95, 135, 175, 215, 255};
-    index -= 16;
-    return {levels[std::size_t(index / 36)],
-            levels[std::size_t(index / 6 % 6)],
-            levels[std::size_t(index % 6)]};
-}
 } // namespace
 
 struct VtParser::Impl {
@@ -59,8 +28,8 @@ struct VtParser::Impl {
         StringEscape
     };
     struct Rendition {
-        Rgb8 foreground;
-        Rgb8 background;
+        ColorReference foreground;
+        ColorReference background;
         bool inverse = false;
         bool conceal = false;
         CellAttribute attributes = CellAttribute::None;
@@ -97,8 +66,8 @@ struct VtParser::Impl {
 
     Impl(TerminalModel &model,
          VtEvents events,
-         Rgb8 foreground,
-         Rgb8 background)
+         ColorReference foreground,
+         ColorReference background)
         : model(model)
         , events(std::move(events))
         , defaults{foreground, background}
@@ -111,16 +80,16 @@ struct VtParser::Impl {
         return model.alternateScreen() ? alternate : primary;
     }
     void applyColors() {
-        auto foreground = context().style.foreground;
-        auto background = context().style.background;
-        if (context().style.inverse) {
-            std::swap(foreground, background);
+        const auto &style = context().style;
+        model.setColorReferences(style.foreground, style.background);
+        auto attributes = style.attributes;
+        if (style.inverse) {
+            attributes = attributes | CellAttribute::Inverse;
         }
-        if (context().style.conceal) {
-            foreground = background;
+        if (style.conceal) {
+            attributes = attributes | CellAttribute::Conceal;
         }
-        model.setColors(foreground, background);
-        model.setAttributes(context().style.attributes);
+        model.setAttributes(attributes);
     }
     void save() {
         model.saveCursor();
@@ -355,23 +324,27 @@ struct VtParser::Impl {
                 style.background = defaults.background;
             }
             else if (code >= 30 && code <= 37) {
-                style.foreground = indexedColor(code - 30);
+                style.foreground =
+                    ColorReference::indexed(std::uint8_t(code - 30));
             }
             else if (code >= 40 && code <= 47) {
-                style.background = indexedColor(code - 40);
+                style.background =
+                    ColorReference::indexed(std::uint8_t(code - 40));
             }
             else if (code >= 90 && code <= 97) {
-                style.foreground = indexedColor(code - 90 + 8);
+                style.foreground =
+                    ColorReference::indexed(std::uint8_t(code - 90 + 8));
             }
             else if (code >= 100 && code <= 107) {
-                style.background = indexedColor(code - 100 + 8);
+                style.background =
+                    ColorReference::indexed(std::uint8_t(code - 100 + 8));
             }
             else if (code == 38 || code == 48) {
                 if (++i >= parameterCount) {
                     break;
                 }
                 const int mode = parameters[i];
-                Rgb8 color{};
+                ColorReference color{};
                 bool valid = false;
                 if (mode == 5) {
                     if (++i >= parameterCount) {
@@ -380,7 +353,7 @@ struct VtParser::Impl {
                     const int index = parameters[i];
                     valid = index >= 0 && index <= 255;
                     if (valid) {
-                        color = indexedColor(index);
+                        color = ColorReference::indexed(std::uint8_t(index));
                     }
                 }
                 else if (mode == 2) {
@@ -393,8 +366,9 @@ struct VtParser::Impl {
                     valid = r >= 0 && r <= 255 && g >= 0 && g <= 255 &&
                             b >= 0 && b <= 255;
                     if (valid) {
-                        color = {
-                            std::uint8_t(r), std::uint8_t(g), std::uint8_t(b)};
+                        color = ColorReference::rgb({std::uint8_t(r),
+                                                     std::uint8_t(g),
+                                                     std::uint8_t(b)});
                     }
                 }
                 else {
@@ -742,8 +716,15 @@ VtParser::VtParser(TerminalModel &model,
                    VtEvents events,
                    Rgb8 foreground,
                    Rgb8 background)
-    : impl_(std::make_unique<Impl>(
-          model, std::move(events), foreground, background)) {}
+    : impl_(std::make_unique<Impl>(model,
+                                   std::move(events),
+                                   ColorReference::rgb(foreground),
+                                   ColorReference::rgb(background))) {}
+VtParser::VtParser(TerminalModel &model, VtEvents events)
+    : impl_(std::make_unique<Impl>(model,
+                                   std::move(events),
+                                   ColorReference::defaultColor(),
+                                   ColorReference::defaultColor())) {}
 VtParser::~VtParser() = default;
 void VtParser::feed(std::string_view bytes) {
     impl_->feed(bytes);

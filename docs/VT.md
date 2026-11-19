@@ -64,12 +64,15 @@ margins/origin to the full screen; applications can re-establish them on SIGWINC
 - 90-97 / 100-107: bright palette foreground/background.
 - 39 / 49: default foreground/background.
 - 7 / 27: inverse on/off; 8 / 28: conceal on/off. Logical colors are retained,
-  while effective cell colors are resolved before storage.
+  with effective colors resolved at rendering, after palette lookup.
 - `38;5;n` / `48;5;n`: 256-color index (0-255).
 - `38;2;r;g;b` / `48;2;r;g;b`: RGB components (0-255).
 
-Indices use a conventional xterm-style 16-color palette, 6x6x6 color cube, and
-grayscale ramp. Defaults are independently configurable. Invalid known color
+Indices/defaults are stored as references, resolved through Palette at render
+time; the dark built-in 16 colors are Tango/GNOME-inspired, with the conventional
+6x6x6 cube/grayscale ramp for the rest. Inverse/conceal remain style bits rather
+than permanently swapped RGB values. See COLORS.md for the 12-byte layout.
+Defaults are independently configurable. Invalid known color
 groups are consumed without changing that color. An unknown extended-color format
 stops the remaining SGR parameters to avoid reinterpreting its payload.
 

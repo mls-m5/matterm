@@ -74,14 +74,13 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
   alternate, and post-reset states. Do not discard intentional blank output lines.
 - [ ] Decide explicitly whether alternate-mode wheel input should scroll history,
   be ignored, or encode application input; currently it sends arrow keys.
-- [ ] Plan configurable palettes: retain default/indexed/RGB color identity in
-  terminal cells rather than eagerly flattening all colors to RGB in the parser.
+- [x] Retain default/indexed/RGB color identity in terminal cells and resolve via caller-owned Palette during rendering.
 - [ ] Define palette ownership, 16/256-color lookup, default foreground/background,
   theme changes affecting existing cells, inverse/faint rendering, and future OSC
   palette commands. Keep cell layout compact and the API backend-independent.
 - [ ] Add palette and scroll-boundary regression tests before changing behavior.
 
-These are recorded requests, not fixes or a completed palette implementation.
+Palette representation/rendering is implemented. Scroll fixes and persistent settings are still pending.
 
 ## Future Direction: Output to an Existing Terminal (Do Not Implement Yet)
 
@@ -132,7 +131,7 @@ future goals, not implementation in the current parser slice.
 - [x] Document independent-repo task/handoff rules and candidate parallel tasks in docs/PARALLEL_WORK.md.
 - [x] Inspect the local matperf API and document usage/caveats in its repository.
 - [x] Record XDG text configuration, benchmark completion semantics, and deferred pipeline design in docs/SETTINGS_AND_PERFORMANCE.md.
-- [ ] Implement approved 12-byte color-reference layout and dark palette before parallel color consumers.
+- [x] Implement approved 12-byte color-reference layout and dark palette before parallel color consumers (docs/COLORS.md).
 - [ ] Select a text configuration parser/schema and implement typed settings, validation, and atomic saving.
 - [ ] Produce first internal/parser and external/stdout measurements before optimizing.
 - [ ] Review matperf concurrency before enabling optional coarse tracing.

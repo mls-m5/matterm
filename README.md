@@ -237,8 +237,11 @@ Width/height resize resets margins and origin mode to the full screen.
 Custom tab stops, bold/italic, underline/strike, faint/blinking text, and cursor
 shape/blink controls are implemented. FChar remains 12 bytes. Wide characters,
 combining clusters, and full DEC mode rules are not implemented; currently one
-code point occupies one cell. Configurable palettes and reported scroll-boundary
-issues are tracked in ROADMAP.md; colors are still resolved to RGB during parsing.
+code point occupies one cell. Palettes retain default/indexed/RGB identity in the same 12-byte cell. The native
+terminal uses a Tango/GNOME-inspired dark default. Set RenderFrame.palette to a
+caller-owned Palette to recolor existing indexed/default cells; literal RGB artwork
+stays unchanged. See docs/COLORS.md for exact offsets/flags and compatibility.
+Persistent settings and reported scroll-boundary issues remain tracked in ROADMAP.md.
 
 ## Rendering Boundary
 

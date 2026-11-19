@@ -1,5 +1,6 @@
 #pragma once
 
+#include "colorreference.h"
 #include "rgb8.h"
 #include "terminalmodes.h"
 #include "vtevents.h"
@@ -16,10 +17,13 @@ class TerminalModel;
 // execution.
 class VtParser {
 public:
-    explicit VtParser(TerminalModel &model,
-                      VtEvents events = {},
-                      Rgb8 defaultForeground = {255, 255, 255},
-                      Rgb8 defaultBackground = {0, 0, 0});
+    explicit VtParser(TerminalModel &model, VtEvents events = {});
+    // Compatibility override: these defaults are explicit RGB, not theme
+    // defaults.
+    VtParser(TerminalModel &model,
+             VtEvents events,
+             Rgb8 foreground,
+             Rgb8 background);
     ~VtParser();
     VtParser(const VtParser &) = delete;
     VtParser &operator=(const VtParser &) = delete;

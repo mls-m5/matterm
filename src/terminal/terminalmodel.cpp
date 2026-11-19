@@ -89,7 +89,10 @@ struct TerminalModel::Impl {
         return screen.memory.size() - rows;
     }
     FChar blank(const Screen &screen) const {
-        return FChar{U' ', screen.style.foreground, screen.style.background};
+        auto result = screen.style;
+        result.codePoint = U' ';
+        result.setStyle(CellAttribute::None);
+        return result;
     }
 
     void fillRow(Screen &screen,
@@ -221,11 +224,16 @@ void TerminalModel::moveCursor(int column, int row) {
 }
 void TerminalModel::setColors(Rgb8 foreground, Rgb8 background) {
     auto &screen = impl_->active();
-    screen.style.foreground = foreground;
-    screen.style.background = background;
+    screen.style.setForeground(ColorReference::rgb(foreground));
+    screen.style.setBackground(ColorReference::rgb(background));
+}
+void TerminalModel::setColorReferences(ColorReference foreground,
+                                       ColorReference background) {
+    impl_->active().style.setForeground(foreground);
+    impl_->active().style.setBackground(background);
 }
 void TerminalModel::setAttributes(CellAttribute attributes) {
-    impl_->active().style.attributes = attributes;
+    impl_->active().style.setStyle(attributes);
 }
 void TerminalModel::setCursorVisible(bool visible) {
     impl_->active().cursor.visible = visible;

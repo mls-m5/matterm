@@ -27,7 +27,7 @@ TEST_CASE(
     finish(session, 17); // Deliberately fragment controls and response writes.
     EXPECT_EQ(session.exitStatus()->code, 0);
     EXPECT(session.model().cell(0, 0).codePoint == U'm');
-    EXPECT_EQ(session.model().cell(0, 0).foreground.g, 205);
+    EXPECT_EQ(Palette{}.resolve(session.model().cell(0, 0)).foreground.g, 154);
     EXPECT(session.model().cell(0, 1).codePoint == U'R');
     EXPECT(session.model().cell(0, 2).codePoint == U'D');
     EXPECT_FALSE(session.send("after exit"));

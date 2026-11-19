@@ -4,14 +4,20 @@ project(matterm LANGUAGES CXX)
 find_package(SDL2 2.0.18 REQUIRED)
 find_package(SDL2_ttf 2.0.18 REQUIRED)
 
+add_library(palette src/core/palette.cpp)
+target_compile_features(palette PUBLIC cxx_std_17)
+target_include_directories(palette PUBLIC src src/core)
+
 # Common cells, storage, and presentation state: no terminal protocol or SDL.
 add_library(cellbuffer src/core/cellbuffer.cpp)
 target_compile_features(cellbuffer PUBLIC cxx_std_17)
 target_include_directories(cellbuffer PUBLIC src src/core)
+target_link_libraries(cellbuffer PUBLIC palette)
 
 add_library(terminalmemory src/core/terminalmemory.cpp src/core/scrollviewport.cpp)
 target_compile_features(terminalmemory PUBLIC cxx_std_17)
 target_include_directories(terminalmemory PUBLIC src src/core)
+target_link_libraries(terminalmemory PUBLIC palette)
 
 # CPU screen behavior and stream decoding are independent library layers.
 add_library(terminalmodel src/terminal/terminalmodel.cpp src/terminal/inputencoder.cpp)
