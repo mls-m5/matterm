@@ -86,3 +86,17 @@ add_custom_target(matterm-web-site ALL
         ${CMAKE_CURRENT_SOURCE_DIR}/shell.html
         $<TARGET_FILE_DIR:matterm-web>/index.html)
 add_dependencies(matterm-web-site matterm-web)
+
+# demo.html: the page with a marker that selects the in-browser demo, so a static
+# host (GitHub Pages, see .github/workflows/pages.yml) can serve it as index.html
+# without a login form or a query string.
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/shell.html matterm_shell_html)
+string(REPLACE "<title>matterm</title>"
+    "<title>matterm demo</title>\n<meta name=\"matterm-static-demo\" content=\"1\">"
+    matterm_demo_html "${matterm_shell_html}")
+file(WRITE ${CMAKE_BINARY_DIR}/demo.html "${matterm_demo_html}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shell.html)
+add_custom_target(matterm-web-demo-page ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/demo.html
+        $<TARGET_FILE_DIR:matterm-web>/demo.html)
+add_dependencies(matterm-web-demo-page matterm-web)
