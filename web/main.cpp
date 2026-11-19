@@ -71,6 +71,14 @@ std::string wsUrl() {
     return url;
 }
 
+// The font is sized in device pixels, so scale it by the page's pixel ratio:
+// text keeps its CSS size and is sharp on HiDPI screens.
+int fontPixels() {
+    const double ratio =
+        EM_ASM_DOUBLE({ return window.devicePixelRatio || 1; });
+    return std::clamp(int(std::lround(18 * ratio)), 8, 96);
+}
+
 void setTitle(const std::string &title) {
     EM_ASM({ document.title = UTF8ToString($0); }, title.c_str());
 }
@@ -375,19 +383,20 @@ int main() {
     }
     static App app;
     gApp = &app;
-    app.window = SDL_CreateWindow("matterm",
-                                  SDL_WINDOWPOS_CENTERED,
-                                  SDL_WINDOWPOS_CENTERED,
-                                  960,
-                                  600,
-                                  SDL_WINDOW_RESIZABLE);
+    app.window =
+        SDL_CreateWindow("matterm",
+                         SDL_WINDOWPOS_CENTERED,
+                         SDL_WINDOWPOS_CENTERED,
+                         960,
+                         600,
+                         SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!app.window) {
         std::fprintf(stderr, "window failed: %s\n", SDL_GetError());
         return 1;
     }
     try {
-        app.backend =
-            std::make_unique<SdlBackend>(*app.window, "/assets/font.ttf", 18);
+        app.backend = std::make_unique<SdlBackend>(
+            *app.window, "/assets/font.ttf", fontPixels());
     }
     catch (const std::exception &error) {
         std::fprintf(stderr, "backend failed: %s\n", error.what());

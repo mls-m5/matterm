@@ -9,8 +9,7 @@
   function start(demo) {
     form.hidden = true;
     canvas.hidden = false;
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    fitCanvas();
     // Demo: no server link, so the page runs the built-in simulator.
     if (!demo) {
       window.mattermWs =
@@ -29,10 +28,15 @@
     const script = document.createElement("script");
     script.src = "index.js";
     document.body.appendChild(script);
-    window.addEventListener("resize", function () {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    });
+    window.addEventListener("resize", fitCanvas);
+  }
+
+  // The canvas's CSS size is the window; its backing store is in device pixels
+  // so text stays sharp on HiDPI screens (the terminal scales its font too).
+  function fitCanvas() {
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = Math.round(window.innerWidth * ratio);
+    canvas.height = Math.round(window.innerHeight * ratio);
   }
 
   // ?demo skips the login and runs the in-browser simulator (no server needed).
