@@ -12,6 +12,9 @@ const std::vector<ProgramInfo> &programs() {
         {"crumble", makeCrumble, "a word falls apart"},
         {"matrix", makeMatrix, "follow the white rabbit"},
         {"crash", makeCrash, "a machine without a disk"},
+        {"snow", makeSnow, "quiet snowfall"},
+        {"life", makeLife, "cells live and die"},
+        {"sl", makeTrain, "a steam locomotive"},
     };
     return table;
 }
