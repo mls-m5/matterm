@@ -175,24 +175,52 @@
     canvas.addEventListener("contextmenu", function (event) {
       event.preventDefault();
     });
-    // Printable text and, on keyboards that report no key codes, deletion.
-    let namedKeyDown = false;
+    // Phone keyboards deliver Enter and Backspace to the focused field, not to
+    // SDL, so named keys are sent from here (and kept from SDL so a hardware
+    // keyboard does not type twice). Ctrl/Alt/Meta chords are left to SDL.
+    // Keyboards that report no key (Unidentified, code 229) come through
+    // beforeinput. The field holds two blanks so Backspace always has something
+    // to delete; beforeinput is cancelled, so the field never changes.
+    const named = ["Enter", "Backspace", "Tab", "Escape", "ArrowUp", "ArrowDown",
+      "ArrowLeft", "ArrowRight", "Home", "End", "Delete", "PageUp", "PageDown"];
+    let handled = false;
+    const resetField = function () {
+      field.value = "  ";
+      field.setSelectionRange(2, 2);
+    };
+    field.addEventListener("focus", resetField);
     field.addEventListener("keydown", function (event) {
-      // SDL sees named keys (Enter, Backspace, arrows) itself.
-      namedKeyDown = event.key.length > 1 && event.key !== "Unidentified";
+      handled = false;
+      if (named.indexOf(event.key) < 0 || event.isComposing && event.keyCode === 229) {
+        return;
+      }
+      handled = true;
+      if (event.ctrlKey || event.altKey || event.metaKey) {
+        return; // SDL takes the chord.
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (mod() && mod().ccall) {
+        mod().ccall("matterm_key", null, ["string", "number"],
+          [event.key, mods() | (event.shiftKey ? 4 : 0)]);
+        release();
+      }
     }, true);
     field.addEventListener("beforeinput", function (event) {
       if (event.inputType === "insertText" || event.inputType === "insertCompositionText") {
         if (event.data) {
           text(event.data);
         }
-      } else if (event.inputType === "deleteContentBackward" && !namedKeyDown) {
-        key("Backspace");
-      } else if (event.inputType === "insertLineBreak" && !namedKeyDown) {
-        key("Enter");
+      } else if (!handled) {
+        if (event.inputType === "deleteContentBackward") {
+          key("Backspace");
+        } else if (event.inputType === "insertLineBreak" ||
+                   event.inputType === "insertParagraph") {
+          key("Enter");
+        }
       }
-      namedKeyDown = false;
-      event.preventDefault(); // The field stays empty; the terminal is the state.
+      handled = false;
+      event.preventDefault(); // The field stays as it is; the terminal is the state.
     });
     bar.addEventListener("pointerdown", function (event) {
       event.preventDefault(); // Keep the keyboard open.

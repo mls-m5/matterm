@@ -32,6 +32,12 @@ const { chromium } = require('playwright-core');
   await page.tap('#keybar button[data-key=ArrowLeft]');
   await input('insertText', 'X');
   await page.waitForTimeout(500);
+  // Real key events in the field (phone keyboards send Enter and Backspace there).
+  await page.evaluate(() => { window.__keys = []; const c = Module.ccall; Module.ccall = function (n, r, t, a) { if (n === 'matterm_key') window.__keys.push(a[0]); return c.apply(this, arguments); }; });
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Enter');
+  const keys = await page.evaluate(() => window.__keys);
+  console.log(JSON.stringify(keys) === '["Backspace","Enter"]' ? 'PASS field keys reach the terminal once' : 'FAIL field keys: ' + JSON.stringify(keys));
   console.log('canvas', JSON.stringify(await page.evaluate(() => { const c = document.getElementById('canvas'); return [c.width, c.height, c.clientWidth, c.clientHeight]; })));
   await page.screenshot({ path: process.argv[3] });
   await browser.close();
