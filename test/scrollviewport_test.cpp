@@ -8,6 +8,36 @@
 
 TEST_SUIT_BEGIN(ScrollViewport)
 
+TEST_CASE(
+    "A drag down and the same drag back up ends exactly at the live tail") {
+    // Floating-point residue (1e-16 rows) must not leave the view "scrolled":
+    // atTail() is false then, which hides the cursor and keeps the scrollbar.
+    unsigned state = 12345;
+    auto next = [&] {
+        state = state * 1664525u + 1013904223u;
+        return (state >> 8) / double(1 << 24);
+    };
+    int residue = 0;
+    for (int run = 0; run < 200; ++run) {
+        ScrollViewport viewport;
+        viewport.setGeometry(400, 24);
+        double steps[8];
+        for (auto &s : steps) {
+            s = 0.3 + next() * 3.0; // Rows moved by one touch event.
+        }
+        for (const double s : steps) {
+            viewport.scrollBy(s);
+        }
+        for (const double s : steps) {
+            viewport.scrollBy(-s);
+        }
+        residue += viewport.targetOffset() != 0.0;
+        viewport.advance(1.0);
+        EXPECT(viewport.atTail());
+    }
+    EXPECT_EQ(residue, 0);
+}
+
 TEST_CASE("No history means no wheel travel and no scrollbar") {
     ScrollViewport viewport;
     EXPECT_FALSE(viewport.scrollbar().visible);
