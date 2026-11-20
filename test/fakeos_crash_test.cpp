@@ -1,6 +1,7 @@
 #include "fakeos_harness.h"
 #include "mls-unit-test/unittest.h"
 
+#include <set>
 #include <string>
 
 // rm -rf / warns; with --no-preserve-root it asks; yes crashes the system
@@ -87,19 +88,49 @@ TEST_CASE("Other rm commands are not part of it") {
     EXPECT(pc.last() == kPrompt);
 }
 
-TEST_CASE("Yes: the screen clears, the disk is gone, the machine hangs") {
-    Pc pc;
+TEST_CASE(
+    "Yes: the screen corrupts first, then clears, then the machine hangs") {
+    Pc pc(false, 80, 24);
     pc.run("echo keep > keepsake");
     crash(pc);
     EXPECT(pc.sys.inProgram());
     EXPECT(pc.model.alternateScreen());
     EXPECT(pc.sys.world().fs.find("/etc") == nullptr); // Everything is gone.
     EXPECT(pc.sys.world().fs.find("/home") == nullptr);
-    EXPECT(litCells(pc) < 5); // The screen went blank first.
+    const int total = 80 * 24;
+    EXPECT(litCells(pc) > 0 &&
+           litCells(pc) < total / 4); // It starts to go wrong.
+    walk(pc, 1000);
+    const int midway = litCells(pc);
+    EXPECT(midway > total / 4);
+    const auto first = pc.screen();
+    walk(pc, 120);
+    EXPECT(pc.screen() != first); // The glyphs keep changing.
+    walk(pc, 800);
+    EXPECT(litCells(pc) > total * 6 / 10); // Garbage nearly everywhere.
+    // Random colors, some cells inverted (a bright background).
+    int colors = 0, inverted = 0;
+    std::set<unsigned> seen;
+    for (std::size_t y = 0; y < pc.model.rows(); ++y) {
+        for (std::size_t x = 0; x < pc.model.columns(); ++x) {
+            const auto &cell = pc.model.cell(x, y);
+            if (cell.codePoint == U' ')
+                continue;
+            seen.insert(unsigned(cell.foreground.r) << 16 |
+                        unsigned(cell.foreground.g) << 8 | cell.foreground.b);
+            inverted +=
+                cell.background.r + cell.background.g + cell.background.b > 300;
+        }
+    }
+    colors = int(seen.size());
+    EXPECT(colors > 20);
+    EXPECT(inverted > 20);
+    walk(pc, 600); // t = about 2.6 s: black.
+    EXPECT(litCells(pc) < 5);
     walk(pc, 1500);
     EXPECT(pc.shows("Looking for boot media..."));
     EXPECT(!pc.shows("No bootable device"));
-    walk(pc, 3500);
+    walk(pc, 3000);
     EXPECT(
         pc.shows("No bootable device -- insert boot disk and press any key"));
     EXPECT(!pc.shows(kPrompt)); // No prompt, nothing to type into.
@@ -115,6 +146,17 @@ TEST_CASE("Yes: the screen clears, the disk is gone, the machine hangs") {
     EXPECT(pc.sys.inProgram());
 }
 
+TEST_CASE("The corruption is seeded: same seed, same garbage") {
+    auto garbage = [](std::uint64_t seed) {
+        Pc pc(false, 60, 18, seed);
+        crash(pc);
+        walk(pc, 900);
+        return pc.screen();
+    };
+    EXPECT(garbage(3) == garbage(3));
+    EXPECT(garbage(3) != garbage(4));
+}
+
 TEST_CASE(
     "Keys before the message are ignored; one after it restarts at once") {
     Pc pc;
@@ -124,8 +166,8 @@ TEST_CASE(
     pc.type("\r");
     walk(pc, 300);
     EXPECT(pc.sys.inProgram());
-    EXPECT(!pc.shows("No bootable device")); // Still looking.
-    walk(pc, 3500);
+    EXPECT(!pc.shows("No bootable device"));
+    walk(pc, 4800); // t = about 5.8 s: the message is up.
     EXPECT(pc.shows("No bootable device"));
     pc.type("x"); // Any key.
     walk(pc, 200);
@@ -142,13 +184,13 @@ TEST_CASE(
     EXPECT(!pc.shows("keepsake"));
 }
 
-TEST_CASE("Left alone it restarts by itself after about eight seconds") {
+TEST_CASE("Left alone it restarts by itself after about nine seconds") {
     Pc pc;
     crash(pc);
-    walk(pc, 5000);
-    EXPECT(pc.shows("No bootable device")); // Still hung at five seconds.
+    walk(pc, 7500);
+    EXPECT(pc.shows("No bootable device")); // Still hung well into it.
     EXPECT(!pc.shows("press any key to skip"));
-    walk(pc, 5000); // Ten seconds in all.
+    walk(pc, 3000); // Ten and a half seconds in all.
     EXPECT(pc.sys.inProgram());
     EXPECT(pc.shows("press any key to skip")); // The intro has begun.
     walk(pc, 8000);
