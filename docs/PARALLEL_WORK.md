@@ -59,23 +59,19 @@ changes should not run in parallel with changes to the same model/parser API.
 
 ## Active Tasks
 
-Agents work in separate worktrees with non-overlapping owned paths. Finished and
-integrated: server skeleton, hardening, configuration, ScriptedLink, fast-json
-fixes, resize duplication, zero-width glyph.
+Agents work in separate worktrees with non-overlapping owned paths. Integrated:
+server skeleton, hardening, configuration, ScriptedLink, fast-json fixes, resize
+duplication, zero-width glyph, security review, URL opening, touch gestures,
+empty-scroll/grow/ED3 work, server sessions (phase 1 of docs/MULTI_TERMINAL.md),
+the Mattrix OS demo (`docs/tasks/fakeos-demo.md`, milestones 1-11), warnings and
+clang-tidy (`docs/STATIC_ANALYSIS.md`).
 
-
-- `docs/tasks/server-sessions.md`: `trusted_proxy`, then server-owned sessions
-  with an optional replay ring (phase 1 of docs/MULTI_TERMINAL.md). Worktree
-  `.tmp/agent2`, branch `agent2-sessions`.
-
-- `docs/tasks/fakeos-demo.md`: the demo (pretend OS, animations, easter eggs).
-  Milestone 1 integrated (core, fire, intro, web host); milestone 2 (native
-  window, renames, `--tty`) is next. Worktree `.tmp/agent3`, branch `agent3-fakeos`.
-
-Integrated since the previous list: security review, URL opening,
-touch gestures (`docs/tasks/touch-gestures.md`), empty-scroll/grow/ED3 work
-(`docs/tasks/empty-scroll-and-reflow.md`; reflow is only designed, see
-docs/SCROLLING_AND_REFLOW.md).
+- `docs/CHAT.md`: the Mattrix OS chat (ChatRoom core, `chatd`, `mattrix-chat`).
+  Worktree `.tmp/agent3`, branch `agent3-fakeos`.
+- `docs/tasks/web-sessions.md`: browser tabs/terminal views on top of the server
+  sessions (phase 2 of docs/MULTI_TERMINAL.md); plan first, implement after the
+  operator agrees. Worktree `.tmp/agent2`, branch `agent2-websessions`.
+- Width reflow: designed only (docs/SCROLLING_AND_REFLOW.md), not assigned.
 
 Agents can be reached through the MCP message tools (`list_peers`,
 `send_message`, `receive_messages`); the integrator is the project named by
