@@ -73,6 +73,14 @@ add_custom_target(fakeos_aboutstats
 add_dependencies(fakeos fakeos_aboutstats)
 target_include_directories(fakeos PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
+# chat: the pure core of the chat (text rules, room, client). No I/O, clock or
+# process access (enforced by test/check_fakeos_includes.cmake pointed at it).
+file(GLOB CHAT_SOURCES CONFIGURE_DEPENDS src/chat/*.cpp)
+add_library(chatcore ${CHAT_SOURCES})
+add_library(matterm::chat ALIAS chatcore)
+target_compile_features(chatcore PUBLIC cxx_std_17)
+target_include_directories(chatcore PUBLIC src/chat)
+
 add_library(utf8decoder src/terminal/vt/utf8decoder.cpp)
 add_library(matterm::utf8 ALIAS utf8decoder)
 target_compile_features(utf8decoder PUBLIC cxx_std_17)
