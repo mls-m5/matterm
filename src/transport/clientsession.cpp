@@ -128,6 +128,8 @@ void ClientSession::handle(const Welcome &message) {
             return;
         }
     }
+    if (state_ != State::AwaitWelcome)
+        return; // Frontend may abort during reset.
     sessionId_ = message.sessionId;
     negotiatedFeatures_ = message.features;
     received_ = acked_ = message.startOffset;
