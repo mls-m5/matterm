@@ -1,259 +1,328 @@
 # Chat in Mattrix OS (plan, nothing is built yet)
 
-Status: **plan.** Decisions so far (from the owner): our own small chat server
-(a `ChatRoom` core plus a thin WebSocket layer), C++ throughout, Boost.Beast for
-WebSocket, an in-RAM ring buffer and nothing on disk, no accounts, moderation
-from the server's own terminal first, **no WebRTC/STUN**, and the chat client
-should later also run as a **separate terminal program** that can be started
-from inside the client (matterm, `mattrix`, the web demo). Ergo (IRC) stays as a
-fallback and its verified settings are kept in the appendix. Nothing here has
-been run; what is unverified is marked **UNVERIFIED**.
+Status: **plan, decisions recorded.** Nothing here has been built or run;
+unverified points are marked **UNVERIFIED**. Ergo (IRC) remains a fallback and its
+checked settings are kept in Appendix A.
+
+## 0. Decisions so far
+
+| Topic | Decision |
+|---|---|
+| Server | Our own `ChatRoom` core (pure C++, no I/O) plus a thin Boost.Beast layer (`chatd`). No Ergo, **no WebRTC/STUN**. |
+| Storage | A ring buffer in RAM only; nothing is written to disk; a restart empties the room. Messages also **expire after a while** (TTL, proposed 45 min). |
+| Accounts | None. A client sends a name and lines. Names are unique among live connections. |
+| TLS | Terminated by the reverse proxy (`wss://` from the browser). Locally everything is plain `ws://`. TLS in a native client comes much later. |
+| Hosting | Own machine, **Podman from the start** (section 7). Several sites may use the one shared room (one `chatd`, an Origin list with several entries). |
+| Moderation | From the server's own terminal first, no accounts. Silent automatic defences; **no "no moderator here" notice** (it invites abuse). |
+| Online count | Always visible ("12 here"). |
+| Protocol | A minimal **line format**, not JSON (section 3). |
+| Live typing | Drafts are sent while typing; everyone sees them; **cannot be turned off** (it is the point of the chat). A bubble **locks by itself after 5 s of stillness**, no Enter needed (section 4). |
+| Looks | Bubbles with a title row, one cell of padding each side, blank line between bubbles, up to **6** live bubbles (section 5). |
+| Mode | **Inline by default** (normal screen, the terminal's own scrollback); `--fullscreen` optional (section 5). |
+| Text allowed | ASCII plus Latin letters (å ä ö, accents) at first; no emoji or wide characters. |
+| Numbers (proposals) | Ring 200 messages, text 200 characters, name 2-16, 64 connections in total, 2-3 per IP, one message per 2 s with burst 3. |
+| Room rules | Written in English. |
+| Later | A cheap always-online bot (just another client); a chat-only web view; the separate `mattrix-chat` program. |
 
 ## 1. Goals and non-goals
 
 * One public room, short plain-text messages, guests with a chosen name.
-* The server never stores text anywhere but a fixed-size ring in RAM; a
-  restart empties the room. No logs of message content.
-* Strict input checks in several independent layers (section 4), so hostile
-  text cannot reach a terminal, a file or another program.
-* Not: accounts, private messages, several rooms, history search, file transfer,
-  federation, IRC compatibility, peer-to-peer (WebRTC would expose every
-  participant's IP to every other, needs a signalling server anyway, often needs
+* The server keeps text only in a fixed-size RAM ring and a fixed table of live
+  drafts; no logs of message content.
+* Strict input checks in independent layers (section 6), so hostile text cannot
+  reach a terminal, a file or another program.
+* Not: accounts, private messages, several rooms, history search, file
+  transfer, federation, IRC compatibility, peer-to-peer (WebRTC would show every
+  participant's IP to every other, still needs a signalling server, often needs
   TURN, and cannot be moderated).
 
 ## 2. Architecture
 
 ```
  fakeos `chat` program ----+                      +-- server terminal (admin)
- mattrix-chat (any terminal)+--wss--> nginx/Caddy --ws--> chatd
+ mattrix-chat (any terminal)+--wss--> nginx/Caddy --ws--> chatd (Podman)
  web demo (JS WebSocket) ---+   (TLS, limits)            |  ChatRoom (pure core)
                                                           |  Beast adapter (I/O only)
 ```
 
-Pieces, each separately testable:
-
 | Piece | What | I/O? |
 |---|---|---|
-| `ChatRoom` | The whole server logic as a state machine: connections, names, validation, rate limits, caps, ring buffer, moderator commands. Time and randomness injected. Input: events (`connected`, `frame`, `closed`, `tick`, `admin command`); output: actions (send to connection, close connection with reason). | none |
-| `chatd` | Boost.Beast server: accepts, forwards bytes and time to `ChatRoom`, executes its actions. Reads the admin console from stdin or a Unix socket. Listens on loopback; TLS ends in nginx/Caddy (as before: `X-Forwarded-For` honored only from the proxy). | yes, thin |
-| `ChatClient` | Client state machine: Off, Connecting, Hello, Joined, Closed/Error; sends `hello`/`say`, applies the room's events, sanitizes everything it receives, rate-limits its own sending. Time injected. | none |
-| Chat channel | Abstract connection (`send(text)`, `onText`, `onClose`, `close()`); test doubles like `ScriptedLink`; real ones: JS `WebSocket` (web), Beast client (native, see 7). | per host |
-| Chat screen | The TUI (section 5) as a fakeos-style `Program` drawing into `AsciiCanvas`. | none |
+| `ChatRoom` | All server logic as a state machine: connections, names, validation, rate limits, caps, the draft table, the ring, moderator commands. Time injected. Events in (`connected`, `line`, `closed`, `tick`, `admin`), actions out (send, close with reason). | none |
+| `chatd` | Boost.Beast server: accepts, forwards bytes and time to `ChatRoom`, executes its actions, reads the admin console. Listens on loopback; honors `X-Forwarded-For` only from the proxy (reuse `proxysource`, `sourceKey`). | yes, thin |
+| `ChatClient` | Client state machine: Off, Connecting, Hello, Joined, Closed/Error; owns the local bubbles, the idle timer, the `not sent` logic; sanitizes everything it receives. Time injected. | none |
+| Chat channel | Abstract connection (`send(line)`, `onLine`, `onClose`, `close()`); scripted test doubles; real: JS `WebSocket` (web), Beast client later (native). | per host |
+| Chat screen | The inline "live region" renderer and the optional fullscreen view (section 5). | none |
 
-The core pieces live in a library with no sockets (like fakeos, with the include
-check), so they run in the web build too.
+The pure pieces live in a library with no sockets (like fakeos, with the include
+check), so they also run in the web build. `matterm-server`'s `RateLimiter`
+(password attempts) and `ReplayRing` (terminal bytes by serial and byte budget)
+are **not** reused; chat needs a per-connection token bucket and fixed slots.
 
-Existing server code is not a drop-in: `RateLimiter` is for password attempts
-(per source, lockouts) and `ReplayRing` replays terminal bytes by serial and byte
-budget; the chat needs a per-connection token bucket and a ring of fixed slots.
-`matterm-server` does show the Beast setup, `proxysource` (trusted `X-Forwarded-For`)
-and `sourceKey` (IPv4 as is, IPv6 as /64) that `chatd` should reuse.
+## 3. Protocol (line format)
 
-## 3. Protocol (draft)
-
-WebSocket **text** frames, one JSON object per frame, UTF-8, at most **1 KiB**.
-Binary frames, fragmented messages, permessage-deflate and unknown fields are
-rejected (Beast: `read_message_max`, no deflate extension, check `got_text()`).
+One **WebSocket text frame = one line**, UTF-8, fields separated by a single TAB,
+at most **1 KiB** per frame (in practice under about 260 bytes). Binary frames,
+fragmented messages, permessage-deflate, unknown commands and extra fields are
+rejected (Beast: `read_message_max`, no deflate, `got_text()`). No JSON parser.
+`B` is a **bubble number** the client increments per bubble (a small integer).
 
 Client to server:
-* `{"t":"hello","name":"ada"}`: must be the first message, within 5 s.
-* `{"t":"say","text":"hello everyone"}`
-* `{"t":"ping"}` (optional; the server also pings).
+* `hello<TAB>NAME`: first line, within 5 s.
+* `draft<TAB>B<TAB>TEXT`: the **whole** current draft of bubble `B` (0..200
+  characters). An empty text withdraws the bubble. At most about 3 per second are
+  used; the client coalesces.
+* `lock<TAB>B`: the client's idle timer fired (5 s without a change): publish.
+* `nick<TAB>NAME`: rename.
 
 Server to client:
-* `{"t":"welcome","name":"ada","users":["bo","cy"],"history":[{"n":"bo","s":..., "text":"..."}]}`
-* `{"t":"msg","name":"bo","text":"...","ts":1234}` (`name` is set by the server)
-* `{"t":"join","name":...}`, `{"t":"leave","name":...}`
-* `{"t":"error","code":"name-taken|bad-name|too-long|rate|full|banned|bad-frame","text":"..."}`, usually followed by a close.
-* `{"t":"notice","text":"..."}` (moderator or server messages).
+* `welcome<TAB>NAME`, `users<TAB>a,b,c`, then `hist<TAB>SERIAL<TAB>AGE_S<TAB>NAME<TAB>TEXT` per kept message, then `ready`.
+* `draft<TAB>NAME<TAB>TEXT`, `gone<TAB>NAME` (someone else's live bubble; coalesced, only the 6 most recently active typers are forwarded, the rest are counted: `typers<TAB>N`).
+* `msg<TAB>SERIAL<TAB>NAME<TAB>TEXT`: a locked message (for everyone, also the author).
+* `ack<TAB>B<TAB>SERIAL<TAB>TEXT`: to the author only: bubble `B` was locked as `TEXT`.
+* `online<TAB>N` (at most about once a second), `join<TAB>NAME`, `leave<TAB>NAME`,
+  `hide<TAB>SERIAL` (a moderator removed a message), `notice<TAB>TEXT`,
+  `error<TAB>CODE<TAB>TEXT` (codes `name-taken`, `bad-name`, `too-long`, `rate`, `full`,
+  `banned`, `bad-line`), usually followed by a close.
 
-A parser for this fixed shape (not a general JSON parser: a small strict one that
-accepts only these keys and string/number values) keeps the attack surface small.
-**Open:** whether JSON or a trivial line format (`say<TAB>text`) is simpler and
-safer; a fixed line format avoids a JSON parser altogether.
+Rules for `B`: the server remembers the current `B` per connection. A `draft` or
+`lock` with an **older** `B` is ignored (late or duplicate); a `lock` for a bubble
+that was already locked or is empty does nothing; a `draft` with a **new** `B`
+first locks the previous bubble (if it has text) and starts a new one. So sending
+the same thing twice can never publish it twice.
 
-## 4. Strict input, in layers
+**Locking.** The client locks after 5 s without a change (`lock`); the server
+has the same rule as a backstop after about **6.5 s** (both are constants). An
+empty or space-only bubble never locks and just disappears. Locking counts as
+one message for the token bucket. Text is **trimmed** at lock time (leading and
+trailing spaces are allowed while typing).
+
+**When the server is first.** If `ack` arrives while the client has typed more,
+the client removes the acknowledged text **from the start** of its input bubble
+if it begins with it and keeps the rest as the new bubble. If the user edited
+inside the locked part meanwhile, the client keeps its text unchanged (a
+duplicate is better than lost typing).
+
+**Not sent.** If the connection drops or an `error` arrives, the own bubble shows
+`not sent` and stays until the user sends or clears it (no silent resend).
+
+## 4. Live typing
+
+* The server holds **one draft per connection** in a preallocated table (64
+  connections x 200 characters, about 13 KiB); nothing grows. Drafts never enter
+  the ring until locked.
+* Traffic: each connection's drafts are limited to about 3 per second (extra ones
+  are coalesced silently, a flood of more than about 10 per second is a
+  violation); only changed drafts are forwarded; at most 6 typers are forwarded
+  to each client, so the worst case at 64 users is a few hundred KB/s. UNVERIFIED
+  until measured.
+* **Privacy:** everyone sees what you type, including what you delete, and a
+  pause of 5 s publishes it. This is the point, and the notice says it
+  (section 8). Drafts cannot be switched off.
+* Validation of a draft is the same as of a message except for leading/trailing
+  spaces (trimmed at lock); a rejected draft is an `error`, never silently
+  repaired.
+* The client shows the author's bubble as `draft sent` while it is being sent
+  live and `sent` after `ack`, so it is clear that typing goes out at once.
+
+## 5. The chat screen
+
+### Look
+
+Bubbles have a **title row** (a color band), one cell of padding left and
+right, text, and a **blank row between bubbles**. A bubble is as wide as its
+content (title or longest line, plus 2), up to a maximum (about 70% of the width);
+longer text wraps. Finished and live bubbles differ by background shade. Own
+bubbles are marked by a small face in the title row (`☺`, or `:)` when the
+terminal is not Unicode); all bubbles are left-aligned. In this sketch `▒` is the
+title row's background and `░` the body's (not drawn in the real thing):
+
+```
+▒bo  14:02  sent▒▒▒▒▒▒▒▒▒▒▒▒▒
+░hi everyone, anyone around?░
+
+▒cy  14:02  sent▒▒▒▒
+░hej! just got here░
+
+ · dee joined
+
+▒ada  14:05  sent▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
+░anyone seen the crumble game? I think░
+░it is hidden in /usr/games░░░░░░░░░░░░
+
+▒bo  typing…▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
+░i think it has a dot in fr▌░
+
+▒cy  typing…▒
+░ok but wh▌░░
+
+▒☺ mia  draft sent▒▒▒▒▒
+░what is the dot for▌░
+```
+
+* Title rows: `name  14:06  sent` (locked), `name  typing…` (someone else's live
+  bubble), `☺ name  draft sent` / `sent` / `not sent` (own). Name in bold, time
+  and state dimmer.
+* When a bubble locks it flashes briefly, becomes a locked bubble (time and
+  `sent` appear, the shade changes) and a new empty bubble opens for the author.
+* More typers than six: "+3 typing…". The count of people online is in a status
+  line ("Mattrix chat · 12 here").
+* The first lines say what this is: **"Live chat, draft sent as you type"**,
+  pulsing for a few seconds and then written as a plain static line.
+* Animations (cheap, optional): a smooth step when a line is added, a blinking
+  caret in live bubbles, moving dots in `typing…` when a bubble is still empty,
+  names fading in and out on join/leave. They never carry information and are
+  switched off by `--plain`, by a setting and on slow terminals.
+
+### Inline by default
+
+* **Finished bubbles are printed once to the normal screen and become the
+  terminal's own scrollback.** Only the **live region** at the bottom (the live
+  bubbles, your own bubble, the status line) is redrawn in place with relative
+  cursor movement. To add a finished bubble: move to the top of the live region,
+  erase downwards, print the bubble as ordinary lines, redraw the region below.
+* Your **cursor sits in your own bubble**, always the last one; there is no
+  separate input line. If you have scrolled back and type, the view goes to the
+  bottom (that is the terminal's behavior when output arrives or you type).
+* Benefits: native scroll, search and copy, the same in matterm, `mattrix` and
+  the web demo, no alt-screen. `--fullscreen` can add an alt-screen view later.
+* Costs: animations only happen inside the live region (printed lines are
+  final); a window **resize** reflows printed lines and the live region's row
+  count may be wrong, so on resize the renderer clears from a remembered anchor
+  and redraws (the known weak spot of inline UIs); it needs a new small
+  **live-region renderer** (a pure function from region lines to bytes using
+  CUU/EL/ED), not the full-screen `AsciiCanvas` flush. **UNVERIFIED** until built
+  and tried in matterm, a plain terminal and the web demo.
+* Inside Mattrix OS the same renderer works on the shell's primary screen, so
+  `chat` behaves like any long-running command.
+
+### Input
+
+One-line editor (Backspace, Ctrl-U/W/A/E, arrows), 200 characters with a visible
+counter, paste is sanitized and truncated. Commands: `/help`, `/nick NAME`,
+`/clear`, `/who`, `/quit` (Ctrl-C leaves at once). Anything else starting with
+`/` is an error line and is not sent.
+
+## 6. Strict input, in layers
 
 1. **Proxy:** request size, connection and request rates, timeouts.
 2. **Transport (Beast):** text frames only, 1 KiB cap, no compression, no
    fragmentation, ping/pong with timeouts (slowloris), handshake deadline.
 3. **Server validation (`ChatRoom`)**, rejecting rather than repairing:
-   strict UTF-8; **name** `[A-Za-z0-9_-]{2,16}`, unique among current
-   connections, a small reserved list (`server`, `admin`, `system`, `mod*`,
-   `you`); **text** 1..200 code points, no C0/C1 controls (also not TAB, CR, LF),
-   no DEL, no format/bidi/zero-width characters (U+200B-U+200F, U+202A-U+202E,
-   U+2028/2029, U+2066-U+2069, U+FEFF), no unassigned or private-use code
-   points, no leading/trailing space, no run of more than N identical
-   characters, not only spaces. Fixed schema: any other key is an error.
-4. **Limits (`ChatRoom`):** token bucket per connection (for example 1 message
-   per 2 s, burst 3) and per source (`sourceKey`), a hard total of connections
-   (for example 64), per-source cap (2-3), a cap on connections still without
-   `hello`, a cap on total bytes queued per connection (a slow reader is
-   disconnected, never buffered), repeated violations disconnect.
-5. **Storage:** a ring of fixed slots (for example 200 slots of 256 bytes) in one
-   preallocated array; nothing grows; oldest dropped. **No file writes, no
-   message text in logs** (counters only); the container is read-only with no
-   volume and no outbound network; the process does not know how to open a file
-   for chat data. Names and IPs are not stored after a connection ends (bans
-   excepted, see section 6).
+   strict UTF-8; **name** `[A-Za-z0-9_-]{2,16}`, unique among live connections, a
+   small reserved list (`server`, `admin`, `system`, `mod*`, `you`); **text**
+   0..200 code points from ASCII and Latin letters only: no C0/C1 controls (also
+   not TAB, CR, LF), no DEL, no format/bidi/zero-width characters, no private-use
+   or unassigned code points, no run of more than N identical characters, not
+   only spaces; fixed commands and field counts.
+4. **Limits (`ChatRoom`):** token bucket per connection (one message per 2 s,
+   burst 3), per source (`sourceKey`), a hard total of connections (64), a
+   per-source cap (2-3), a cap on connections still without `hello`, a cap on
+   bytes queued per connection (a slow reader is disconnected, never buffered),
+   draft rate limits (section 4), repeated violations disconnect and ban for a
+   short time.
+5. **Storage:** a ring of fixed slots in one preallocated array plus the draft
+   table; nothing grows; the oldest is dropped, and entries expire after the TTL.
+   **No file writes and no message text in logs** (counters only); the container
+   is read-only with no volume (section 7). Names and IPs are not kept after a
+   connection ends (active bans excepted, in RAM).
 6. **Client (`ChatClient`):** treats everything received as hostile although the
-   server checked it: decodes strict UTF-8, removes C0/C1 controls (so no
-   CSI/OSC/DCS can form; the leftover `[31m` is plain text), IRC-style format
-   bytes (harmless but stripped), bidi and zero-width characters, caps lengths
-   and counts. Same code path as the server's validator where possible (one
-   shared `chatText` function, tested once).
-7. **Screen:** the chat program draws with `AsciiCanvas::text` (cells), never
-   raw strings into the output stream, and never through the shell's `io.out`.
-8. **Links:** URLs in chat are shown as text; the demo's link detection must not
-   make them clickable without a confirmation (phishing surface).
+   server checked it: strict UTF-8, removes C0/C1 controls (so no CSI/OSC/DCS can
+   form; a leftover `[31m` is plain text), format bytes, bidi and zero-width
+   characters, caps lengths and counts. One shared validator function for the
+   server and the client.
+7. **Screen:** everything drawn is cells or text the renderer itself composed;
+   chat text never goes into the output as raw strings from the network, and
+   never through the shell's `io.out`.
+8. **Links:** URLs in chat are plain text; the demo's link detection must not
+   make them clickable without a confirmation.
 
-The shared validator is the single point to fuzz hard.
+The shared validator is the single point to fuzz hardest.
 
-## 5. The chat TUI (planning)
+## 7. Server, operation and Podman
 
-Sketch at 80x24 (cells; colors in brackets):
+* **Container (UNVERIFIED, to be tried):** `chatd` as a statically linked binary
+  in an image with nothing else (no shell, no other programs), run rootless with
+  `--read-only`, `--cap-drop=all`, `--security-opt no-new-privileges`, memory
+  and process limits, **no volume**, no outbound network, and only its one
+  port published on loopback; nginx/Caddy in front does TLS and rate limits and
+  forwards `Origin` and `X-Forwarded-For`. Whether Boost.Beast links statically
+  here cleanly is to be checked.
+* **Several sites, one room:** the Origin allowlist has one entry per site (the
+  real pages, plus a local development origin); a connection without an allowed
+  `Origin` is refused. Origin is a browser-enforced header, not authentication:
+  it stops other *websites* using visitors' browsers, nothing more.
+* **Admin console** on the server's terminal, no accounts (whoever can reach the
+  host is admin): over stdin (`podman attach`/`run -i`) or a small Unix-socket
+  console with a client in the image. Commands: `list` (name, age, source), `kick
+  NAME`, `ban IP|NAME [minutes]`, `unban`, `mute NAME [minutes]`, `delete N`
+  (remove a message and send `hide`), `clear`, `lock`/`unlock` (no new joins),
+  `say TEXT` (a notice), `stats`, `quit`. Bans and mutes live in RAM and expire.
+* **Unattended:** silent defences only: automatic kick and a short ban after
+  repeated violations, a global cap on messages per minute for the whole room,
+  and the remote `lock` as an emergency brake. The room never announces that no
+  moderator is present.
+* **Secrets:** none in the repo; configuration is the listen address, the
+  Origin list and the numeric limits; the repo has a template with placeholders.
+* The proxy's access log is where visitor IPs live; keep it short-lived.
 
-```
- Mattrix chat   #mattrix   12 here   [connected]            Esc menu   <- title bar (reverse)
-+--------------------------------------------------------+------------+
-| 14:02 bo   hi everyone                                 | ada (you)  |
-| 14:02 cy   hej!                                        | bo         |
-| 14:03 *    dee joined                                  | cy         |
-| 14:05 ada  anyone seen the crumble game?               | dee        |
-|                                                        |            |   <- user list (hidden < 60 cols)
-|                                                        |            |
-+--------------------------------------------------------+------------+
-| > type here, Enter sends                              118/200   [ok]  <- input + counter + rate state
-```
+## 8. The notice and the separate program
 
-* **Layout:** title bar, message pane, user list (hidden below about 60 columns
-  and replaced by the count in the title), one input line with a character
-  counter and a small state field (`ok`, `slow down`, `muted`, `offline`).
-  Works from 40x10 up; below that a one-line "terminal too small".
-* **Messages:** time, name, text; names get stable colors from a hash (16/256/
-  truecolor degraded like the rest of fakeos); server notices dimmed; own
-  messages marked; hard wrap with a hanging indent; wide characters counted by
-  cell width (single-width only at first: anything else is replaced).
-* **Input:** one line editor reusing the shell's (Backspace, Ctrl-U/W/A/E, left/
-  right, history of own messages with Up/Down), 200 code points max shown as a
-  counter, paste is sanitized and truncated, Enter sends, an empty line does
-  nothing.
-* **Scrolling:** the pane follows new messages; PageUp/PageDown or the wheel
-  scrolls and shows "N new below"; End jumps back. Ring-sized buffer on the
-  client too (no unbounded growth).
-* **Commands:** `/help`, `/nick NAME`, `/me TEXT` (action, if the protocol gets
-  one), `/clear`, `/who`, `/quit`; everything else starting with `/` is an error
-  line, not sent.
-* **Keys:** Esc opens a tiny menu (Resume, Leave); Ctrl-C leaves at once. Mouse:
-  wheel scrolls; click a name in the list inserts `name: `; no link clicking.
-* **States and honesty:** connecting spinner with the server name, "reconnect?"
-  only on request, the notice from section 6 shown before the first connect
-  (what it is, that the server sees your IP, that messages are public and
-  nothing is kept, rules in 3 lines) and again in `/help`.
-* **Accessibility:** no reliance on color alone (the own-message marker and
-  notices have symbols too); optional bell on mention is off by default; works
-  with a screen reader mode that just prints lines without the full-screen
-  layout (the standalone program's `--plain`).
-* **Testing:** the screen is a `Program`, so the existing `Pc` harness checks
-  rendering at several sizes, resize, scrolling, narrow terminal, 16/256/
-  truecolor and hostile text, with the scripted channel driving it.
+**Notice**, shown before any connection (`chat`, `mattrix-chat`; `?cmd=chat` never
+connects without it): "**Live chat, draft sent as you type.** This connects to
+<server> over a secure WebSocket. The server sees your IP address; other users
+see only your name. Everyone sees what you type while you type it, and a pause of
+5 seconds posts it. Messages are public, kept only in server memory for a short
+time, and gone when it restarts. Rules: (3 short lines, English)." Off by default.
 
-## 6. Notice, privacy, operations
+**Separate program** (later): `mattrix-chat`, started from a terminal, from
+matterm or from inside Mattrix OS. Shared library; the chat screen and
+`ChatClient` are the same in every host; the host part of `app/demo/ttyhost.cpp`
+is split into a small "program host" that can run a chat program and also wait on
+a socket. Native TLS needs OpenSSL (`libssl-dev` is **not installed in this
+sandbox**; an apt request would be needed) and is postponed: web goes through the
+proxy's TLS, and native uses `ws://` to a local `chatd` while developing. Starting
+it from inside Mattrix OS (host-provided channel versus a host hook that launches
+the program) is decided later; the fakeos core opens no sockets. A chat-only web
+view and an always-online bot are later too.
 
-* `chat` and `mattrix-chat` print, before any connection: the server's name,
-  that the connection is a WebSocket over TLS, **that the server sees your IP
-  address**, that other users see only your chosen name, that messages are
-  public, kept only in server memory and gone at restart, the room rules. Off by
-  default; `?cmd=chat` does not auto-connect without a consent step (open
-  question 4).
-* The server does not record IPs beyond the live connection and active bans
-  (in RAM). The proxy's access log is the remaining place visitor IPs live: keep
-  it short-lived and say so.
-* **Moderation (first version):** an admin console on the server's own terminal
-  (stdin, or a Unix socket with 0600 permissions; no accounts, whoever can
-  reach the host is admin): `list` (name, age, source in this console only),
-  `kick NAME`, `ban IP|NAME [minutes]`, `unban`, `mute NAME [minutes]`,
-  `delete N` (remove a message from the ring and tell clients to hide it),
-  `clear`, `lock` / `unlock` (no new joins), `say TEXT` (a notice), `stats`,
-  `quit`. Bans and mutes live in RAM and expire; a restart clears them
-  (optionally a ban file later, a deliberate decision).
-* Secrets: none in the repo. The only configuration is the listen address, the
-  allowed origin(s) and numeric limits; the template lives in the repo with
-  placeholders.
+## 9. Build order (when told to start)
 
-## 7. Running the chat as a separate terminal program
-
-Wanted later: `mattrix-chat`, started from a normal terminal, from matterm or
-from inside Mattrix OS, and `chat` in the pretend OS becomes a convenience for
-the same program.
-
-* **Shared code:** `ChatClient`, the validator and the chat screen are the
-  same library in every host. The screen is a fakeos `Program`; a small
-  **program host** (the part of `app/demo/ttyhost.cpp` that does raw mode,
-  `poll`, `SIGWINCH`, capability detection and restore) is split out so that it
-  can run a `Program` directly instead of a whole `System`, and so that its
-  poll loop can also wait on the socket.
-* **Connection in the native program:** Beast client with TLS. This needs
-  OpenSSL (`libssl-dev`), which is **not installed in this sandbox** (headers
-  absent): an apt request is needed before building it. Options for the
-  connection: `wss://` directly (needs TLS in the program), or `ws://` to a
-  local `chatd` / an `ssh -L` tunnel for development.
-* **From inside Mattrix OS (`mattrix` and `matterm-demo --tty`):** `chat` must
-  not open sockets from the fakeos core (it has no I/O). Either the host
-  provides the channel (web: JS `WebSocket`; native hosts: the same Beast
-  client), or `chat` runs the separate program by asking the host to start it.
-  The second route keeps the pretend OS pure but needs a "launch external
-  program" hook in the host and a clear consent step. **Open question 6.**
-* **From matterm:** `matterm -- mattrix-chat` works the same as `mattrix`:
-  matterm's PTY sets `TERM`/`COLORTERM`, and capability detection already
-  handles that.
-* **Install:** a CMake option like `MATTERM_BUILD_MATTRIX` (the chat client
-  would be `MATTERM_BUILD_CHAT`, off by default until TLS support is decided);
-  the server `chatd` a separate option, Linux only.
-* **Options (draft):** `--server URL`, `--name NAME`, `--plain`, `--no-color`,
-  `--help`; no config file with secrets, no history file.
-
-## 8. Build order (when told to start)
-
-1. **Validator** (`chatText`, `chatName`): table tests, fuzz, shared by server
-   and client. Smallest, most security-critical piece first.
+1. **Validator** (`chatText`, `chatName`): table tests, fuzz; shared.
 2. **`ChatRoom` core** with scripted tests: join/leave, names, caps, token
-   buckets with an injected clock, ring eviction, kick/ban/mute, slow readers,
-   malformed frames, fuzz of the frame parser.
-3. **Protocol parser/serializer** with strict fuzz.
-4. **`ChatClient`** with the scripted channel; end-to-end with `ChatRoom` in
-   process (no sockets): two clients talking, hostile messages never reaching
-   the screen model.
-5. **Chat screen** as a `Program` with `Pc` tests at several sizes.
+   buckets with an injected clock, the draft table, locking rules (bubble
+   numbers, duplicates, the 6.5 s backstop), ring eviction and TTL, kick/ban/mute,
+   slow readers, malformed lines, fuzz of the line parser.
+3. **Line codec** with strict fuzz.
+4. **`ChatClient`** with the scripted channel; end to end with `ChatRoom` in
+   process (no sockets): two clients, drafts, locks, `ack` prefix cutting,
+   `not sent`, hostile text never reaching the screen model.
+5. **Live-region renderer** and the chat screen, tested with the `Pc` harness
+   at several sizes, with resize, color degradation and hostile text.
 6. **`chatd`** (Beast adapter, admin console); loopback integration test with a
-   real socket.
-7. Web bridge and `chat` command in fakeos (off by default, consent text).
-8. Separate `mattrix-chat` (program host split, TLS decision).
-9. Deployment notes (proxy snippet, Podman, limits), only after the above.
+   real socket (plain `ws://`).
+7. Web bridge and the `chat` command in fakeos (off by default, the notice).
+8. Podman image and the proxy snippet; measurements of draft traffic.
+9. `mattrix-chat` (program host split; TLS later).
 
-## 9. Open questions
+## 10. Still open
 
-1. Protocol: JSON with a strict mini-parser, or a fixed line format?
-2. Numbers: ring size, message length (200?), token bucket, total/per-IP caps.
-3. Names: fixed `guest-NNNN` assigned by the server, or free choice within the
-   rules, and may a name be changed during a session?
-4. `?cmd=chat` and autostart: never auto-connect, or a consent key press?
-5. Moderation beyond the server terminal (a moderator inside the room with a
-   secret key) later, or never?
-6. Starting the separate program from inside Mattrix OS: host-provided channel,
-   or a host hook that launches `mattrix-chat`?
-7. TLS in the native client: install OpenSSL (apt request) or web-only plus
-   loopback `ws://` for the native client at first.
-8. Wide characters, emoji and combining marks: single-width ASCII-plus-Latin
-   only at first, or full Unicode with a width table?
-9. Where it runs, the domain, who watches the room, and the room rules.
+1. The TTL and exact numbers (all proposals); the 3-per-second draft rate.
+2. Resize handling in the inline renderer, and whether pulsing text (SGR blink or
+   our own redraw) works the same in every host.
+3. Static linking of Boost.Beast and the admin console's transport (stdin or
+   Unix socket) in the container.
+4. The three-line room rules (English) and who watches the room.
+5. Starting the separate program from inside Mattrix OS.
+6. Whether `lock` after 5 s should lengthen later ("people type slower than you
+   think"): it is a constant in both client and server.
 
-## 10. Not verified
+## 11. Not verified
 
 * Nothing was built or run.
-* The Boost.Beast calls named above (`read_message_max`, no deflate, `got_text`)
-  are from memory of its API: confirm against the installed version.
-* OpenSSL headers are absent here; the native TLS client is untried.
+* Beast calls named above (`read_message_max`, no deflate, `got_text`) are from
+  memory of its API; check against the installed version.
+* The inline live-region approach, draft traffic estimates and the Podman
+  hardening are untried.
 * All numbers are proposals.
 
 ---
