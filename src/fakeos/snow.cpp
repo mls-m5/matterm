@@ -97,7 +97,7 @@ private:
                     pile_[std::size_t(x - 1)] + 1 < pile_[std::size_t(x)]) {
                     --x;
                 }
-                else if (x + 1 < w && pile_[std::size_t(x + 1)] + 1 <
+                else if (x + 1 < w && pile_[std::size_t(x) + 1] + 1 <
                                           pile_[std::size_t(x)]) {
                     ++x;
                 }
