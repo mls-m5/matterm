@@ -1,6 +1,7 @@
 #include "clientsession.h"
 
 #include <algorithm>
+#include <limits>
 
 using namespace protocol;
 
@@ -44,6 +45,9 @@ void ClientSession::onOpened() {
     Hello hello;
     hello.columns = std::uint16_t(config_.columns);
     hello.rows = std::uint16_t(config_.rows);
+    hello.sessionId = config_.sessionId;
+    hello.resumeOffset = config_.resumeOffset;
+    hello.features = config_.replay ? featureReplay : 0;
     if (!sendMessage(hello)) {
         fail("could not send Hello", 1011);
         return;
@@ -97,7 +101,39 @@ void ClientSession::handle(const Welcome &message) {
         fail("server chose an unsupported protocol version", 1002);
         return;
     }
+    const auto offered = config_.replay ? featureReplay : 0;
+    const bool resumed = (message.flags & welcomeResumed) != 0;
+    const bool reset = (message.flags & welcomeOutputLost) != 0;
+    if ((message.features & ~offered) || (message.flags & ~3u) ||
+        (reset && !resumed) ||
+        (resumed && !(message.features & featureReplay)) ||
+        (resumed ? (config_.sessionId.empty() ||
+                    message.sessionId != config_.sessionId)
+                 : (!config_.sessionId.empty() || message.startOffset != 0 ||
+                    message.flags != 0)) ||
+        (resumed && !reset && message.startOffset != config_.resumeOffset)) {
+        fail("protocol error: invalid replay negotiation", 1002);
+        return;
+    }
+    if (reset) {
+        if (!config_.resetForReplay) {
+            fail("replay requires a frontend reset callback", 1002);
+            return;
+        }
+        try {
+            config_.resetForReplay();
+        }
+        catch (const std::exception &) {
+            fail("frontend replay reset failed", 1011);
+            return;
+        }
+    }
+    if (state_ != State::AwaitWelcome)
+        return; // Frontend may abort during reset.
     sessionId_ = message.sessionId;
+    negotiatedFeatures_ = message.features;
+    received_ = acked_ = message.startOffset;
+    lastAck_ = config_.clock();
     state_ = State::Running;
 }
 
@@ -108,6 +144,11 @@ void ClientSession::handle(const Output &message) {
     }
     if (message.offset != received_) {
         fail("protocol error: gap in the output stream", 1002);
+        return;
+    }
+    if (message.data.size() >
+        std::numeric_limits<std::uint64_t>::max() - received_) {
+        fail("protocol error: output offset exhausted", 1002);
         return;
     }
     received_ += message.data.size();

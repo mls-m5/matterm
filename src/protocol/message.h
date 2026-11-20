@@ -12,6 +12,9 @@
 namespace protocol {
 
 constexpr std::uint16_t currentVersion = 1;
+constexpr std::uint32_t featureReplay = 1;
+constexpr std::uint8_t welcomeResumed = 1;
+constexpr std::uint8_t welcomeOutputLost = 2;
 constexpr std::size_t maxMessageSize = 16384; // Including the type byte.
 constexpr std::size_t maxInputData = maxMessageSize - 1;
 constexpr std::size_t maxOutputData = maxMessageSize - 1 - 8;

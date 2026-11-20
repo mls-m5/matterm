@@ -75,6 +75,19 @@ void PtySessionHost::terminateProcess() {
 }
 void PtySessionHost::pump(protocol::ServerSession &session,
                           protocol::Time now) {
+    pump(session.outputBudget(),
+         now,
+         {[&](std::string_view bytes) { session.onProcessOutput(bytes, now); },
+          [&](int code, int signal, bool drained) {
+              if (drained)
+                  session.onProcessExit(code, signal, now);
+              else
+                  close_(1000);
+          }});
+}
+void PtySessionHost::pump(std::size_t outputBudget,
+                          protocol::Time now,
+                          const ProcessEvents &events) {
     if (!process_ || finished_) {
         return;
     }
@@ -93,12 +106,11 @@ void PtySessionHost::pump(protocol::ServerSession &session,
     }
     std::array<char, 16375> buffer{};
     // One bounded read per pump, even when output is continually available.
-    const auto budget = std::min(buffer.size(), session.outputBudget());
+    const auto budget = std::min(buffer.size(), outputBudget);
     if (budget && !process_->closed()) {
         const auto read = process_->read(buffer.data(), budget);
         if (read.count)
-            session.onProcessOutput(std::string_view(buffer.data(), read.count),
-                                    now);
+            events.output(std::string_view(buffer.data(), read.count));
     }
     if (!killed_) {
         return; // Keep the leader unreaped until the group is gone.
@@ -114,12 +126,6 @@ void PtySessionHost::pump(protocol::ServerSession &session,
     }
     finished_ = true;
     input_.clear();
-    if (drained) {
-        session.onProcessExit(status->code, status->signal, now);
-    }
-    else {
-        // Unread output was dropped: never claim a complete Exit.
-        close_(1000);
-    }
+    events.exited(status->code, status->signal, drained);
 }
 } // namespace server

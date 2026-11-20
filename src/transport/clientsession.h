@@ -2,8 +2,8 @@
 
 #include "message.h"
 #include "messagechannel.h"
-#include "terminallink.h"
 #include "protocoltime.h"
+#include "terminallink.h"
 
 #include <functional>
 #include <optional>
@@ -26,6 +26,12 @@ public:
         ms pingInterval{20000};           // Idle time before a Ping.
         ms pongTimeout{30000};            // Silence after a Ping is fatal.
         std::size_t maxInputChunk = 4096;
+        bool replay = false;
+        std::string sessionId;
+        std::uint64_t resumeOffset = 0;
+        // Required before accepting a reset/full replay (Welcome.flags=3).
+        // Reset the frontend parser/model/selection before any Output callback.
+        std::function<void()> resetForReplay;
     };
     enum class State { Connecting, AwaitWelcome, Running, Exited, Failed };
 
@@ -45,6 +51,9 @@ public:
     State state() const noexcept;
     const std::string &sessionId() const noexcept;
     std::uint64_t receivedOffset() const noexcept;
+    std::uint32_t negotiatedFeatures() const noexcept {
+        return negotiatedFeatures_;
+    }
 
 private:
     void onOpened();
@@ -64,6 +73,7 @@ private:
     Events events_;
     State state_ = State::Connecting;
     std::string sessionId_;
+    std::uint32_t negotiatedFeatures_ = 0;
     std::uint64_t received_ = 0;
     std::uint64_t acked_ = 0;
     protocol::Time lastAck_{};

@@ -99,6 +99,10 @@ TEST_CASE(
     "Seeded mutations round-trip every accepted client and server message") {
     std::vector<std::string> corpus{
         wire(ClientMessage{Hello{}}),
+        wire(ClientMessage{
+            Hello{1, 80, 24, 1234, "00112233445566778899aabbccddeeff", 1}}),
+        wire(ServerMessage{
+            Welcome{1, "00112233445566778899aabbccddeeff", 2048, 3, 1}}),
         wire(ClientMessage{Input{std::string("\x00\xff\x1b", 3)}}),
         wire(ClientMessage{Resize{1000, 1, 65535, 65535}}),
         wire(ClientMessage{Ack{~std::uint64_t(0)}}),

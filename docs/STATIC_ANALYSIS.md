@@ -27,6 +27,11 @@ cmake -S . -B build          # exports compile_commands.json
 tools/clang-tidy.sh build -j8
 ```
 
+A full run takes a few minutes (about 2.5 min with 8 jobs), so it is not part of the
+normal build or of every change. Run it every so often, after a batch of changes, and
+use `tools/clang-tidy.sh build --changed` (only the .cpp files that differ from
+`origin/main`) for a quick check on one task.
+
 Enabled: `bugprone-*`, `cert-*`, `clang-analyzer-{core,security,unix,cplusplus}`,
 `concurrency-*`, a few `misc-*`, `cppcoreguidelines-narrowing-conversions` (not for
 int/float) and `-slicing`. Disabled as style noise: init-variables, member-init,

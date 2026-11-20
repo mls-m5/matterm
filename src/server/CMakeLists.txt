@@ -8,7 +8,7 @@ find_library(SODIUM_LIBRARY sodium REQUIRED)
 if(NOT EXISTS "${PROJECT_SOURCE_DIR}/lib/fast-json/include/fast-json/json.h")
     message(FATAL_ERROR "matterm-server reads its configuration with lib/fast-json: run 'git submodule update --init lib/fast-json'")
 endif()
-add_library(matterm-server-core auth.cpp config.cpp ratelimiter.cpp ptysessionhost.cpp server.cpp)
+add_library(matterm-server-core auth.cpp config.cpp ratelimiter.cpp proxysource.cpp replayring.cpp sessionregistry.cpp ptysessionhost.cpp server.cpp)
 # fast-json defines non-inline specializations: include it from config.cpp only.
 target_include_directories(matterm-server-core PRIVATE ${PROJECT_SOURCE_DIR}/lib/fast-json/include)
 target_compile_features(matterm-server-core PUBLIC cxx_std_20)

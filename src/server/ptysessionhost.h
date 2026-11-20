@@ -30,6 +30,15 @@ public:
     void terminateProcess() override;
     // Bounded nonblocking I/O. Reports exit only after EOF, never just waitpid.
     void pump(protocol::ServerSession &session, protocol::Time now);
+    struct ProcessEvents {
+        std::function<void(std::string_view)> output;
+        std::function<void(int code, int signal, bool drained)> exited;
+    };
+    // Registry-owned processes may drain into a replay ring without any
+    // attached protocol session. Budget and callbacks are still bounded.
+    void pump(std::size_t budget,
+              protocol::Time now,
+              const ProcessEvents &events);
     // True once the process is reaped and its end was reported (or abandoned).
     bool finished() const noexcept {
         return finished_;
