@@ -109,7 +109,7 @@ void size(int &columns, int &rows) {
 
 int runTtyHost(fakeos::Config config) {
     if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO)) {
-        std::cerr << "matterm-demo --tty needs a terminal on standard input "
+        std::cerr << "this program needs a terminal on standard input "
                      "and output\n";
         return 1;
     }

@@ -12,6 +12,7 @@ reusable cell-grid renderer and a small terminal model.
   password-protected server that owns the shell (see
   [docs/SERVER.md](docs/SERVER.md), [web/README.md](web/README.md)).
 - `matterm-demo`: the showcase behind "Try it online".
+- `mattrix`: Mattrix OS, the pretend operating system of the demo, as a program for any terminal (no SDL; also runs inside `matterm -- ./mattrix`).
 - `matterm-render-demo`, `matterm-lib-demo`: small examples of using the libraries
   (`matterm::renderer`, `matterm::terminal`, `matterm::vt`).
 

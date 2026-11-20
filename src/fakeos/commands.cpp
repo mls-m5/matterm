@@ -2237,7 +2237,7 @@ int cmdNeofetch(World &w, const Args &, CommandIo &io) {
     return 0;
 }
 
-int cmdAbout(World &, const Args &, CommandIo &io) {
+int cmdAbout(World &w, const Args &, CommandIo &io) {
     const bool c = io.tty;
     auto bold = [&](const std::string &text) {
         return c ? "\x1b[1;36m" + text + "\x1b[0m" : text;
@@ -2245,11 +2245,20 @@ int cmdAbout(World &, const Args &, CommandIo &io) {
     auto strong = [&](const std::string &text) {
         return c ? "\x1b[1m" + text + "\x1b[0m" : text;
     };
-    io.out +=
-        strong("about: Mattrix OS 6.0 Professional Edition") +
-        "\n\n"
-        "matterm is a terminal emulator written from scratch, and this is its\n"
-        "demo: a real terminal with a fake operating system.\n\n";
+    io.out += strong("about: Mattrix OS 6.0 Professional Edition") + "\n\n";
+    if (w.standalone) {
+        io.out +=
+            "Mattrix OS is a pretend operating system that runs in your real\n"
+            "terminal. It is built on the core of matterm, a terminal "
+            "emulator\n"
+            "written from scratch, and it also runs inside matterm.\n\n";
+    }
+    else {
+        io.out +=
+            "matterm is a terminal emulator written from scratch, and this is "
+            "its\n"
+            "demo: a real terminal with a fake operating system.\n\n";
+    }
     io.out +=
         bold("Technical background") +
         "\n"
