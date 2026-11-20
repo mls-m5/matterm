@@ -111,3 +111,27 @@ alternate isolation, capacity eviction, and allocation/overflow failures. A
 recorded full-screen transcript should accompany CPU properties before claiming
 compatibility. No reflow implementation or new policy for trailing spaces lands
 in this task.
+
+## Reflow: what is still open (checked again, not started)
+
+Not bounded enough to implement now. Decisions and work that remain, in order:
+
+1. **Written extent.** Rows have no "last written column", so trailing spaces
+   that the user typed cannot be told from padding. Either add a per-row extent
+   (set by writes, cleared by erase) or settle for "trailing default-styled blanks
+   are padding". Everything else depends on this; it also decides how a full
+   line that was exactly the old width is joined.
+2. **Wrap flags.** Check that every path that wraps (autowrap, deferred wrap,
+   insert/delete, scroll regions, ED/EL) sets and clears `softWrap` correctly.
+   Today nothing relies on it, so errors would first show up as joined hard lines.
+3. **Algorithm** over primary rows only (logical lines, new layout, trimming to
+   the saved-row limit afterwards), with the old model kept until the new one is
+   complete.
+4. **Positions:** cursor, saved cursor, deferred wrap, the historical viewport
+   anchor; selection and link data are invalidated, as in any resize.
+5. **Cost:** a benchmark of width-change bursts on a full history, then decide
+   about coalescing resizes.
+6. **Tests** from the list above, and a recorded full-screen session as a guard.
+
+The scroll-target snap in `ScrollViewport::scrollBy` (a drag and its reverse end
+exactly at the tail) is unrelated to this and is covered in `scrollviewport_test`.
