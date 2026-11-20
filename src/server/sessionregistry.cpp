@@ -393,6 +393,23 @@ void SessionRegistry::tick(Time now) {
         it = impl_->entries.erase(it);
     }
 }
+std::optional<Time> SessionRegistry::nextDeadline() const {
+    std::optional<Time> result;
+    const auto consider = [&](Time value) {
+        if (!result || value < *result)
+            result = value;
+    };
+    for (const auto &[id, entry] : impl_->entries) {
+        if (entry->attached && entry->session) {
+            if (const auto deadline = entry->session->nextDeadline())
+                consider(*deadline);
+        }
+        else if (!entry->closing && impl_->config.detachedTimeout.count()) {
+            consider(entry->detachedAt + impl_->config.detachedTimeout);
+        }
+    }
+    return result;
+}
 void SessionRegistry::closeAll(Time now) {
     impl_->tombstones.clear();
     for (auto &[id, entry] : impl_->entries)

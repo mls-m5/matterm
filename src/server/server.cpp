@@ -257,7 +257,8 @@ private:
             const bool matched = shared_->password.verify(
                 password ? std::string_view(*password) : std::string_view(""));
             if (password)
-                // NOLINTNEXTLINE(clang-analyzer-cplusplus.InnerPointer): false positive, the string_view above is dead here
+                // NOLINTNEXTLINE(clang-analyzer-cplusplus.InnerPointer): false
+                // positive, the string_view above is dead here
                 sodium_memzero(password->data(), password->size());
             sodium_memzero(request.body().data(), request.body().size());
             request.body().clear();
@@ -587,7 +588,11 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
         acceptor.listen(16);
     }
     void pump() {
-        pumpTimer.expires_after(protocol::Time(10));
+        auto delay = protocol::Time(10);
+        if (const auto deadline = shared->registry.nextDeadline())
+            delay = std::min(
+                delay, std::max(protocol::Time(0), *deadline - timeNow()));
+        pumpTimer.expires_after(delay);
         pumpTimer.async_wait([self = shared_from_this()](beast::error_code ec) {
             if (ec || !self->acceptor.is_open())
                 return;
