@@ -20,6 +20,9 @@ struct World {
     VirtualFs fs;
     std::string user = "guest";
     std::string hostname = "matterm";
+    // Running as the standalone Mattrix OS program, not inside matterm: the
+    // intro and `about` use the OS name only.
+    bool standalone = false;
     std::string cwd = "/home/guest";
     std::map<std::string, std::string> env;
     int lastStatus = 0;

@@ -324,3 +324,13 @@ if(BUILD_TESTING)
         message(STATUS "Set TEST_FONT_FILE to enable font-dependent atlas and rendering tests")
     endif()
 endif()
+
+# mattrix needs no SDL: its terminal test runs wherever the PTY adapter does.
+if(TARGET mattrix AND TARGET ptylink)
+    add_executable(mattrixtty_test mattrixtty_test.cpp mls-unit-test/test_main.cpp)
+    target_link_libraries(mattrixtty_test PRIVATE matterm::ptylink)
+    target_compile_definitions(mattrixtty_test PRIVATE MATTRIX_BINARY="$<TARGET_FILE:mattrix>")
+    add_dependencies(mattrixtty_test mattrix)
+    add_test(NAME mattrix_tty COMMAND mattrixtty_test)
+    set_tests_properties(mattrix_tty PROPERTIES TIMEOUT 60)
+endif()

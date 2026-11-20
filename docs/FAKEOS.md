@@ -201,6 +201,20 @@ own files) and a 21-inch CRT at 2048x1536.
   locale. It refuses to run unless stdin and stdout are terminals, and opens
   nothing but them. Tested under a pseudo-terminal (`test/demotty_test.cpp`).
 
+- **`mattrix`** (`app/mattrix/main.cpp`, POSIX only): the same terminal host
+  as `--tty` (`app/demo/ttyhost.cpp`) with its own `main`, linked against fakeos
+  only, so it builds without SDL (`MATTERM_BUILD_MATTRIX`, on by default, installed
+  to `bin/`). `Config::standalone` brands it as Mattrix OS: the intro banner says
+  MATTRIX with its own taglines, the prompt is `guest@mattrix`, `about` does not
+  describe matterm; the demos keep "powered by matterm". Options: `--help`,
+  `--no-intro`, `--no-reveal`, `--cmd`, `--seed`; no sound. Without a renderer the
+  intro's fades are just colors that follow the terminal: truecolor, nearest of 256,
+  or the 16 basic ones; the smooth cursor does not apply. The terminal's real
+  background is unknown, so the intro fades to the matterm palette's gray. Inside
+  matterm the environment (`TERM`, `COLORTERM=truecolor`) is set by its PTY, and
+  detection works as for any terminal. Tested under a pseudo-terminal
+  (`test/mattrixtty_test.cpp`) and with `test/fakeos_standalone_test.cpp`.
+
 ### Adding things
 
 - **A command**: write the function in `commands.cpp` and add a row to the table.
