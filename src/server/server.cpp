@@ -229,6 +229,7 @@ private:
             const bool matched = shared_->password.verify(
                 password ? std::string_view(*password) : std::string_view(""));
             if (password)
+                // NOLINTNEXTLINE(clang-analyzer-cplusplus.InnerPointer): false positive, the string_view above is dead here
                 sodium_memzero(password->data(), password->size());
             sodium_memzero(request.body().data(), request.body().size());
             request.body().clear();

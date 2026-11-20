@@ -30,12 +30,12 @@ struct PtySession::Impl {
     Impl(const std::vector<std::string> &arguments,
          int columns,
          int rows,
-         VtEvents events,
+         VtEvents handlers,
          const std::string &term,
          PtyProcess::ColorCapability color)
         : model(validated(columns), validated(rows), 1000)
         , link(arguments, columns, rows, term, color)
-        , events(std::move(events))
+        , events(std::move(handlers))
         , parser(model,
                  {[this](std::string_view bytes) {
                       if (!link.sendInput(bytes)) {
@@ -51,9 +51,9 @@ struct PtySession::Impl {
                       }
                   },
                   this->events.palette,
-                  [this](std::size_t index, Rgb8 color) {
+                  [this](std::size_t index, Rgb8 rgb) {
                       if (this->events.setPaletteColor) {
-                          this->events.setPaletteColor(index, color);
+                          this->events.setPaletteColor(index, rgb);
                       }
                   },
                   [this](std::optional<std::size_t> index) {

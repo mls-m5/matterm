@@ -13,7 +13,7 @@ void signalReceived(int value) {
 }
 void ready() {
     std::puts("READY");
-    std::fflush(stdout);
+    (void)std::fflush(stdout);
 }
 } // namespace
 
@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
         }
         if (queryColors) {
             std::printf("\x1b]11;?\x07");
-            std::fflush(stdout);
+            (void)std::fflush(stdout);
             for (const char expected : "\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\") {
                 if (expected && std::getchar() != expected) {
                     return 101;
@@ -94,7 +94,7 @@ int main(int argc, char **argv) {
             return 0;
         }
         std::printf("\x1b[2J\x1b[H\x1b[32mmatterm PTY\x1b[0m\r\n\x1b[6n");
-        std::fflush(stdout);
+        (void)std::fflush(stdout);
         char response[64]{};
         std::size_t size = 0;
         while (size + 1 < sizeof(response)) {

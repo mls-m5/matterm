@@ -2222,7 +2222,7 @@ int cmdNeofetch(World &w, const Args &, CommandIo &io) {
                                                        "\x1b[1;92m",
                                                        "\x1b[31m",
                                                        "\x1b[0m"};
-                        left += colors[int(c)];
+                        left += colors[static_cast<unsigned char>(c)];
                     }
                 }
                 else {

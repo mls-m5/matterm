@@ -1,5 +1,6 @@
 #include "keys.h"
 
+#include <algorithm>
 #include <cstdlib>
 
 namespace fakeos {
@@ -58,7 +59,12 @@ void KeyDecoder::finishCsi(std::vector<Key> &out) {
         const auto end = args.find(';', begin);
         const auto text = args.substr(
             begin, end == std::string::npos ? std::string::npos : end - begin);
-        return text.empty() ? fallback : std::atoi(text.c_str());
+        if (text.empty()) {
+            return fallback;
+        }
+        // Parameters come from the (untrusted) terminal input: clamp, never overflow.
+        const long value = std::strtol(text.c_str(), nullptr, 10);
+        return int(std::clamp(value, 0L, 100000L));
     };
     if (!args.empty() && args[0] == '<' && (final == 'M' || final == 'm')) {
         args.erase(0, 1);

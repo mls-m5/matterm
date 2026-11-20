@@ -468,7 +468,7 @@ void System::handleShellKey(const Key &key) {
         complete();
         break;
     case T::Ctrl: {
-        const char c = key.text.empty() ? 0 : key.text[0];
+        const char c = key.text.empty() ? char(0) : key.text[0];
         if (c == 'c') {
             out_ += "^C\r\n";
             showPrompt();

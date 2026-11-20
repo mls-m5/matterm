@@ -35,9 +35,9 @@ TEST_CASE("find, list and files") {
     EXPECT(fs.find("/home/guest/missing") == nullptr);
     EXPECT(fs.find("/home/guest/a.txt/x") == nullptr);
     EXPECT(fs.find("/")->directory);
-    const auto entries = fs.list("/home/guest");
-    EXPECT_EQ(entries.size(), std::size_t(1));
-    EXPECT(entries[0].first == "a.txt");
+    const auto listed = fs.list("/home/guest");
+    EXPECT_EQ(listed.size(), std::size_t(1));
+    EXPECT(listed[0].first == "a.txt");
 }
 
 TEST_CASE("Writing, appending and permissions") {

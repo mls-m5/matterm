@@ -41,7 +41,7 @@ Rgb cornerBackground(const Pc &pc) {
     const auto &bg = pc.model.cell(0, 0).background;
     return {bg.r, bg.g, bg.b};
 }
-int brightness(const Pc &pc, std::size_t from = 0, std::size_t to = 99) {
+[[maybe_unused]] int brightness(const Pc &pc, std::size_t from = 0, std::size_t to = 99) {
     int most = 0;
     for (std::size_t y = from; y < to && y < pc.model.rows(); ++y) {
         for (std::size_t x = 0; x < pc.model.columns(); ++x) {
