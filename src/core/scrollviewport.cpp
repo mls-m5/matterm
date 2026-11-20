@@ -26,6 +26,16 @@ void ScrollViewport::scrollBy(double rows) {
     }
     // Clamp the delta before adding, avoiding overflow for extreme inputs.
     target_ += std::clamp(rows, -target_, maxOffset() - target_);
+    // A drag down and the same drag back up sum to zero only up to rounding;
+    // a residue of 1e-16 rows would leave the view "scrolled" (no live cursor,
+    // a scrollbar) for good. Positions that close to an end are that end.
+    constexpr double kSnapRows = 1e-6;
+    if (target_ < kSnapRows) {
+        target_ = 0;
+    }
+    else if (maxOffset() - target_ < kSnapRows) {
+        target_ = maxOffset();
+    }
 }
 
 void ScrollViewport::oldest() {
