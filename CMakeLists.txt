@@ -54,6 +54,14 @@ target_compile_features(ttytransport PUBLIC cxx_std_17)
 target_include_directories(ttytransport PUBLIC src/transport)
 target_link_libraries(ttytransport PUBLIC matterm::protocol)
 
+# chat: the pure core of the chat (text rules, room, client). No I/O, clock or
+# process access (enforced by test/check_fakeos_includes.cmake pointed at it).
+file(GLOB CHAT_SOURCES CONFIGURE_DEPENDS src/chat/*.cpp)
+add_library(chatcore ${CHAT_SOURCES})
+add_library(matterm::chat ALIAS chatcore)
+target_compile_features(chatcore PUBLIC cxx_std_17)
+target_include_directories(chatcore PUBLIC src/chat)
+
 # fakeos: a pretend Unix system with ASCII animations. Pure C++17 with no I/O,
 # clock or process access (enforced by test/check_fakeos_includes.cmake), so the
 # same core runs in the browser, in the native window and in a plain terminal.
@@ -62,6 +70,7 @@ add_library(fakeos ${FAKEOS_SOURCES})
 add_library(matterm::fakeos ALIAS fakeos)
 target_compile_features(fakeos PUBLIC cxx_std_17)
 target_include_directories(fakeos PUBLIC src/fakeos)
+target_link_libraries(fakeos PUBLIC matterm::chat) # The chat program.
 # The `about` command prints numbers counted from the repository: a build step
 # writes them to a header (cmake/AboutStats.cmake), so they match what was built.
 set(FAKEOS_ABOUT_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/fakeos_about_stats.h)
@@ -72,14 +81,6 @@ add_custom_target(fakeos_aboutstats
     COMMENT "Counting the repository for `about`")
 add_dependencies(fakeos fakeos_aboutstats)
 target_include_directories(fakeos PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
-
-# chat: the pure core of the chat (text rules, room, client). No I/O, clock or
-# process access (enforced by test/check_fakeos_includes.cmake pointed at it).
-file(GLOB CHAT_SOURCES CONFIGURE_DEPENDS src/chat/*.cpp)
-add_library(chatcore ${CHAT_SOURCES})
-add_library(matterm::chat ALIAS chatcore)
-target_compile_features(chatcore PUBLIC cxx_std_17)
-target_include_directories(chatcore PUBLIC src/chat)
 
 add_library(utf8decoder src/terminal/vt/utf8decoder.cpp)
 add_library(matterm::utf8 ALIAS utf8decoder)

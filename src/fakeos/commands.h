@@ -31,6 +31,8 @@ struct CommandInfo {
 
 const std::vector<CommandInfo> &commands();
 const CommandInfo *findCommand(const std::string &name);
+// Whether the command exists in this world (`chat` needs a configured server).
+bool commandAvailable(const World &w, const CommandInfo &c);
 
 // Text helpers shared with the shell.
 std::string unixDate(std::int64_t seconds, const char *format); // UTC.
