@@ -209,15 +209,16 @@ TEST_CASE("Concurrent upgrades are bounded and releasing a socket makes its "
     Client first, second;
     first.connect(fixture, cookie);
     second.connect(fixture, cookie);
-    bool refused = false;
-    try {
-        Client third;
-        third.connect(fixture, cookie);
-    }
-    catch (const boost::system::system_error &) {
-        refused = true;
-    }
-    EXPECT(refused);
+    first.send(protocol::Hello{});
+    second.send(protocol::Hello{});
+    EXPECT(std::holds_alternative<protocol::Welcome>(first.read()));
+    EXPECT(std::holds_alternative<protocol::Welcome>(second.read()));
+    Client third;
+    third.connect(fixture,
+                  cookie); // Pending Hello is bounded by unauthenticated cap.
+    third.send(protocol::Hello{});
+    const auto error = std::get<protocol::Error>(third.read());
+    EXPECT(error.code == protocol::ErrorCode::LimitExceeded);
     drop(first);
     std::this_thread::sleep_for(std::chrono::milliseconds(40));
     Client replacement;

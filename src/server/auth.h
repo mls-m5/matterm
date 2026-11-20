@@ -37,6 +37,9 @@ public:
     std::string issue();
     bool valid(std::string_view token, bool touch = true);
     bool claim(std::string_view token);
+    // Internal lease admission after a previously authenticated upgrade's
+    // Hello. A generation-matched takeover may transiently transfer one slot.
+    bool claimGeneration(std::uint64_t generation, bool transfer = false);
     void release(std::uint64_t generation);
     void revoke();
     std::uint64_t generation() const {

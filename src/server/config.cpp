@@ -386,6 +386,22 @@ std::vector<Field> topLevelFields(Settings &s) {
         {"static_dir", text(c.staticDir)},
         {"trusted_proxy", text(c.trustedProxy)},
         {"trusted_proxy_hops", integer(c.trustedProxyHops, 0, 16)},
+        {"persistent_sessions", boolean(c.registry.persistentSessions)},
+        {"replay_buffer_bytes",
+         integer(c.registry.replayBufferBytes, 0, 1073741824)},
+        {"replay_total_bytes",
+         integer(c.registry.replayTotalBytes, 0, 1073741824)},
+        {"max_sessions", integer(c.registry.maxSessions, 1, 1024)},
+        {"max_detached_sessions",
+         integer(c.registry.maxDetachedSessions, 0, 1024)},
+        {"max_upgrades_per_login",
+         integer(c.auth.maxUpgradesPerLogin, 1, 65535)},
+        {"detached_timeout_seconds",
+         [&c](const Member &m) {
+             c.registry.detachedTimeout =
+                 std::chrono::duration_cast<protocol::Time>(
+                     std::chrono::seconds(integerOf(m, 0, 31536000)));
+         }},
         {"max_connections", integer(c.maxConnections, 1, 65535)},
         {"max_unauthenticated", integer(c.maxUnauthenticated, 1, 65535)},
         {"rate_limit", section([&c] { return rateLimitFields(c.rateLimit); })},
@@ -535,6 +551,12 @@ void validateSettings(const Settings &settings) {
     if (c.rateLimit.lockoutMax < c.rateLimit.lockoutInitial)
         throw ConfigError("rate_limit.lockout_max_seconds: must not be less "
                           "than rate_limit.lockout_initial_seconds");
+    if (c.registry.maxDetachedSessions > c.registry.maxSessions)
+        throw ConfigError(
+            "max_detached_sessions: must not exceed max_sessions");
+    if (c.registry.replayBufferBytes > c.registry.replayTotalBytes)
+        throw ConfigError(
+            "replay_buffer_bytes: must not exceed replay_total_bytes");
     if (c.process.arguments.empty())
         throw ConfigError("process.arguments: must name a program");
 }
@@ -640,6 +662,14 @@ std::string printConfig(const Settings &settings) {
     w.member("allow_plain_http", c.allowPlainHttp);
     w.member("trusted_proxy", c.trustedProxy);
     w.member("trusted_proxy_hops", c.trustedProxyHops);
+    w.member("persistent_sessions", c.registry.persistentSessions);
+    w.member("replay_buffer_bytes", c.registry.replayBufferBytes);
+    w.member("replay_total_bytes", c.registry.replayTotalBytes);
+    w.member("max_sessions", c.registry.maxSessions);
+    w.member("max_detached_sessions", c.registry.maxDetachedSessions);
+    w.member("max_upgrades_per_login", c.auth.maxUpgradesPerLogin);
+    w.member("detached_timeout_seconds",
+             c.registry.detachedTimeout.count() / 1000);
     if (!settings.credentialsPath.empty())
         w.member("credentials", settings.credentialsPath);
     w.member("password_hash", c.passwordHash.empty() ? hashUnset : hashSet);

@@ -21,6 +21,11 @@ public:
     struct Transport {
         std::function<void(std::string)> send;
         std::function<void(int)> close;
+        // HTTP layer lease callbacks; CPU-only users may leave these empty.
+        // transfer is true only for a same-login live attachment replacement.
+        std::function<bool(bool transfer)> admit;
+        std::function<void()> release;
+        std::uint64_t authGeneration = 0;
     };
     struct Attachment {
         std::string id;
@@ -37,6 +42,7 @@ public:
     void detach(const Attachment &, protocol::Time now);
     void fail(const Attachment &, protocol::Time now);
     void tick(protocol::Time now);
+    std::optional<protocol::Time> nextDeadline() const;
     void closeAll(protocol::Time now);
     std::size_t size() const;
     std::size_t detachedSize() const;

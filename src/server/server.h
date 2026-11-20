@@ -1,6 +1,7 @@
 #pragma once
 #include "auth.h"
 #include "ptysessionhost.h"
+#include "sessionregistry.h"
 #include <utility>
 
 #include <boost/asio/io_context.hpp>
@@ -18,6 +19,7 @@ struct ServerConfig {
     RateLimitConfig rateLimit;
     AuthConfig auth;
     ProcessConfig process;
+    RegistryConfig registry;
     unsigned maxUnauthenticated = 16;
     unsigned maxConnections = 32;
     // Directory of the browser client (the web/ build output). Its regular

@@ -92,6 +92,8 @@ struct Entry : SessionHost {
     }
     void detach(Time now) {
         attached = false;
+        if (transport.release)
+            transport.release();
         transport = {};
         detachedAt = now;
         auto old = session;
@@ -251,6 +253,11 @@ std::optional<SessionRegistry::Attachment> SessionRegistry::attach(
                 [&](const auto &t) { return t.id == hello.sessionId; });
             if (dead != impl_->tombstones.end() &&
                 hello.resumeOffset <= dead->end) {
+                if (transport.admit && !transport.admit(false)) {
+                    reject(
+                        transport, ErrorCode::LimitExceeded, "upgrade limit");
+                    return {};
+                }
                 emit(transport,
                      Welcome{1, dead->id, dead->end, 3, featureReplay});
                 emit(transport, Exit{dead->code, dead->signal});
@@ -304,13 +311,20 @@ std::optional<SessionRegistry::Attachment> SessionRegistry::attach(
                              [&](const auto &t) { return t.id == id; }));
         entry = std::make_shared<Entry>(
             id, capable, impl_->config.replayBufferBytes, impl_->process);
-        impl_->entries.emplace(id, entry);
     }
     if (entry->generation == std::numeric_limits<std::uint64_t>::max()) {
         reject(transport, ErrorCode::Internal, "attachment limit");
         return {};
     }
     const auto previous = entry->attached ? entry->transport : Transport{};
+    const bool transfer =
+        previous.release && previous.authGeneration == transport.authGeneration;
+    if (transport.admit && !transport.admit(transfer)) {
+        reject(transport, ErrorCode::LimitExceeded, "upgrade limit");
+        return {};
+    }
+    if (!resume)
+        impl_->entries.emplace(entry->id, entry);
     ++entry->generation; // Fence old events before closing its transport.
     entry->transport = std::move(transport);
     entry->attached = true;
@@ -322,6 +336,8 @@ std::optional<SessionRegistry::Attachment> SessionRegistry::attach(
     config.welcomeFlags = flags;
     config.resume = resume;
     entry->session = std::make_shared<ServerSession>(config, *entry);
+    if (previous.release)
+        previous.release();
     if (previous.send || previous.close)
         reject(previous, ErrorCode::Replaced, "session taken over");
     auto current = entry->session;
@@ -347,8 +363,11 @@ void SessionRegistry::detach(const Attachment &a, Time now) {
     }
 }
 void SessionRegistry::fail(const Attachment &a, Time now) {
-    if (const auto entry = impl_->find(a))
-        entry->stop(now);
+    if (const auto entry = impl_->find(a)) {
+        entry->terminateProcess();
+        if (const auto current = entry->session)
+            current->onTransportClosed(now);
+    }
 }
 void SessionRegistry::tick(Time now) {
     for (auto it = impl_->entries.begin(); it != impl_->entries.end();) {

@@ -81,6 +81,7 @@ struct Shared {
     ProxySource proxy;
     RateLimiter limiter;
     SessionStore sessions;
+    SessionRegistry registry;
     unsigned connections = 0, unauthenticated = 0;
     std::array<unsigned char, crypto_shorthash_KEYBYTES> auditKey{};
     std::string auditSource(const std::string &source) const {
@@ -99,7 +100,8 @@ struct Shared {
         , password(config.passwordHash)
         , proxy(config.trustedProxy, config.trustedProxyHops)
         , limiter(config.rateLimit)
-        , sessions(config.auth) {
+        , sessions(config.auth)
+        , registry(config.registry, config.process, config.session) {
         randombytes_buf(auditKey.data(), auditKey.size());
     }
 };
@@ -108,12 +110,7 @@ public:
     Connection(tcp::socket socket, std::shared_ptr<Shared> shared)
         : socket_(std::move(socket))
         , timer_(socket_.get_executor())
-        , shared_(std::move(shared))
-        , host_(
-              shared_->config.process,
-              [this](std::string bytes) { send(std::move(bytes)); },
-              [this](int code) { close(code); })
-        , session_(shared_->config.session, host_) {
+        , shared_(std::move(shared)) {
         const auto address = beast::get_lowest_layer(socket_)
                                  .socket()
                                  .remote_endpoint()
@@ -281,6 +278,29 @@ private:
             }
             return;
         }
+        if (request.method() == http::verb::post &&
+            (request.target() == "/logout" ||
+             request.target() == "/sessions/close-all")) {
+            const auto token =
+                request.count(http::field::cookie) == 1
+                    ? sessionCookie(view(request[http::field::cookie]))
+                    : std::nullopt;
+            if (!token || !shared_->sessions.valid(*token)) {
+                response(http::status::unauthorized, "Unauthorized\n");
+                return;
+            }
+            shared_->registry.closeAll(timeNow());
+            if (request.target() == "/logout") {
+                shared_->sessions.revoke();
+                response(http::status::ok,
+                         "Logged out\n",
+                         "matterm_session=; Max-Age=0; HttpOnly; Secure; "
+                         "SameSite=Strict; Path=/");
+            }
+            else
+                response(http::status::ok, "Sessions closed\n");
+            return;
+        }
         if (request.method() == http::verb::get && request.target() == "/ws" &&
             ws::is_upgrade(request)) {
             if (request.count(http::field::cookie) != 1 ||
@@ -292,7 +312,7 @@ private:
             }
             const auto token =
                 sessionCookie(view(request[http::field::cookie]));
-            if (!token || !shared_->sessions.claim(*token)) {
+            if (!token || !shared_->sessions.valid(*token)) {
                 response(http::status::unauthorized, "Unauthorized\n");
                 return;
             }
@@ -323,10 +343,10 @@ private:
                 request, [self = shared_from_this()](beast::error_code ec) {
                     if (ec)
                         return;
-                    self->authenticated_ = true;
-                    --self->shared_->unauthenticated;
                     self->parser_.get() = {};
-                    self->session_.start(timeNow());
+                    self->helloDeadline_ =
+                        Clock::now() +
+                        self->shared_->config.session.helloTimeout;
                     self->read();
                     self->schedule();
                 });
@@ -339,10 +359,18 @@ private:
             buffer_,
             [self = shared_from_this()](beast::error_code ec, std::size_t) {
                 if (ec) {
+                    if (self->attachment_ &&
+                        (ec == ws::error::message_too_big ||
+                         ec == ws::condition::protocol_violation))
+                        self->shared_->registry.fail(*self->attachment_,
+                                                     timeNow());
                     self->disconnected();
                     return;
                 }
                 if (!self->socket_.got_binary()) {
+                    if (self->attachment_)
+                        self->shared_->registry.fail(*self->attachment_,
+                                                     timeNow());
                     self->close(1002);
                     return;
                 }
@@ -355,14 +383,74 @@ private:
                     beast::buffers_to_string(self->buffer_.data());
                 self->buffer_.consume(self->buffer_.size());
                 try {
-                    self->session_.onMessage(bytes, timeNow());
+                    if (self->attachment_) {
+                        self->shared_->registry.onMessage(
+                            *self->attachment_, bytes, timeNow());
+                    }
+                    else {
+                        const auto decoded = protocol::decodeClient(bytes);
+                        if (!decoded ||
+                            !std::holds_alternative<protocol::Hello>(
+                                *decoded.message)) {
+                            self->protocolError(protocol::ErrorCode::BadMessage,
+                                                "expected Hello");
+                        }
+                        else {
+                            std::weak_ptr<Connection> weak = self;
+                            SessionRegistry::Transport transport{
+                                [weak](std::string data) {
+                                    if (const auto s = weak.lock())
+                                        s->send(std::move(data));
+                                },
+                                [weak](int code) {
+                                    if (const auto s = weak.lock())
+                                        s->close(code);
+                                },
+                                [weak](bool transfer) {
+                                    const auto s = weak.lock();
+                                    if (!s ||
+                                        !s->shared_->sessions.claimGeneration(
+                                            s->generation_, transfer))
+                                        return false;
+                                    s->lease_ = true;
+                                    s->authenticated_ = true;
+                                    --s->shared_->unauthenticated;
+                                    return true;
+                                },
+                                [weak] {
+                                    if (const auto s = weak.lock())
+                                        s->releaseLease();
+                                },
+                                self->generation_};
+                            self->attachment_ = self->shared_->registry.attach(
+                                std::get<protocol::Hello>(*decoded.message),
+                                std::move(transport),
+                                timeNow());
+                        }
+                    }
                 }
                 catch (const std::exception &) {
+                    if (self->attachment_)
+                        self->shared_->registry.fail(*self->attachment_,
+                                                     timeNow());
                     self->close(1011);
                 }
                 if (!self->closing_ && !self->dead_)
                     self->read();
             });
+    }
+    void releaseLease() {
+        if (lease_) {
+            shared_->sessions.release(generation_);
+            lease_ = false;
+        }
+    }
+    void protocolError(protocol::ErrorCode code, const char *reason) {
+        std::string bytes;
+        protocol::encode(protocol::ServerMessage{protocol::Error{code, reason}},
+                         bytes);
+        send(std::move(bytes));
+        close(protocol::closeCodeFor(code));
     }
     void send(std::string bytes) {
         if (dead_ || closing_)
@@ -397,7 +485,9 @@ private:
             return;
         closing_ = true;
         closeCode_ = code;
-        session_.onTransportClosed(timeNow());
+        closeDeadline_ =
+            Clock::now() + shared_->config.webSocketHandshakeTimeout;
+        releaseLease();
         if (queue_.empty())
             finishClose();
     }
@@ -412,39 +502,33 @@ private:
         if (dead_)
             return;
         dead_ = true;
-        session_.onTransportClosed(timeNow());
-        // Keep ownership until the grace period ends, then the host destructor
-        // closes the PTY and reaps even a HUP-ignoring child.
-        cleanupAt_ = Clock::now() + shared_->config.process.terminationGrace +
-                     std::chrono::seconds(1);
+        if (attachment_)
+            shared_->registry.detach(*attachment_, timeNow());
+        releaseLease();
+        timer_.cancel();
         beast::error_code ignored;
         beast::get_lowest_layer(socket_).socket().close(ignored);
     }
     void schedule() {
-        if (dead_ && (host_.finished() || Clock::now() >= cleanupAt_))
+        if (dead_)
             return;
-        auto delay = protocol::Time(10);
-        if (!dead_) {
-            const auto deadline = session_.nextDeadline();
-            if (deadline)
-                delay = std::min(
-                    delay, std::max(protocol::Time(0), *deadline - timeNow()));
-        }
-        timer_.expires_after(delay);
+        timer_.expires_after(protocol::Time(10));
         timer_.async_wait([self = shared_from_this()](beast::error_code ec) {
             if (ec)
                 return;
-            try {
-                if (!self->dead_) {
-                    if (!self->shared_->sessions.attachedValid(
-                            self->generation_, false))
-                        self->close(1008);
-                    self->session_.tick(timeNow());
-                }
-                self->host_.pump(self->session_, timeNow());
+            if (self->closing_) {
+                if (Clock::now() >= self->closeDeadline_)
+                    self->disconnected();
             }
-            catch (const std::exception &) {
-                self->disconnected();
+            else if (!self->shared_->sessions.attachedValid(self->generation_,
+                                                            false)) {
+                self->close(1008); // Cookie rotation/expiry detaches, never
+                                   // transfers old rights.
+            }
+            else if (!self->attachment_ &&
+                     Clock::now() >= self->helloDeadline_) {
+                self->protocolError(protocol::ErrorCode::Timeout,
+                                    "expected Hello");
             }
             self->schedule();
         });
@@ -455,25 +539,26 @@ private:
     beast::flat_buffer buffer_{32768};
     http::request_parser<http::string_body> parser_;
     std::optional<http::response<http::string_body>> response_;
-    PtySessionHost host_;
-    protocol::ServerSession session_;
+    std::optional<SessionRegistry::Attachment> attachment_;
     std::deque<std::string> queue_;
     std::size_t queuedBytes_ = 0;
     std::string source_;
     net::ip::address peer_;
     bool loopback_ = false, authenticated_ = false, closing_ = false,
-         dead_ = false;
+         dead_ = false, lease_ = false;
     int closeCode_ = 1000;
     std::uint64_t generation_ = 0;
-    Clock::time_point cleanupAt_{};
+    Clock::time_point helloDeadline_{}, closeDeadline_{};
 };
 } // namespace
 struct Server::Impl : std::enable_shared_from_this<Impl> {
     tcp::acceptor acceptor;
+    net::steady_timer pumpTimer;
     std::shared_ptr<Shared> shared;
     bool started = false;
     Impl(net::io_context &io, ServerConfig config)
-        : acceptor(io) {
+        : acceptor(io)
+        , pumpTimer(io) {
         if (::geteuid() == 0)
             throw std::runtime_error("matterm-server refuses to run as root");
         const auto address = net::ip::make_address(config.address);
@@ -499,6 +584,20 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
         acceptor.set_option(net::socket_base::reuse_address(true));
         acceptor.bind({address, shared->config.port});
         acceptor.listen(16);
+    }
+    void pump() {
+        pumpTimer.expires_after(protocol::Time(10));
+        pumpTimer.async_wait([self = shared_from_this()](beast::error_code ec) {
+            if (ec || !self->acceptor.is_open())
+                return;
+            try {
+                self->shared->registry.tick(timeNow());
+            }
+            catch (const std::exception &) {
+                self->shared->registry.closeAll(timeNow());
+            }
+            self->pump();
+        });
     }
     void accept() {
         acceptor.async_accept([self = shared_from_this()](beast::error_code ec,
@@ -529,11 +628,13 @@ Server::Server(net::io_context &io, ServerConfig config)
 Server::~Server() {
     beast::error_code ignored;
     impl_->acceptor.close(ignored);
+    impl_->pumpTimer.cancel();
 }
 void Server::start() {
     if (!impl_->started) {
         impl_->started = true;
         impl_->accept();
+        impl_->pump();
     }
 }
 unsigned short Server::port() const {
