@@ -1,8 +1,11 @@
 # Chat in Mattrix OS (plan, nothing is built yet)
 
-Status: **plan, decisions recorded.** Nothing here has been built or run;
-unverified points are marked **UNVERIFIED**. Ergo (IRC) remains a fallback and its
-checked settings are kept in Appendix A.
+Status: **decisions recorded; the server, the client core, the terminal view and
+`mattrix-chat` are built and tested locally** (section 12). Not built yet: the web
+bridge and the `chat` command in Mattrix OS (nothing about chat is shown on the
+Pages demo until a server address is configured), the Podman image and TLS in the
+native client. Unverified points are marked **UNVERIFIED**. Ergo (IRC) remains a
+fallback and its checked settings are kept in Appendix A.
 
 ## 0. Decisions so far
 
@@ -75,7 +78,7 @@ Client to server:
 * `nick<TAB>NAME`: rename.
 
 Server to client:
-* `welcome<TAB>NAME`, `users<TAB>a,b,c`, then `hist<TAB>SERIAL<TAB>AGE_S<TAB>NAME<TAB>TEXT` per kept message, then `ready`.
+* `welcome<TAB>NAME`, one or more `users<TAB>a,b,c` lines (a long list is split to stay inside the frame limit), then `hist<TAB>SERIAL<TAB>AGE_S<TAB>NAME<TAB>TEXT` per kept message, then `ready`.
 * `draft<TAB>NAME<TAB>TEXT`, `gone<TAB>NAME` (someone else's live bubble; coalesced, only the 6 most recently active typers are forwarded, the rest are counted: `typers<TAB>N`).
 * `msg<TAB>SERIAL<TAB>NAME<TAB>TEXT`: a locked message (for everyone, also the author).
 * `ack<TAB>B<TAB>SERIAL<TAB>TEXT`: to the author only: bubble `B` was locked as `TEXT`.
@@ -107,9 +110,9 @@ duplicate is better than lost typing).
 
 ## 4. Live typing
 
-* The server holds **one draft per connection** in a preallocated table (64
-  connections x 200 characters, about 13 KiB); nothing grows. Drafts never enter
-  the ring until locked.
+* The server holds **one draft per connection**, at most 200 characters (about 13
+  KiB for 64 connections); the validator bounds it, and the ring has a fixed
+  number of slots. Drafts never enter the ring until locked.
 * Traffic: each connection's drafts are limited to about 3 per second (extra ones
   are coalesced silently, a flood of more than about 10 per second is a
   violation); only changed drafts are forwarded; at most 6 typers are forwarded
@@ -285,24 +288,16 @@ it from inside Mattrix OS (host-provided channel versus a host hook that launche
 the program) is decided later; the fakeos core opens no sockets. A chat-only web
 view and an always-online bot are later too.
 
-## 9. Build order (when told to start)
+## 9. Build order
 
-1. **Validator** (`chatText`, `chatName`): table tests, fuzz; shared.
-2. **`ChatRoom` core** with scripted tests: join/leave, names, caps, token
-   buckets with an injected clock, the draft table, locking rules (bubble
-   numbers, duplicates, the 6.5 s backstop), ring eviction and TTL, kick/ban/mute,
-   slow readers, malformed lines, fuzz of the line parser.
-3. **Line codec** with strict fuzz.
-4. **`ChatClient`** with the scripted channel; end to end with `ChatRoom` in
-   process (no sockets): two clients, drafts, locks, `ack` prefix cutting,
-   `not sent`, hostile text never reaching the screen model.
-5. **Live-region renderer** and the chat screen, tested with the `Pc` harness
-   at several sizes, with resize, color degradation and hostile text.
-6. **`chatd`** (Beast adapter, admin console); loopback integration test with a
-   real socket (plain `ws://`).
-7. Web bridge and the `chat` command in fakeos (off by default, the notice).
-8. Podman image and the proxy snippet; measurements of draft traffic.
-9. `mattrix-chat` (program host split; TLS later).
+Done (each with tests; see the commits): 1. the validator (`chattext`), 2. the
+`ChatRoom` core, 3. the line codec (`chatproto`), 4. `ChatClient`, 5. the view
+(bubbles, editor, inline live region), 6. `chatd` (Beast WebSocket with origin
+allowlist, plus the loopback-only TCP test listener, operator console), 7.
+`mattrix-chat` (TCP and plain WebSocket) with pseudo-terminal tests against a real
+`chatd`. Next, in this order: 8. the web bridge and the hidden `chat` command in
+fakeos (off until a server address is configured), 9. the Podman image and the
+proxy snippet, with measurements of draft traffic, 10. TLS in the native client.
 
 ## 10. Still open
 
@@ -318,12 +313,52 @@ view and an always-online bot are later too.
 
 ## 11. Not verified
 
-* Nothing was built or run.
+* Run only locally and in tests (section 12): no browser, no proxy, no TLS, no Podman.
 * Beast calls named above (`read_message_max`, no deflate, `got_text`) are from
   memory of its API; check against the installed version.
 * The inline live-region approach, draft traffic estimates and the Podman
   hardening are untried.
 * All numbers are proposals.
+
+## 12. Running it locally
+
+Needs Boost 1.74 or newer (header-only parts) and a C++17 compiler; `cmake -S . -B
+build && cmake --build build` builds `build/chatd` and `build/mattrix-chat`
+(`-DMATTERM_BUILD_CHATD=OFF` skips them). Nothing leaves the machine.
+
+```sh
+# Terminal 1: the server. The plain TCP listener is for testing and refuses any
+# address that is not loopback; WebSocket needs an allowed origin.
+build/chatd --origin http://localhost:8080 --listen 127.0.0.1:8097 \
+            --test-tcp 127.0.0.1:8098 --console
+#   operator commands in the same terminal: help, list, stats, say TEXT, kick NAME,
+#   ban NAME|SOURCE [min], mute NAME [min], delete SERIAL, clear, lock, unlock
+
+# Terminals 2 and 3: two people
+build/mattrix-chat --tcp 127.0.0.1:8098 --name ada
+build/mattrix-chat --tcp 127.0.0.1:8098 --name bo
+#   over WebSocket instead (no TLS here; the Origin must be an allowed one):
+build/mattrix-chat --ws 127.0.0.1:8097 --origin http://localhost:8080 --name cy
+
+# Poke the protocol by hand (fields are separated by a TAB):
+printf 'hello\tmallory\n' | nc 127.0.0.1 8098
+```
+
+The program first prints what it is and asks `Connect? [y/N]` (`--yes` skips the
+question). Type: the others see your draft live; Enter sends at once and five quiet
+seconds send too; `/nick NAME`, `/who`, `/help`, Ctrl-C leaves. For several
+simulated people, a few lines of Python with `socket` and `\t` do (send
+`hello\tNAME`, then `draft\t1\ttext` and `lock\t1`); `chatd_test` and
+`chatterm_test` (in `test/`) show the same with real sockets and with pseudo-
+terminals.
+
+What the tests cover: two and more clients over TCP and WebSocket, hostile lines
+refused and never relayed, a flood and an over-long line ending the connection, a
+name taken until its owner leaves, per-source caps and a locked room, the origin
+allowlist, binary and oversized frames, unsafe options refused, and `mattrix-chat`
+in real pseudo-terminals (live drafts, Enter, the five-second pause, Ctrl-C, no
+color, taken names, a refused connection). **Not tested:** real browsers, TLS and
+a reverse proxy, many hundreds of connections, long-running soak, Podman.
 
 ---
 
