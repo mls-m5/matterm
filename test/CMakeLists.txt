@@ -116,6 +116,14 @@ if(BUILD_TESTING)
         COMMAND ${CMAKE_COMMAND} -DFAKEOS_DIR=${PROJECT_SOURCE_DIR}/src/fakeos
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/check_fakeos_includes.cmake)
 
+    file(GLOB CHAT_TESTS CONFIGURE_DEPENDS chat_*_test.cpp)
+    add_executable(chat_test ${CHAT_TESTS} mls-unit-test/test_main.cpp)
+    target_link_libraries(chat_test PRIVATE matterm::chat)
+    add_test(NAME chat COMMAND chat_test)
+    add_test(NAME chat_includes
+        COMMAND ${CMAKE_COMMAND} -DFAKEOS_DIR=${PROJECT_SOURCE_DIR}/src/chat
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/check_fakeos_includes.cmake)
+
     add_executable(pipsynth_test pipsynth_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(pipsynth_test PRIVATE ${PROJECT_SOURCE_DIR}/app/demo)
     add_test(NAME pip_synth COMMAND pipsynth_test)
