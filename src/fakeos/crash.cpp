@@ -1,3 +1,4 @@
+#include "color.h"
 #include "programs.h"
 
 #include <algorithm>
@@ -9,10 +10,13 @@ namespace {
 // A machine that lost its disk: a black screen, a search for a boot device, and
 // a message with a blinking cursor. It restarts by itself, or at a key once the
 // message is up.
-constexpr double kBlackMs = 700;    // Nothing at all.
-constexpr double kLookingAt = 700;  // "Looking for boot media..." is typed.
-constexpr double kMessageAt = 3200; // The failure message.
-constexpr double kRestartAt = 8000; // The machine tries again by itself.
+constexpr double kCorruptMs =
+    2500; // The screen corrupts: glyphs swarm everywhere.
+constexpr double kLookingAt =
+    3200; // Then black; "Looking for boot media..." is typed.
+constexpr double kMessageAt = 5200; // The failure message.
+constexpr double kRestartAt = 9500; // The machine tries again by itself.
+constexpr double kChurnMs = 60;     // How often the garbage changes.
 constexpr double kTypeMsPerChar = 28;
 constexpr int kBlinkMs = 500;
 
@@ -39,6 +43,10 @@ public:
         lastNow_ = now;
         const double t = double((now - start_).count());
         canvas.clear({0, 0, 0});
+        if (t < kCorruptMs) {
+            corrupt(world, canvas, t);
+            return;
+        }
         const Rgb grey{190, 190, 190};
         const int w = canvas.columns();
         int row = 0;
@@ -83,6 +91,42 @@ public:
     }
 
 private:
+    // Garbage over the whole terminal: more and more cells with random glyphs
+    // and colors, some inverted, changing a few times a second. It is drawn
+    // with ordinary cursor addressing, so it works in any terminal.
+    void corrupt(World &world, AsciiCanvas &canvas, double t) {
+        if (!seeded_) {
+            seeded_ = true;
+            salt_ = std::uint32_t(world.rng.next() >> 40);
+        }
+        static const std::u32string glyphs =
+            U"#%&*+=-:.<>?/\\|@$!~^0123456789ABCDEFXYZabcdefxyz";
+        const double density = std::clamp(t / (kCorruptMs * 0.8), 0.04, 1.0);
+        const auto frame = std::uint32_t(t / kChurnMs);
+        for (int y = 0; y < canvas.rows(); ++y) {
+            for (int x = 0; x < canvas.columns(); ++x) {
+                if (cellNoise(x, y, salt_) >= density) {
+                    continue;
+                }
+                const double pick = cellNoise(x, y, frame * 7919u + salt_);
+                Rgb fg = hsv(cellNoise(y, x, frame + salt_),
+                             0.7 + 0.3 * cellNoise(x + 1, y, frame),
+                             0.9);
+                Rgb bg{0, 0, 0};
+                if (cellNoise(x, y + 3, frame + salt_) < 0.2) {
+                    bg = fg; // Inverted now and then.
+                    fg = {0, 0, 0};
+                }
+                canvas.put(x,
+                           y,
+                           glyphs[std::size_t(pick * double(glyphs.size()))],
+                           fg,
+                           bg,
+                           pick > 0.9);
+            }
+        }
+    }
+
     static int typed(const char *text, double ms) {
         return int(std::clamp(
             ms / kTypeMsPerChar, 0.0, double(std::string(text).size())));
@@ -101,6 +145,8 @@ private:
     }
 
     Time start_{0}, lastNow_{0};
+    bool seeded_ = false;
+    std::uint32_t salt_ = 0;
     int lastCount_ = 0, messageCount_ = 0;
     bool finished_ = false;
 };
