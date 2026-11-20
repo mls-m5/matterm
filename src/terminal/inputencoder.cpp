@@ -180,7 +180,9 @@ std::string InputEncoder::key(Key key,
     case Key::Enter:
         return text("\r", mod.alt);
     case Key::Backspace:
-        return text(mod.control ? "\b" : "\x7f", mod.alt);
+        // Ctrl+Backspace deletes a word: ^W (unix-word-rubout) is what shells and
+        // most line editors bind that to; plain Backspace stays DEL.
+        return text(mod.control ? "\x17" : "\x7f", mod.alt);
     case Key::Tab:
         return mod.shift ? "\x1b[Z" : text("\t", mod.alt);
     case Key::Escape:
