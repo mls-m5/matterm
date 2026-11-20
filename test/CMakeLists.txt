@@ -118,7 +118,7 @@ if(BUILD_TESTING)
 
     file(GLOB CHAT_TESTS CONFIGURE_DEPENDS chat_*_test.cpp)
     add_executable(chat_test ${CHAT_TESTS} mls-unit-test/test_main.cpp)
-    target_link_libraries(chat_test PRIVATE matterm::chat)
+    target_link_libraries(chat_test PRIVATE matterm::chat matterm::vt)
     add_test(NAME chat COMMAND chat_test)
     add_test(NAME chat_includes
         COMMAND ${CMAKE_COMMAND} -DFAKEOS_DIR=${PROJECT_SOURCE_DIR}/src/chat
