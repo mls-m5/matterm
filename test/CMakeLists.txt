@@ -350,3 +350,13 @@ if(TARGET chatd-core)
     add_test(NAME chatd COMMAND chatd_test)
     set_tests_properties(chatd PROPERTIES TIMEOUT 60)
 endif()
+
+# mattrix-chat in pseudo-terminals against a real chatd.
+if(TARGET mattrix-chat AND TARGET ptylink AND TARGET chatd-core)
+    add_executable(chatterm_test chatterm_test.cpp mls-unit-test/test_main.cpp)
+    target_link_libraries(chatterm_test PRIVATE matterm::ptylink chatd-core)
+    target_compile_definitions(chatterm_test PRIVATE CHAT_BINARY="$<TARGET_FILE:mattrix-chat>")
+    add_dependencies(chatterm_test mattrix-chat)
+    add_test(NAME chat_terminal COMMAND chatterm_test)
+    set_tests_properties(chat_terminal PROPERTIES TIMEOUT 90)
+endif()

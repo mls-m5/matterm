@@ -96,6 +96,9 @@ public:
     // Leaves the screen sane: ends the region, resets attributes, shows the
     // cursor.
     std::string finish();
+    // A line for the person only (a command's answer), printed with the next
+    // render.
+    void note(const std::string &text);
     // When render() wants to be called again for an animation.
     std::optional<Millis> nextFrame(Millis now) const;
 
@@ -130,6 +133,7 @@ private:
     ChatClient::State lastState_ = ChatClient::State::Off;
     bool bannerPrinted_ = false;
     Millis start_ = -1;
+    std::vector<std::string> notes_;
 };
 
 } // namespace chat

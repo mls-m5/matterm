@@ -409,6 +409,10 @@ std::vector<std::string> ChatView::printable(ChatClient &client, Millis now) {
             break;
         }
     }
+    for (const auto &n : notes_) {
+        lines.push_back(line(n, true));
+    }
+    notes_.clear();
     const bool pulsing =
         config_.animations && start_ >= 0 && now - start_ < config_.bannerPulse;
     if (!bannerPrinted_ && start_ >= 0 && !pulsing) {
@@ -416,6 +420,10 @@ std::vector<std::string> ChatView::printable(ChatClient &client, Millis now) {
         lines.insert(lines.begin(), banner(now));
     }
     return lines;
+}
+
+void ChatView::note(const std::string &text) {
+    notes_.push_back(" \xC2\xB7 " + sanitizeIncoming(text, 200));
 }
 
 std::optional<Millis> ChatView::nextFrame(Millis now) const {

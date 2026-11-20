@@ -296,6 +296,19 @@ TEST_CASE(
     EXPECT(t.shows("message number 5"));
 }
 
+TEST_CASE("A note is printed once above the region, and cannot carry escapes") {
+    Joined j;
+    ChatView view(config());
+    Term t;
+    t.write(view.render(j.client, j.input, j.now));
+    view.note("here: ada, bo \x1b[2J");
+    t.write(view.render(j.client, j.input, j.now));
+    t.write(view.render(j.client, j.input, j.now));
+    EXPECT(t.count("here: ada, bo") == 1);
+    EXPECT(t.count("@ mia  ready") == 1);
+    EXPECT(t.shows("here: ada, bo [2J"));
+}
+
 TEST_CASE("A resize starts a new region below the old one") {
     Joined j;
     ChatView view(config());
