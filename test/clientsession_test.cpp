@@ -213,6 +213,22 @@ TEST_CASE("Exact resume keeps frontend state; malformed or unnegotiated replay "
             EXPECT(f.session.state() == ClientSession::State::Failed);
     }
 }
+TEST_CASE(
+    "A frontend disconnect during replay reset cannot revive the client") {
+    ClientSession::Config config;
+    config.replay = true;
+    config.sessionId = "00112233445566778899aabbccddeeff";
+    Fixture *fixture = nullptr;
+    config.resetForReplay = [&] { fixture->channel.lost(1000); };
+    Fixture f(config);
+    fixture = &f;
+    f.channel.opened();
+    f.channel.deliver(Welcome{1, config.sessionId, 0, 3, featureReplay});
+    EXPECT(f.session.state() == ClientSession::State::Failed);
+    f.channel.deliver(Output{0, "late"});
+    EXPECT(f.output.empty());
+}
+
 TEST_CASE("A hostile replay offset cannot wrap the output counter") {
     ClientSession::Config config;
     config.replay = true;
