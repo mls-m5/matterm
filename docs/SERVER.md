@@ -82,8 +82,9 @@ checked before any password hashing. Values live in `RateLimitConfig`.
 
 - **Per-source lockout.** After `maxFailures` (5) consecutive failures a source
   is refused for `lockoutInitial` (30 s), doubling to `lockoutMax` (15 min)
-  while it keeps failing. A success clears it. The source key is the peer
-  address: IPv4 as is, IPv4-mapped IPv6 as the IPv4 address, any other IPv6
+  while it keeps failing. A success clears it. The source key is the validated
+  forwarded client of a configured trusted proxy, otherwise the peer address:
+  IPv4 as is, IPv4-mapped IPv6 as the IPv4 address, any other IPv6
   address as its /64 prefix (`sourceKey()`, so a client cannot rotate through
   the addresses of its own /64).
 - **Source table.** At most `maxSources` (4096) sources are remembered. A source
@@ -107,9 +108,13 @@ checked before any password hashing. Values live in `RateLimitConfig`.
   (from any addresses) blocks every non-loopback login until the hour ends.
   The way back in is a login from loopback (exempt), or restarting the server
   (the state is in memory only). A `--reset-lockout` command needs persisted
-  state and is deferred with it. Until `trusted_proxy` exists, clients behind a
-  reverse proxy all appear as the proxy's loopback address: they share one
-  per-source lockout and are exempt from the global budget.
+  state and is deferred with it. Behind nginx, configure `trusted_proxy` to
+  the exact peer address and use `trusted_proxy_hops: 0` with the shipped
+  header-overwriting example. Forwarded clients then have independent source
+  lockouts and external clients are not loopback-exempt just because nginx is.
+  With trust off or a missing forwarding header, accounting falls back to the
+  peer. See [SERVER_CONFIG.md](SERVER_CONFIG.md#trusted-proxy-boundary) before
+  using `any`; it requires a proxy-only reachable backend.
 
 `SessionStore` and `RateLimiter` are not thread safe. They belong to the single
 `io_context` thread; debug builds assert it (the first calling thread becomes
@@ -152,5 +157,5 @@ The child gets a small environment allow-list plus `TERM=xterm-256color` and
 
 ## Not in this slice
 
-TLS, `trusted_proxy`, writing the configuration back, second factor, session resume, persistent lockout state. Open review
+TLS, writing the configuration back, second factor, session resume, persistent lockout state. Open review
 items are in [tasks/server-skeleton.md](tasks/server-skeleton.md).

@@ -190,9 +190,9 @@ TEST_CASE("Unknown keys name their full path") {
                     "rate_limit.max_failurs: unknown key"));
     EXPECT(contains(errorOf("{\n  \"session\": {\n    \"x\": 1\n  }\n}"),
                     "t.json:3:5: session.x: unknown key"));
-    // Keys the server does not support yet are unknown, not silently accepted.
-    EXPECT(contains(errorOf(R"({"trusted_proxy": "127.0.0.1"})"),
-                    "trusted_proxy: unknown key"));
+    // Typos remain errors, never silently accepted as known settings.
+    EXPECT(contains(errorOf(R"({"trust_proxy": "127.0.0.1"})"),
+                    "trust_proxy: unknown key"));
 }
 TEST_CASE("Wrong types name their path") {
     EXPECT(

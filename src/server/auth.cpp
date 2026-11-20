@@ -114,7 +114,7 @@ std::string SessionStore::issue() {
     std::string token(hex.data());
     digest_ = digest(token);
     created_ = touched_ = now_();
-    claimed_ = false;
+    claimed_ = 0;
     ++generation_;
     return token;
 }
@@ -137,14 +137,24 @@ bool SessionStore::valid(std::string_view token, bool touch) {
 }
 bool SessionStore::claim(std::string_view token) {
     assert(affinity_.check());
-    if (!valid(token) || claimed_)
+    return valid(token) && claimGeneration(generation_);
+}
+bool SessionStore::claimGeneration(std::uint64_t generation, bool transfer) {
+    assert(affinity_.check());
+    if (!attachedValid(generation, false) ||
+        claimed_ >= config_.maxUpgradesPerLogin + unsigned(transfer))
         return false;
-    claimed_ = true;
+    ++claimed_;
     return true;
+}
+void SessionStore::release(std::uint64_t generation) {
+    assert(affinity_.check());
+    if (generation == generation_ && claimed_)
+        --claimed_;
 }
 bool SessionStore::attachedValid(std::uint64_t generation, bool touch) {
     assert(affinity_.check());
-    if (generation != generation_ || digest_.empty() || !claimed_)
+    if (generation != generation_ || digest_.empty())
         return false;
     const auto now = now_();
     if (now - created_ >= config_.absoluteTimeout ||
@@ -159,7 +169,7 @@ bool SessionStore::attachedValid(std::uint64_t generation, bool touch) {
 void SessionStore::revoke() {
     assert(affinity_.check());
     digest_.clear();
-    claimed_ = false;
+    claimed_ = 0;
 }
 namespace {
 class Json {

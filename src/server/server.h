@@ -1,6 +1,7 @@
 #pragma once
 #include "auth.h"
 #include "ptysessionhost.h"
+#include "sessionregistry.h"
 #include <utility>
 
 #include <boost/asio/io_context.hpp>
@@ -13,9 +14,12 @@ struct ServerConfig {
     std::string allowedOrigin = "http://localhost:8080";
     bool allowPlainHttp = false;
     std::string passwordHash;
+    std::string trustedProxy = "none";
+    unsigned trustedProxyHops = 0;
     RateLimitConfig rateLimit;
     AuthConfig auth;
     ProcessConfig process;
+    RegistryConfig registry;
     unsigned maxUnauthenticated = 16;
     unsigned maxConnections = 32;
     // Directory of the browser client (the web/ build output). Its regular

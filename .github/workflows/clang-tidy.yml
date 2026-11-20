@@ -1,0 +1,36 @@
+# Runs the security-focused clang-tidy checks (.clang-tidy) over the whole tree once a
+# week, and on demand. A full run takes minutes, so it is not part of every push.
+# Locally: tools/clang-tidy.sh build [--changed]. See docs/STATIC_ANALYSIS.md.
+name: clang-tidy
+
+on:
+  schedule:
+    - cron: "17 4 * * 1" # Mondays 04:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tidy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-tidy cmake ninja-build \
+            libsdl2-dev libsdl2-ttf-dev libboost-dev libsodium-dev
+      - name: Configure and build (generates headers, exports compile_commands.json)
+        run: |
+          cmake -S . -B build -G Ninja -DMATTERM_BUILD_SERVER=ON
+          cmake --build build
+      - name: clang-tidy
+        run: |
+          tools/clang-tidy.sh build -j"$(nproc)" 2>&1 | tee tidy.log
+          if grep -E "warning:|error:" tidy.log; then
+            echo "clang-tidy reported findings"; exit 1
+          fi

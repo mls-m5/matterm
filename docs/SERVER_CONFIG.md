@@ -57,6 +57,8 @@ Top level:
 | `port` | integer | 8080 | 0..65535 | TCP port; 0 picks a free one. |
 | `allowed_origin` | string | `http://localhost:8080` | `http(s)://host[:port]`, no path | The exact `Origin` browsers must send; its authority must equal `Host`. |
 | `allow_plain_http` | boolean | false | | Permit plain HTTP on a non-loopback address (prints a warning). |
+| `trusted_proxy` | string | `none` | `none`, exact IPv4/IPv6, or `any` | Peers allowed to supply X-Forwarded-For. `any` requires proxy-only network reachability and prints a warning. |
+| `trusted_proxy_hops` | integer | 0 | 0..16 | Entries to skip from the right of X-Forwarded-For; 0 selects the last appended address. |
 | `credentials` | string | next to the config file | non-empty path | Credentials file. |
 | `password_hash` | string | | `"<redacted>"` or `"<none>"` only | Output of `--print-config`. Accepted on input only as those placeholders, so a config file can never carry the hash. |
 | `static_dir` | string | none | non-empty path | Directory of the browser client; empty: placeholder page only. |
@@ -72,7 +74,7 @@ Top level:
 | `lockout_max_seconds` | integer | 900 | 1..2592000, not below `lockout_initial_seconds` | Longest lockout. |
 | `global_attempts_per_hour` | integer | 30 | 0..1000000 | Password attempts per hour across all sources; 0 disables. |
 | `global_counts_failures_only` | boolean | true | | true: only failures spend the global budget; false: every attempt does. |
-| `exempt_loopback` | boolean | true | | Loopback sources are exempt from the global budget. Set false behind a reverse proxy on the same host, where every client looks like loopback. |
+| `exempt_loopback` | boolean | true | | Loopback source addresses are exempt from the global budget. With a trusted proxy this uses the forwarded client, not the proxy's address. Set false to also count local/fallback clients. |
 | `max_sources` | integer | 4096 | 1..1000000 | Sources remembered at once. |
 | `source_idle_expiry_seconds` | integer | 3600 | 1..2592000 | An unlocked source idle this long is forgotten. |
 
@@ -113,8 +115,35 @@ Top level:
 | `rate_window_milliseconds` | integer | 5000 | 100..600000 | Window of the message rate limit. |
 | `max_messages_per_window` | integer | 5000 | 1..10000000 | Client messages allowed per window. |
 
-Not yet supported, and therefore rejected as unknown keys: `trusted_proxy`,
-TLS files and scrollback sizes.
+Not yet supported, and therefore rejected as unknown keys: TLS files and
+scrollback sizes.
+
+### Trusted proxy boundary
+
+Forwarding is off by default. A peer must match the exact configured IP (IPv4
+mapped IPv6 is normalized) before its header is considered. Untrusted peers'
+forwarded headers, including duplicates, are ignored. No proxy-only connection
+ACL is implied: direct clients retain their actual peer address.
+
+A trusted peer with no X-Forwarded-For header also uses its peer address. If the
+header is present it must be exactly one header with 1..32 comma-separated plain
+IP addresses (no ports, brackets, scope IDs, or `unknown`/`for=` values). Every
+entry must be valid; malformed, duplicate or too-short lists get 400 before
+password hashing or session claiming. Spaces/tabs around entries are allowed.
+The selected client is at `length - 1 - trusted_proxy_hops`. Keep hops zero with
+the shipped nginx example, which **overwrites** the header with `$remote_addr`.
+Larger hop counts are safe only when the upstream chain appends/overwrites the
+required entries itself; never select an attacker-supplied prefix.
+
+The selected client uses the same IPv4 or IPv6 /64 source key for lockout and
+budget accounting as a direct connection. Auth event logs use a keyed hash of
+that source (random key per server instance), never raw headers or tokens.
+
+`any` is an explicit trust assertion, not a check that a firewall exists. It
+permits every peer to assert client identities, including loopback exemption.
+Use it only when the backend port is reachable solely by the proxy (for example
+an isolated container network with host-loopback-only publication). The server
+cannot verify host firewall/container topology. Prefer an exact proxy IP.
 
 ## Command-line flags
 
@@ -124,6 +153,7 @@ TLS files and scrollback sizes.
 | `--print-config` | prints the effective settings and exits |
 | `--listen ADDR`, `--port N`, `--origin URL`, `--static-dir DIR` | `listen_address`, `port`, `allowed_origin`, `static_dir` |
 | `--credentials PATH` | `credentials` |
+| `--trusted-proxy none\|IP\|any`, `--trusted-proxy-hops N` | `trusted_proxy`, `trusted_proxy_hops` |
 | `--allow-plain-http` | sets `allow_plain_http` to true (it cannot unset it) |
 | `-- PROGRAM ARG...` | `process.arguments` |
 | `--setup-credentials` (alias `--set-password`) | on a terminal asks for the password twice without echo (an empty answer generates and prints a random one), otherwise reads one line from stdin; writes the credentials file; honors `--config` and `--credentials` |
@@ -135,8 +165,8 @@ forgiving limits (ten failures, short lockouts, no global budget).
 
 [`examples/server-public.json`](examples/server-public.json): behind a
 TLS-terminating reverse proxy on the same machine. Three failures, lockouts
-from one minute to an hour, ten attempts per hour globally, loopback *not*
-exempt (the proxy connects from loopback), short sessions and tighter
+from one minute to an hour, ten attempts per hour globally, explicit trust of
+127.0.0.1 with zero skipped hops, loopback *not* exempt, short sessions and tighter
 transport timeouts. Both files are loaded by the test suite.
 
 ## Static directory default

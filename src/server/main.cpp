@@ -17,6 +17,7 @@ void usage() {
            "[--port N]\n"
            "  [--origin URL] [--credentials PATH] [--static-dir DIR] "
            "[--allow-plain-http]\n"
+           "  [--trusted-proxy none|IP|any] [--trusted-proxy-hops N]\n"
            "  [-- PROGRAM ARG...]\n"
            "matterm-server --setup-credentials (alias --set-password) [--config PATH]\n"
            "  [--credentials PATH]   prompts twice on a terminal (empty = generate one), else reads "

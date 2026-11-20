@@ -12,6 +12,25 @@ std::string bytes(const char (&literal)[N]) {
 }
 } // namespace
 TEST_SUIT_BEGIN(ServerAuth)
+TEST_CASE("Upgrade leases are concurrent, bounded, released, and fenced by "
+          "login rotation") {
+    AuthConfig config;
+    config.maxUpgradesPerLogin = 2;
+    SessionStore store(config);
+    const auto token = store.issue();
+    const auto oldGeneration = store.generation();
+    EXPECT(store.claim(token));
+    EXPECT(store.claim(token));
+    EXPECT_FALSE(store.claim(token));
+    store.release(oldGeneration);
+    EXPECT(store.claim(token));
+    const auto replacement = store.issue();
+    store.release(oldGeneration); // Must not release somebody else's new lease.
+    EXPECT(store.claim(replacement));
+    EXPECT(store.claim(replacement));
+    EXPECT_FALSE(store.claim(replacement));
+    EXPECT_FALSE(store.claim(token));
+}
 TEST_CASE("Argon2id verifies only the configured password") {
     const std::string password = "a long random test password 12345";
     PasswordVerifier verifier(hashPassword(password));
@@ -31,7 +50,7 @@ TEST_CASE("Argon2id verifies only the configured password") {
 TEST_CASE(
     "Only digested issued tokens validate; expiry, rotation and single claim") {
     Clock::time_point now{};
-    SessionStore store({std::chrono::seconds(10), std::chrono::seconds(20)},
+    SessionStore store({std::chrono::seconds(10), std::chrono::seconds(20), 1},
                        [&] { return now; });
     auto token = store.issue();
     EXPECT_EQ(token.size(), std::size_t(64));

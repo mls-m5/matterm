@@ -22,6 +22,7 @@ private:
 struct AuthConfig {
     std::chrono::seconds idleTimeout{43200};
     std::chrono::seconds absoluteTimeout{604800};
+    unsigned maxUpgradesPerLogin = 16;
 };
 // One owner login, rotated on every successful login; only a digest is
 // retained.
@@ -36,6 +37,10 @@ public:
     std::string issue();
     bool valid(std::string_view token, bool touch = true);
     bool claim(std::string_view token);
+    // Internal lease admission after a previously authenticated upgrade's
+    // Hello. A generation-matched takeover may transiently transfer one slot.
+    bool claimGeneration(std::uint64_t generation, bool transfer = false);
+    void release(std::uint64_t generation);
     void revoke();
     std::uint64_t generation() const {
         return generation_;
@@ -47,7 +52,7 @@ private:
     RateLimiter::Now now_;
     std::string digest_;
     Clock::time_point created_{}, touched_{};
-    bool claimed_ = false;
+    unsigned claimed_ = 0;
     std::uint64_t generation_ = 0;
     ThreadAffinity affinity_;
 };

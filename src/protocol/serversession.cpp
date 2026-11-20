@@ -1,6 +1,7 @@
 #include "serversession.h"
 
 #include <algorithm>
+#include <limits>
 
 namespace protocol {
 
@@ -73,6 +74,7 @@ void ServerSession::start(Time now) {
         return;
     }
     state_ = State::AwaitHello;
+    sent_ = acked_ = config_.startOffset;
     helloDeadline_ = now + config_.helloTimeout;
     lastMessage_ = now;
     rateWindowStart_ = now;
@@ -121,7 +123,10 @@ void ServerSession::handle(const Hello &message, Time now) {
         fail(ErrorCode::UnsupportedVersion, "no common protocol version");
         return;
     }
-    if (!message.sessionId.empty() || message.resumeOffset != 0) {
+    if (config_.resume
+            ? (message.sessionId != config_.sessionId ||
+               !(message.features & config_.features & featureReplay))
+            : (!message.sessionId.empty() || message.resumeOffset != 0)) {
         fail(ErrorCode::ResumeUnsupported, "resume is not supported");
         return;
     }
@@ -136,6 +141,9 @@ void ServerSession::handle(const Hello &message, Time now) {
     Welcome welcome;
     welcome.version = std::min(message.version, currentVersion);
     welcome.sessionId = config_.sessionId;
+    welcome.startOffset = config_.startOffset;
+    welcome.flags = config_.welcomeFlags;
+    welcome.features = config_.features & message.features;
     sendMessage(welcome);
 }
 
@@ -205,6 +213,10 @@ void ServerSession::updateStall(Time now) {
 
 void ServerSession::onProcessOutput(std::string_view bytes, Time now) {
     if (state_ != State::Running && state_ != State::Closing) {
+        return;
+    }
+    if (bytes.size() > std::numeric_limits<std::uint64_t>::max() - sent_) {
+        fail(ErrorCode::LimitExceeded, "output offset exhausted");
         return;
     }
     while (!bytes.empty()) {
