@@ -1,5 +1,6 @@
 #include "fakeos_harness.h"
 #include "mls-unit-test/unittest.h"
+#include "scriptedprogram.h"
 
 #include <memory>
 #include <string>
@@ -199,6 +200,31 @@ TEST_CASE("Commands are not drafts, a resize does not break it") {
     pc.type("\x03");
     pc.advance(300);
     EXPECT(!pc.sys.inProgram());
+}
+
+TEST_CASE("Events from the host's connection reach the program through a "
+          "ScriptedProgram") {
+    Host host;
+    fakeos::ScriptedProgram program(withChat(host));
+    program.start();
+    program.input("chat\r");
+    program.tick(protocol::Time(std::chrono::milliseconds(10)));
+    program.input("y");
+    program.tick(protocol::Time(std::chrono::milliseconds(20)));
+    EXPECT_EQ(host.opened, 1);
+    EXPECT(program.nextDeadline().has_value());
+    program.chatEvent(0, "");
+    EXPECT(program.nextDeadline().has_value()); // Something is waiting.
+    EXPECT(host.sent.empty());                  // Not handled before a tick.
+    program.tick(protocol::Time(std::chrono::milliseconds(30)));
+    EXPECT_EQ(host.sent.size(), std::size_t(1));
+    EXPECT(host.sent[0].rfind("hello\tguest-", 0) == 0);
+    program.chatEvent(1, "ready");
+    program.chatEvent(2, "");
+    const auto reaction =
+        program.tick(protocol::Time(std::chrono::milliseconds(40)));
+    EXPECT(reaction.output.find("disconnected") != std::string::npos ||
+           reaction.output.find("offline") != std::string::npos);
 }
 
 TEST_SUIT_END

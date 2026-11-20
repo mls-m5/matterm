@@ -149,6 +149,7 @@ For the static demo (`demo.html`, or `index.html?demo`; see docs/DEMO.md):
 | `?embed` | Edge to edge for a page inside an `<iframe>`; no layout toggle. |
 | `?nointro` | Skip the intro animation. |
 | `?noreveal` | Print program output at once, not at a pace. |
+| `?chat=wss://host/path` | Turns the `chat` command on in the demo (it does not exist without this parameter). The command still shows what it does and asks `Connect? [y/N]` before it opens the connection (docs/CHAT.md). |
 | `?cmd=...` | Type and run a command at the first prompt, letter by letter after the intro (text only, 200 characters; nothing runs by itself without it). |
 | `?theme=light\|dark` | Page colors around the terminal (not the terminal palette). |
 | `?sound=1` / `?mute` | Pips for revealed and typed text (WebAudio, after the first key or click): off by default; `?sound=1` starts with them on, `sound on` in the demo turns them on, `?mute` keeps them off. |

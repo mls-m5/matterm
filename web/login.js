@@ -410,4 +410,57 @@
       message.textContent = "Login failed.";
     }
   });
+  // The chat connection of the demo (?chat=wss://host/path, see docs/CHAT.md).
+  // The program in the pretend system opens it, and only after the visitor has
+  // read the notice and answered y. Everything it receives is handed to the
+  // terminal as text frames; the C++ side checks and cleans it.
+  window.mattermChat = (function () {
+    let socket = null;
+    function emit(kind, text) {
+      if (window.Module && window.Module.ccall) {
+        window.Module.ccall("matterm_chat_event", null, ["number", "string"], [kind, text || ""]);
+      }
+    }
+    return {
+      open: function () {
+        const url = new URLSearchParams(location.search).get("chat") || "";
+        try {
+          socket = new WebSocket(url);
+        } catch (e) {
+          socket = null;
+          emit(2);
+          return;
+        }
+        socket.onopen = function () {
+          emit(0);
+        };
+        socket.onmessage = function (event) {
+          if (typeof event.data === "string") {
+            emit(1, event.data);
+          } else {
+            socket.close(); // The chat sends text frames only.
+          }
+        };
+        socket.onclose = function () {
+          socket = null;
+          emit(2);
+        };
+      },
+      send: function (line) {
+        if (socket && socket.readyState === 1) {
+          socket.send(line);
+        }
+      },
+      close: function () {
+        const s = socket;
+        socket = null;
+        if (s) {
+          s.onclose = null;
+          try {
+            s.close();
+          } catch (e) {}
+        }
+      },
+    };
+  })();
 })();
