@@ -116,6 +116,20 @@ const std::vector<Egg> &eggs() {
             egg("answer", T::Line, "42")
                 .print("That is the answer. The question is still open.\n"),
             egg("neo", T::Command, "neo").print("The Matrix has you.\n"),
+            // Typos and small courtesies.
+            egg("sl", T::Command, "sl").launch("sl"),
+            egg("please", T::Command, "please")
+                .print("Polite! Still no. But thank you for asking.\n"),
+            egg("thanks", T::Command, "thanks")
+                .print("You are welcome. Nobody ever says that to a shell.\n"),
+            egg("coffee", T::Line, "make coffee")
+                .print("418 I'm a teapot. I can offer a nice ASCII tea:\n"
+                       "      ( (\n"
+                       "       ) )\n"
+                       "    ........\n"
+                       "    |      |]\n"
+                       "    \\      /\n"
+                       "     `----'\n"),
             egg("hello", T::Command, "hello").mood("hello", kGreetings),
             egg("hi", T::Command, "hi").mood("hello", kGreetings),
             egg("hej", T::Command, "hej").mood("hello", kGreetings),

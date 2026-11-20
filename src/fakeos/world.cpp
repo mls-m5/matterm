@@ -147,6 +147,10 @@ void seedWorld(World &world) {
            "root",
            0755,
            base - 30 * day);
+    fs.put(
+        "/usr/games/snow", "#!builtin snow\n", "root", 0755, base - 30 * day);
+    fs.put(
+        "/usr/games/life", "#!builtin life\n", "root", 0755, base - 30 * day);
     // A shy one, hidden by its dot.
     fs.put("/usr/games/.crumble",
            "#!builtin crumble\n",
