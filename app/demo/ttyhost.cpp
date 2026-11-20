@@ -1,5 +1,7 @@
 #include "ttyhost.h"
 
+#include "ttyterm.h"
+
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
@@ -27,84 +29,6 @@ void onStop(int) {
     gStop = 1;
 }
 
-bool contains(const char *haystack, const char *needle) {
-    return haystack && std::strstr(haystack, needle);
-}
-
-// What the terminal in front of us can do, from the environment: the usual
-// COLORTERM/TERM/locale conventions.
-fakeos::Capabilities detect() {
-    fakeos::Capabilities caps;
-    const char *colorterm = std::getenv("COLORTERM");
-    const char *term = std::getenv("TERM");
-    caps.truecolor =
-        contains(colorterm, "truecolor") || contains(colorterm, "24bit");
-    caps.colors256 = caps.truecolor || contains(term, "256");
-    const bool plain = !term || std::string(term) == "linux" ||
-                       std::string(term) == "dumb" || contains(term, "vt100") ||
-                       contains(term, "vt220");
-    caps.alternateScreen = !plain;
-    const char *locale = std::getenv("LC_ALL");
-    if (!locale || !*locale)
-        locale = std::getenv("LC_CTYPE");
-    if (!locale || !*locale)
-        locale = std::getenv("LANG");
-    caps.unicode = contains(locale, "UTF-8") || contains(locale, "utf8") ||
-                   contains(locale, "UTF8");
-    return caps;
-}
-
-bool writeAll(const std::string &bytes) {
-    std::size_t done = 0;
-    while (done < bytes.size()) {
-        const auto n =
-            ::write(STDOUT_FILENO, bytes.data() + done, bytes.size() - done);
-        if (n < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            if (errno == EAGAIN) {
-                pollfd out{STDOUT_FILENO, POLLOUT, 0};
-                poll(&out, 1, 100);
-                continue;
-            }
-            return false;
-        }
-        done += std::size_t(n);
-    }
-    return true;
-}
-
-// Puts the terminal back, whatever happens.
-struct RawMode {
-    termios saved{};
-    bool active = false;
-    bool enter() {
-        if (tcgetattr(STDIN_FILENO, &saved) != 0) {
-            return false;
-        }
-        termios raw = saved;
-        cfmakeraw(&raw);
-        raw.c_cc[VMIN] = 1;
-        raw.c_cc[VTIME] = 0;
-        active = tcsetattr(STDIN_FILENO, TCSADRAIN, &raw) == 0;
-        return active;
-    }
-    ~RawMode() {
-        if (active) {
-            tcsetattr(STDIN_FILENO, TCSADRAIN, &saved);
-        }
-    }
-};
-
-void size(int &columns, int &rows) {
-    winsize ws{};
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 &&
-        ws.ws_row > 0) {
-        columns = ws.ws_col;
-        rows = ws.ws_row;
-    }
-}
 } // namespace
 
 int runTtyHost(fakeos::Config config) {
@@ -113,8 +37,12 @@ int runTtyHost(fakeos::Config config) {
                      "and output\n";
         return 1;
     }
-    config.capabilities = detect();
-    size(config.columns, config.rows);
+    const ttyterm::Caps caps = ttyterm::detect();
+    config.capabilities.truecolor = caps.truecolor;
+    config.capabilities.colors256 = caps.colors256;
+    config.capabilities.alternateScreen = caps.alternateScreen;
+    config.capabilities.unicode = caps.unicode;
+    ttyterm::size(config.columns, config.rows);
     if (pipe(gWinchPipe) != 0) {
         std::cerr << "pipe: " << std::strerror(errno) << '\n';
         return 1;
@@ -129,7 +57,7 @@ int runTtyHost(fakeos::Config config) {
     for (const int signal : {SIGINT, SIGTERM, SIGHUP}) {
         sigaction(signal, &action, nullptr);
     }
-    RawMode raw;
+    ttyterm::RawMode raw;
     if (!raw.enter()) {
         std::cerr << "cannot put the terminal in raw mode\n";
         return 1;
@@ -142,7 +70,7 @@ int runTtyHost(fakeos::Config config) {
     };
     std::optional<int> exitCode;
     auto handle = [&](const fakeos::Reaction &r) {
-        if (!r.output.empty() && !writeAll(r.output)) {
+        if (!r.output.empty() && !ttyterm::writeAll(r.output)) {
             gStop = 1;
         }
         if (r.exitCode) {
@@ -167,7 +95,7 @@ int runTtyHost(fakeos::Config config) {
             char drain[16];
             (void)!read(gWinchPipe[0], drain, sizeof drain);
             int columns = config.columns, rows = config.rows;
-            size(columns, rows);
+            ttyterm::size(columns, rows);
             system.resize(columns, rows);
         }
         if (ready > 0 && (fds[0].revents & (POLLIN | POLLHUP))) {
@@ -184,7 +112,7 @@ int runTtyHost(fakeos::Config config) {
         }
     }
     // Leave the screen sane even after a signal or while a program ran.
-    writeAll(
+    ttyterm::writeAll(
         "\x1b[0m\x1b[?1006l\x1b[?1000l\x1b[?25h" +
         std::string(config.capabilities.alternateScreen && system.inProgram()
                         ? "\x1b[?1049l"

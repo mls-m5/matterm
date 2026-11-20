@@ -87,7 +87,8 @@ public:
     virtual ~Session() = default;
     virtual void start() = 0;
     virtual void write() = 0;
-    virtual void shutdown() = 0;
+    virtual void shutdown() = 0; // Politely, when nothing is being written.
+    virtual void abort() = 0;    // At once.
 
     chat::ConnId id() const {
         return id_;
@@ -175,14 +176,17 @@ public:
             });
     }
     void shutdown() override {
-        if (gone_) {
+        if (gone_ || closeStarted_) {
             return;
         }
-        beast::get_lowest_layer(ws_).expires_after(kCloseGrace);
+        closeStarted_ = true;
         ws_.async_close(ws::close_code::normal,
                         [self = shared_from_this()](beast::error_code) {
                             static_cast<WsSession &>(*self).finish();
                         });
+    }
+    void abort() override {
+        finish();
     }
 
 private:
@@ -300,6 +304,7 @@ private:
     http::request_parser<http::empty_body> parser_;
     net::ip::address peer_;
     std::string source_;
+    bool closeStarted_ = false;
 };
 
 // Plain TCP lines, for local tests with nc or telnet.
@@ -333,6 +338,9 @@ public:
             });
     }
     void shutdown() override {
+        abort();
+    }
+    void abort() override {
         if (gone_) {
             return;
         }
@@ -601,7 +609,7 @@ void ChatServer::stop() {
     impl_->timer.cancel();
     const auto all = impl_->sessions;
     for (const auto &entry : all) {
-        entry.second->shutdown();
+        entry.second->abort();
     }
 }
 
