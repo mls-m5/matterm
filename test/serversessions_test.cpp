@@ -64,6 +64,51 @@ bool sees(Client &client, std::string_view expected) {
 }
 } // namespace
 TEST_SUIT_BEGIN(ServerSessions)
+TEST_CASE("Session limits validate and print-config round-trips all "
+          "persistence settings") {
+    server::Settings settings;
+    server::applyConfigText(
+        R"({"persistent_sessions":true,"replay_buffer_bytes":4096,"replay_total_bytes":8192,"max_sessions":3,"max_detached_sessions":2,"max_upgrades_per_login":4,"detached_timeout_seconds":0})",
+        settings);
+    const auto text = server::printConfig(settings);
+    server::Settings restored;
+    server::applyConfigText(text, restored);
+    EXPECT_EQ(server::printConfig(restored), text);
+    for (const auto *bad :
+         {R"({"max_sessions":0})",
+          R"({"max_sessions":2,"max_detached_sessions":3})",
+          R"({"max_upgrades_per_login":0})",
+          R"({"replay_buffer_bytes":4096,"replay_total_bytes":1024})",
+          R"({"detached_timeout_seconds":-1})",
+          R"({"replay_total_bytes":1073741825})"}) {
+        bool rejected = false;
+        try {
+            server::applyConfigText(bad, restored);
+        }
+        catch (const server::ConfigError &) {
+            rejected = true;
+        }
+        EXPECT(rejected);
+    }
+}
+TEST_CASE("Takeover transfers a login lease even when its active upgrade limit "
+          "is full") {
+    Fixture fixture(
+        {"/bin/sh", "-c", "printf 'CHILD:%s\\n' \"$$\"; exec /bin/sh"},
+        [](server::ServerConfig &config) {
+            persistent(config);
+            config.auth.maxUpgradesPerLogin = 1;
+        });
+    const auto cookie = fixture.login();
+    Client first, next;
+    first.connect(fixture, cookie);
+    const auto [id, pid] = start(first);
+    EXPECT(pid > 0);
+    next.connect(fixture, cookie);
+    next.send(protocol::Hello{1, 80, 24, 0, id, protocol::featureReplay});
+    EXPECT(std::holds_alternative<protocol::Welcome>(next.read()));
+    EXPECT_EQ(childPid(next.initialOutput()), pid);
+}
 TEST_CASE("A dropped socket reattaches to the same live shell with replay") {
     Fixture fixture(
         {"/bin/sh", "-c", "printf 'CHILD:%s\\n' \"$$\"; exec /bin/sh"},

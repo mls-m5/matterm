@@ -69,6 +69,43 @@ server::RegistryConfig persistent() {
 }
 } // namespace
 TEST_SUIT_BEGIN(ServerRegistry)
+TEST_CASE("Detached timeout zero is unlimited and only live attachment timers "
+          "remain") {
+    auto config = persistent();
+    config.detachedTimeout = protocol::Time(0);
+    server::SessionRegistry registry(config, process(), {});
+    Sink sink;
+    const auto at = now();
+    auto a = registry.attach(hello(), sink.transport(), at);
+    EXPECT(a.has_value());
+    EXPECT(registry.nextDeadline().has_value());
+    registry.detach(*a, at);
+    EXPECT_FALSE(registry.nextDeadline().has_value());
+    registry.tick(at + std::chrono::hours(2));
+    EXPECT_EQ(registry.detachedSize(), std::size_t(1));
+    registry.closeAll(now());
+    EXPECT(until(registry, [&] { return registry.size() == 0; }));
+}
+TEST_CASE("Total replay cap bounds multiple detached flooding PTYs") {
+    auto config = persistent();
+    config.replayTotalBytes = config.replayBufferBytes;
+    server::SessionRegistry registry(
+        config, process("exec yes 'replay line'"), {});
+    Sink first, second;
+    auto a = registry.attach(hello(), first.transport(), now());
+    auto b = registry.attach(hello(), second.transport(), now());
+    EXPECT(a && b);
+    registry.detach(*a, now());
+    registry.detach(*b, now());
+    EXPECT(until(registry, [&] { return registry.replayCost() > 0; }));
+    for (unsigned i = 0; i < 30; ++i) {
+        registry.tick(now());
+        EXPECT(registry.replayCost() <= config.replayTotalBytes);
+    }
+    registry.closeAll(now());
+    EXPECT(until(registry, [&] { return registry.size() == 0; }));
+    EXPECT_EQ(registry.replayCost(), std::size_t(0));
+}
 TEST_CASE("Detached shell resumes with the same id and safe replay, then "
           "takeover fences old events") {
     server::SessionRegistry registry(persistent(), process(), {});
