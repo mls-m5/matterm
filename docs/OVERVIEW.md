@@ -31,6 +31,10 @@ The demo retains up to 256 rows in reusable 16-row blocks. Controls:
   reflow. Clipped text is not restored when widening again.
 - Escape or closing the window exits. The title shows pause and scroll state.
 
+## Mattrix OS (`mattrix`)
+
+`mattrix` is the pretend operating system of `matterm-demo` as a program for the terminal it is started from: `./build/mattrix [--no-intro] [--no-reveal] [--cmd TEXT] [--seed N]`. It needs only the fakeos core and POSIX (no SDL, no renderer), is built by default (`-DMATTERM_BUILD_MATTRIX=OFF` skips it) and installed to `bin/` by `cmake --install`. It also runs in matterm (`matterm -- ./build/mattrix`), which gives it truecolor. It calls itself Mattrix OS, not matterm. See [FAKEOS.md](FAKEOS.md).
+
 ## Terminal Model Demo
 
 `matterm-lib-demo` uses the model's direct API, not escape sequences:

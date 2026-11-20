@@ -101,6 +101,7 @@ void System::freshWorld() {
     World fresh;
     fresh.user = config_.user;
     fresh.hostname = config_.hostname;
+    fresh.standalone = config_.standalone;
     fresh.columns = config_.columns;
     fresh.rows = config_.rows;
     fresh.caps = config_.capabilities;

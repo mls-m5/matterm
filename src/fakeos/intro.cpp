@@ -32,6 +32,10 @@ constexpr double kSkipBackgroundMs =
 
 const char *const kLine1 = "Futuristic system agnostic terminal emulator";
 const char *const kLine2 = "Real terminal, fake operating system";
+// Mattrix OS on its own (not shown inside the matterm demo): its own name.
+const char *const kStandaloneLine1 = "Mattrix OS 6.0 Professional Edition";
+const char *const kStandaloneLine2 =
+    "A fake operating system in your real terminal";
 const Rgb kIntroBackground{4, 6, 14}; // Dark, before the terminal's own color.
 
 struct Placed {
@@ -80,7 +84,8 @@ std::vector<Placed> layout(const std::string &text, int width, int firstRow) {
 
 class Intro final : public Program {
 public:
-    void begin(World &, Time now) override {
+    void begin(World &world, Time now) override {
+        standalone_ = world.standalone;
         start_ = now;
         lastNow_ = now;
     }
@@ -166,7 +171,7 @@ private:
                     int h,
                     Rgb bg,
                     Shade shade) const {
-        const std::string word = "MATTERM";
+        const std::string word = standalone_ ? "MATTRIX" : "MATTERM";
         const int bannerWidth = int(word.size()) * 6 - 1;
         const bool big = w >= bannerWidth + 4 && h >= 11;
         const int left =
@@ -178,7 +183,7 @@ private:
         if (!big) {
             canvas.text(left,
                         top + 2,
-                        "M A T T E R M",
+                        standalone_ ? "M A T T R I X" : "M A T T E R M",
                         shade(hsv(t * 0.0003, 0.5, 1)),
                         bg,
                         true);
@@ -230,7 +235,8 @@ private:
         if (t < kTagline1) {
             return;
         }
-        const auto cells = layout(kLine1, w, row);
+        const auto cells =
+            layout(standalone_ ? kStandaloneLine1 : kLine1, w, row);
         const int typed = int((t - kTagline1) / kTypeMsPerChar);
         const int shown = std::min<int>(typed, int(cells.size()));
         if (shown >
@@ -274,7 +280,8 @@ private:
         if (t < kTagline2) {
             return;
         }
-        const auto cells = layout(kLine2, w, row);
+        const auto cells =
+            layout(standalone_ ? kStandaloneLine2 : kLine2, w, row);
         const int typed = int((t - kTagline2) / kTypeMsPerChar);
         const int shown = std::min<int>(typed, int(cells.size()));
         if (shown > typed2_) {
@@ -296,6 +303,7 @@ private:
     int typed1_ = 0, typed2_ = 0; // Letters typed so far, for the pips.
     double alphaAtLeave_ = 1.0, backgroundAtLeave_ = 0.0;
     bool finished_ = false;
+    bool standalone_ = false;
 };
 
 } // namespace

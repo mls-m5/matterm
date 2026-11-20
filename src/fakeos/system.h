@@ -22,6 +22,8 @@ struct Config {
     std::string user = "guest";
     std::string hostname = "matterm";
     Capabilities capabilities;
+    // The standalone `mattrix` program: branded as Mattrix OS only.
+    bool standalone = false;
     bool intro = true;
     // The terminal's default background color (the matterm palette's is
     // 30,30,30).
