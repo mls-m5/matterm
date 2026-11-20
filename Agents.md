@@ -74,3 +74,12 @@ and runs integration tests before committing.
   approval. Use `pkill -x name`, never `pkill -f`.
 - `ROADMAP.md` tracks progress; designs for larger features are written in
   `docs/` and agreed before implementation (see "Later" in the roadmap).
+- Warnings and clang-tidy: the tree builds warning-free (`cmake/Warnings.cmake`); keep
+  it so. Run `tools/clang-tidy.sh <build> --changed` after a task and the full
+  `tools/clang-tidy.sh <build> -j8` now and then (minutes); see
+  `docs/STATIC_ANALYSIS.md`. Do not use `===` inside `EM_ASM` (clang-format splits
+  it) and remember `long` is 32 bits in wasm builds.
+- The operator is often away for long stretches: keep going on agreed plans in a
+  sensible order, test first, write down what you could not verify, and do not start
+  designs that need the operator's decision (collect them as questions instead).
+
