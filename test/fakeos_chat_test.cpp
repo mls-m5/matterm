@@ -119,13 +119,6 @@ TEST_CASE("Typing sends the draft live, Enter locks, the bubble appears, "
     EXPECT(pc.shows("draft sent"));
     pc.type("\r");
     EXPECT(host.sent.back() == "lock\t1");
-    const std::string name =
-        pc.sys.world().user; // Only to name the author below.
-    (void)name;
-    std::string me;
-    for (const auto &l : host.sent) {
-        (void)l;
-    }
     pc.apply(pc.sys.chatLine("msg\t1\tbo\thi there"));
     pc.advance(200);
     EXPECT(pc.shows("hi there"));
