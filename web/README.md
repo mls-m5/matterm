@@ -42,7 +42,8 @@ Open http://localhost:8080/, log in, and the shell appears. `login.js` posts the
 password to `/login` (the session cookie is HttpOnly) and then starts
 `index.js`, which opens `ws(s)://<host>/ws` itself. Without the server, open the
 files from any static HTTP server with `?ws=ws://host:port/ws` to connect, or
-add `?demo` to run the interactive in-browser simulator (docs/SIMULATOR.md)
+add `?demo` to run the pretend system (docs/FAKEOS.md: a small Unix with an intro
+animation, a shell and programs to find; `?demo&nointro` skips the intro)
 with no server at all. Without a server, the login form is skipped by `?demo`
 only.
 
@@ -138,6 +139,24 @@ mouse is not possible by touch. Changing the font rebuilds the renderer, then th
 grid is re-fitted and the server told through the normal resize path. Touch events
 wake the idle-throttled loop, which stays awake while a finger is down.
 `tools/e2e-gestures.js` checks these with CDP touch events.
+
+## Demo page parameters
+
+For the static demo (`demo.html`, or `index.html?demo`; see docs/DEMO.md):
+
+| Parameter | Effect |
+|---|---|
+| `?embed` | Edge to edge for a page inside an `<iframe>`; no layout toggle. |
+| `?nointro` | Skip the intro animation. |
+| `?noreveal` | Print program output at once, not at a pace. |
+| `?cmd=...` | Type and run a command at the first prompt, letter by letter after the intro (text only, 200 characters; nothing runs by itself without it). |
+| `?theme=light\|dark` | Page colors around the terminal (not the terminal palette). |
+| `?sound=1` / `?mute` | Pips for revealed and typed text (WebAudio, after the first key or click): off by default; `?sound=1` starts with them on, `sound on` in the demo turns them on, `?mute` keeps them off. |
+| `?smooth=N` | Cursor glide in milliseconds; on (80) in the demo, `?smooth=0` turns it off. |
+
+While the page is out of view (a hidden tab, an iframe scrolled away) the loop
+stops drawing (`window.mattermPaused`, set from `visibilitychange` and an
+`IntersectionObserver`).
 
 ## HiDPI
 

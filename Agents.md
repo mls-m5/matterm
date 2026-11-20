@@ -14,10 +14,11 @@ Write project documentation in English.
 Run clang-format on all project C++ source and header files before committing.
 Do not reformat third-party submodules.
 
-The project name is `matterm` (lowercase). Keep `matterm-demo` as a standalone
-library usage example, separate from the future terminal emulator. Demo artwork
-and generated content belong under `demo/`, not in the reusable renderer.
-Keep `matterm-terminal-demo` as a second, separate client of the CPU-only
+The project name is `matterm` (lowercase). Keep `matterm-render-demo` as a
+standalone library usage example (renderer only), separate from the terminal
+emulator. Demo artwork and generated content belong under `demo/`, not in the
+reusable renderer. The name `matterm-demo` is the showcase (pretend OS, animations,
+easter eggs; see `docs/tasks/fakeos-demo.md`). Keep `matterm-lib-demo` as a second, separate client of the CPU-only
 `matterm::terminal` model. Scrollback and primary/alternate modes must remain
 available to library users, not only to a future terminal executable.
 Keep both existing demos' behavior intact; VT/PTY integration belongs in the

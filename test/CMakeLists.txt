@@ -102,6 +102,24 @@ if(BUILD_TESTING)
     target_link_libraries(scriptedlink_test PRIVATE matterm::transport matterm::vt)
     add_test(NAME scripted_link COMMAND scriptedlink_test)
 
+    add_executable(windowsnap_test windowsnap_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(windowsnap_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+    add_test(NAME window_snap COMMAND windowsnap_test)
+
+    file(GLOB FAKEOS_TESTS CONFIGURE_DEPENDS fakeos_*_test.cpp)
+    add_executable(fakeos_test ${FAKEOS_TESTS} mls-unit-test/test_main.cpp)
+    target_link_libraries(fakeos_test PRIVATE matterm::fakeos matterm::vt matterm::transport)
+    # The about command's numbers are re-counted from the sources by its test.
+    target_compile_definitions(fakeos_test PRIVATE MATTERM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME fakeos COMMAND fakeos_test)
+    add_test(NAME fakeos_includes
+        COMMAND ${CMAKE_COMMAND} -DFAKEOS_DIR=${PROJECT_SOURCE_DIR}/src/fakeos
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/check_fakeos_includes.cmake)
+
+    add_executable(pipsynth_test pipsynth_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(pipsynth_test PRIVATE ${PROJECT_SOURCE_DIR}/app/demo)
+    add_test(NAME pip_synth COMMAND pipsynth_test)
+
     add_executable(touchgesture_test touchgesture_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(touchgesture_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
     add_test(NAME touch_gesture COMMAND touchgesture_test)
@@ -224,13 +242,32 @@ if(BUILD_TESTING)
         add_test(NAME sdl_backend COMMAND sdlbackend_test)
         set_tests_properties(sdl_backend PROPERTIES
             ENVIRONMENT "GLYPH_TEST_FONT=${TEST_FONT_FILE};SDL_VIDEODRIVER=dummy")
-        if(TARGET matterm-demo)
+        if(TARGET matterm-render-demo)
             add_test(NAME glyph_render_smoke
-                COMMAND matterm-demo "${TEST_FONT_FILE}" --smoke-test)
+                COMMAND matterm-render-demo "${TEST_FONT_FILE}" --smoke-test)
             set_tests_properties(glyph_render_smoke PROPERTIES
                 ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+        if(TARGET matterm-demo AND TARGET ptylink)
+            add_executable(demotty_test demotty_test.cpp mls-unit-test/test_main.cpp)
+            target_link_libraries(demotty_test PRIVATE matterm::ptylink)
+            target_compile_definitions(demotty_test PRIVATE DEMO_BINARY="$<TARGET_FILE:matterm-demo>")
+            add_dependencies(demotty_test matterm-demo)
+            add_test(NAME demo_tty COMMAND demotty_test)
+            set_tests_properties(demo_tty PROPERTIES TIMEOUT 60)
+        endif()
+        if(TARGET matterm-demo)
+            add_test(NAME demo_render_smoke
+                COMMAND matterm-demo "${TEST_FONT_FILE}" --smoke-test)
+            set_tests_properties(demo_render_smoke PROPERTIES
+                ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+            # The pips go through SDL audio (a dummy device here) while text is revealed.
+            add_test(NAME demo_sound_smoke
+                COMMAND matterm-demo "${TEST_FONT_FILE}" --sound --smoke-test)
+            set_tests_properties(demo_sound_smoke PROPERTIES
+                ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+        endif()
             add_test(NAME terminal_model_render_smoke
-                COMMAND matterm-terminal-demo "${TEST_FONT_FILE}" --smoke-test)
+                COMMAND matterm-lib-demo "${TEST_FONT_FILE}" --smoke-test)
             set_tests_properties(terminal_model_render_smoke PROPERTIES
                 ENVIRONMENT "SDL_VIDEODRIVER=dummy")
         endif()
@@ -274,7 +311,7 @@ if(BUILD_TESTING)
             endif()
         endif()
         if(MATTERM_BUNDLE_FONT)
-            foreach(app IN ITEMS matterm matterm-demo matterm-terminal-demo)
+            foreach(app IN ITEMS matterm matterm-render-demo matterm-lib-demo matterm-demo)
                 if(TARGET ${app})
                     add_test(NAME ${app}_default_font COMMAND ${app} --smoke-test)
                     set_tests_properties(${app}_default_font PROPERTIES

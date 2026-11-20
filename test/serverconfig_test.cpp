@@ -30,7 +30,7 @@ struct TempDir {
     }
     ~TempDir() {
         std::string command = "rm -rf '" + path + "'";
-        if (!path.empty() && ::system(command.c_str()) != 0) {
+        if (!path.empty() && ::system(command.c_str()) != 0) { // NOLINT(cert-env33-c): test helper, fixed command
         }
     }
     std::string write(const std::string &name,

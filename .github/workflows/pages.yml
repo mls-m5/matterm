@@ -1,0 +1,93 @@
+# Builds the browser demo (the pretend OS, no server) with Emscripten and
+# publishes it to GitHub Pages. One-time setup in the repository:
+#   Settings -> Pages -> Build and deployment -> Source: "GitHub Actions".
+# The site is static: demo.html becomes index.html, the rest is index.js/.wasm/.data,
+# login.js and style.css (see web/CMakeLists.txt). No server, no secrets.
+name: Publish demo to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "src/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer push replaces a queued older one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  # Same pinned, unmodified JetBrains Mono v2.304 as cmake/BundledFont.cmake.
+  FONT_REVISION: cd5227bd1f61dff3bbd6c814ceaf7ffd95e947d9
+  FONT_SHA256: a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f
+  OFL_SHA256: 30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad
+  # The Emscripten SDK release to build with; "latest" is what the README uses.
+  EMSDK_VERSION: latest
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the pinned font
+        run: |
+          mkdir -p font
+          base="https://raw.githubusercontent.com/JetBrains/JetBrainsMono/${FONT_REVISION}"
+          curl -fsSL "$base/fonts/ttf/JetBrainsMono-Regular.ttf" -o font/JetBrainsMono-Regular.ttf
+          curl -fsSL "$base/OFL.txt" -o font/OFL.txt
+          echo "${FONT_SHA256}  font/JetBrainsMono-Regular.ttf" | sha256sum -c -
+          echo "${OFL_SHA256}  font/OFL.txt" | sha256sum -c -
+
+      - name: Install the Emscripten SDK
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk "$HOME/emsdk"
+          "$HOME/emsdk/emsdk" install "${EMSDK_VERSION}"
+          "$HOME/emsdk/emsdk" activate "${EMSDK_VERSION}"
+
+      - name: Build the web client
+        run: |
+          source "$HOME/emsdk/emsdk_env.sh"
+          emcmake cmake -S web -B build-web -DCMAKE_BUILD_TYPE=Release \
+            -DMATTERM_FONT="$PWD/font/JetBrainsMono-Regular.ttf"
+          cmake --build build-web -j"$(nproc)"
+
+      - name: Assemble the site
+        run: |
+          mkdir pages
+          cp -r build-web/site/. pages/
+          # The static page, selected by its marker, is the front page.
+          cp pages/demo.html pages/index.html
+          cp font/OFL.txt pages/OFL.txt
+          touch pages/.nojekyll
+          ls -l pages
+
+      - name: Check the site has what the page loads
+        run: |
+          for f in index.html index.js index.wasm index.data login.js style.css embed.js; do
+            test -s "pages/$f" || { echo "missing pages/$f"; exit 1; }
+          done
+          grep -q 'matterm-static-demo' pages/index.html
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

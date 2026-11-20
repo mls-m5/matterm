@@ -8,7 +8,7 @@ The renderer, terminal model, and protocol/OS adapters remain separately usable.
 - [x] Direct cell drawing, bounded block-backed history, and borrowed row views.
 - [x] SDL atlas rendering, cursor overlay, scrollbar, and fractional scrolling.
 - [x] CPU terminal model with cursor, colors, erasure, wrapping, primary/alternate screens.
-- [x] Keep matterm-demo and matterm-terminal-demo as separate permanent clients.
+- [x] Keep matterm-render-demo and matterm-lib-demo as separate permanent clients (the name `matterm-demo` is reserved for the showcase, see docs/tasks/fakeos-demo.md).
 - [x] Group common cells/storage/view state under src/core/.
 - [x] Group graphical backends under src/render/.
 - [x] Keep screen behavior under src/terminal/ and stream parsing under src/terminal/vt/.
@@ -207,3 +207,13 @@ These describe much more functionality than matterm currently implements.
   shared-lockout regression is enabled; spoofing/malformed/config tests pass.
   nginx/container runtime isolation still needs deployment verification (see
   docs/SECURITY_REVIEW.md and docs/SERVER_CONFIG.md).
+- [ ] Inline images in the terminal (Sixel, iTerm2 `OSC 1337 File=`, and the Kitty
+  graphics protocol are the existing choices). Needs image cells in the model, a
+  memory/size policy and a security decision (decoding untrusted images,
+  scrollback cost); decide which protocol(s) first.
+- [x] The demo (`matterm-demo`, docs/DEMO.md): the pretend Mattrix OS 6.0 Professional Edition (src/fakeos) with intro, shell, about fifty commands, programs found on disk (fire, plasma, crumble, less, top), easter eggs including a click egg and the Matrix sequence, paced output, a cursor that glides, a native window, `--tty` for a plain terminal, and a static web page that can be embedded in an iframe (`?embed`, `embed.js`). Remaining: browser end-to-end runs (`web/tools/e2e-demo.js`) are written but need a browser; apps beyond the demo (see below).
+- [ ] Web demo as a platform: static apps written against a small program interface,
+  optional relay for chat/multi-user later (see docs/tasks/fakeos-demo.md).
+  The fakeos demo became the new `matterm-demo`; the old demos are now `matterm-render-demo` and `matterm-lib-demo`.
+- [ ] Animated text reveal: demo pacing first, then an opt-in renderer effect for the regular terminal. See docs/tasks/text-reveal-animation.md.
+- [ ] Mattrix OS as a separate terminal program (not now): a standalone binary (e.g. `mattrix`) running the fakeos core in a regular terminal, building on `matterm-demo --tty`. Name it "Mattrix OS" in its own text so it is not confused with matterm (the emulator); web and native-window demos can say "powered by matterm". Renderer-only effects (smooth cursor, fades) need simpler tty fallbacks (256-colour steps). Distribution (install target, static binary) undecided.

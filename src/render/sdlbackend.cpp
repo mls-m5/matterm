@@ -91,14 +91,15 @@ struct SdlBackend::Impl {
     Batch glyphs;
     Batch decorations;
     Palette defaultPalette;
+    bool reserveStrip = false;
 
     Impl(SDL_Window &window,
-         const std::string &fontPath,
+         const std::string &path,
          int size,
          bool software)
         : renderer(createRenderer(window, software), SDL_DestroyRenderer)
-        , fontPath(fontPath)
-        , atlas(std::make_unique<GlyphAtlas>(*renderer, fontPath, size))
+        , fontPath(path)
+        , atlas(std::make_unique<GlyphAtlas>(*renderer, path, size))
         , cellWidth(std::max(1, atlas->getOrInsert(U'M').advanceX))
         , cellHeight(std::max(1, atlas->lineHeight())) {
         check(SDL_GetRendererInfo(renderer.get(), &info));
@@ -141,7 +142,7 @@ void SdlBackend::render(const RenderFrame &frame) {
             ? std::size_t(0)
             : std::min(frame.cells.rows(),
                        std::size_t(std::ceil(
-                           (double(textHeight) - frame.verticalOffsetPixels) /
+                           (double(textHeight) - double(frame.verticalOffsetPixels)) /
                            s.cellHeight)));
     s.backgrounds.clear();
     s.glyphs.clear();
@@ -170,6 +171,7 @@ void SdlBackend::render(const RenderFrame &frame) {
             const float top =
                 float(y) * s.cellHeight + frame.verticalOffsetPixels;
             auto colors = palette.resolve(cell);
+            const auto baseBackground = colors.background;
             if (filledBlock && std::size_t(frame.cursor.column) == x &&
                 std::size_t(frame.cursor.row) == y) {
                 // Invert the cell: the glyph keeps showing in the cell color.
@@ -192,6 +194,25 @@ void SdlBackend::render(const RenderFrame &frame) {
                                 colors.background.g,
                                 colors.background.b,
                                 255});
+            if (s.reserveStrip && !frame.scrollbar.visible &&
+                x + 1 == columns) {
+                // The reserved scrollbar strip (and any remainder) looks like
+                // the cell beside it while there is no scrollbar. A cursor block
+                // is not extended; a selection is.
+                const bool selected =
+                    frame.selectionBegin < frame.selectionEnd &&
+                    y * frame.cells.columns() + x >= frame.selectionBegin &&
+                    y * frame.cells.columns() + x < frame.selectionEnd;
+                const auto edge = selected ? Rgb8{49, 86, 145} : baseBackground;
+                const float extraLeft = left + float(s.cellWidth);
+                if (float(width) > extraLeft) {
+                    s.backgrounds.quad(extraLeft,
+                                       top,
+                                       float(width) - extraLeft,
+                                       float(s.cellHeight),
+                                       {edge.r, edge.g, edge.b, 255});
+                }
+            }
             const auto index = y * frame.cells.columns() + x;
             const bool overlayUnderline =
                 index >= frame.underlineBegin && index < frame.underlineEnd;
@@ -336,6 +357,14 @@ void SdlBackend::setPixelSize(int pixelSize) {
     s.cellHeight = height;
     s.textureWidth = textureWidth;
     s.textureHeight = textureHeight;
+}
+
+void SdlBackend::setReserveScrollbarStrip(bool reserve) {
+    impl_->reserveStrip = reserve;
+}
+
+int SdlBackend::scrollbarStrip() noexcept {
+    return scrollbarWidth;
 }
 
 int SdlBackend::cellWidth() const noexcept {

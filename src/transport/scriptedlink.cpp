@@ -149,7 +149,7 @@ void ScriptedLink::tick() {
         sent_ = 0;
     }
     if (state_ == State::Running && step_ >= script_.steps().size()) {
-        runProgram();
+        runProgram(now);
     }
     inputPending_ = false;
     ticking_ = false;
@@ -221,7 +221,7 @@ bool ScriptedLink::runStep(protocol::Time now) {
     return false;
 }
 
-void ScriptedLink::runProgram() {
+void ScriptedLink::runProgram(protocol::Time now) {
     if (!program_) {
         input_.clear(); // Nobody is listening.
         return;
@@ -234,6 +234,9 @@ void ScriptedLink::runProgram() {
         const std::string bytes = std::move(input_);
         input_.clear();
         apply(program_->input(bytes));
+    }
+    if (state_ == State::Running) {
+        apply(program_->tick(now));
     }
 }
 
@@ -249,7 +252,7 @@ std::optional<protocol::Time> ScriptedLink::nextDeadline() const {
         if (program_ && (!programStarted_ || inputPending_)) {
             return now;
         }
-        return std::nullopt;
+        return program_ ? program_->nextDeadline() : std::nullopt;
     }
     const auto &step = script_.steps()[step_];
     using Kind = Script::Step::Kind;

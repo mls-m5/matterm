@@ -25,6 +25,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # both compile and link time.
 set(sdl_flags -sUSE_SDL=2 -sUSE_SDL_TTF=2)
 
+file(GLOB fakeos_sources CONFIGURE_DEPENDS ${root}/src/fakeos/*.cpp)
 add_library(matterm-web-core STATIC
     ${root}/src/core/palette.cpp
     ${root}/src/core/cellbuffer.cpp
@@ -39,10 +40,20 @@ add_library(matterm-web-core STATIC
     ${root}/src/protocol/message.cpp
     ${root}/src/transport/clientsession.cpp
     ${root}/src/transport/scriptedlink.cpp
+    ${fakeos_sources}
 )
+# Numbers for the demo's `about` command, counted from the repository by a build
+# step (the same script as the native build).
+set(about_header ${CMAKE_CURRENT_BINARY_DIR}/generated/fakeos_about_stats.h)
+add_custom_target(matterm-web-aboutstats
+    COMMAND ${CMAKE_COMMAND} -DROOT=${root} -DOUT=${about_header}
+            -P ${root}/cmake/AboutStats.cmake
+    BYPRODUCTS ${about_header})
+add_dependencies(matterm-web-core matterm-web-aboutstats)
 target_include_directories(matterm-web-core PUBLIC
     ${root}/src ${root}/src/core ${root}/src/render ${root}/src/terminal
     ${root}/src/terminal/vt ${root}/src/protocol ${root}/src/transport
+    ${root}/src/fakeos ${CMAKE_CURRENT_BINARY_DIR}/generated
     ${root}/src/frontend)
 target_compile_options(matterm-web-core PUBLIC ${sdl_flags})
 target_link_options(matterm-web-core PUBLIC ${sdl_flags})
@@ -60,6 +71,7 @@ set_target_properties(matterm-web PROPERTIES
 add_custom_command(TARGET matterm-web POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_CURRENT_SOURCE_DIR}/login.js ${CMAKE_CURRENT_SOURCE_DIR}/style.css
+        ${CMAKE_CURRENT_SOURCE_DIR}/embed.js
         $<TARGET_FILE_DIR:matterm-web>
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_CURRENT_SOURCE_DIR}/shell.html
@@ -71,3 +83,30 @@ target_link_options(matterm-web PRIVATE
     -sEXPORTED_RUNTIME_METHODS=ccall
     -lwebsocket.js
     "--preload-file=${MATTERM_FONT}@/assets/font.ttf")
+
+# The POST_BUILD copy above only runs when index.js is relinked. This target
+# refreshes the plain files (page, script, style) on every build, so editing
+# login.js, style.css or shell.html needs no relink.
+add_custom_target(matterm-web-site ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/login.js ${CMAKE_CURRENT_SOURCE_DIR}/style.css
+        ${CMAKE_CURRENT_SOURCE_DIR}/embed.js
+        $<TARGET_FILE_DIR:matterm-web>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/shell.html
+        $<TARGET_FILE_DIR:matterm-web>/index.html)
+add_dependencies(matterm-web-site matterm-web)
+
+# demo.html: the page with a marker that selects the in-browser demo, so a static
+# host (GitHub Pages, see .github/workflows/pages.yml) can serve it as index.html
+# without a login form or a query string.
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/shell.html matterm_shell_html)
+string(REPLACE "<title>matterm</title>"
+    "<title>matterm demo</title>\n<meta name=\"matterm-static-demo\" content=\"1\">"
+    matterm_demo_html "${matterm_shell_html}")
+file(WRITE ${CMAKE_BINARY_DIR}/demo.html "${matterm_demo_html}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shell.html)
+add_custom_target(matterm-web-demo-page ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/demo.html
+        $<TARGET_FILE_DIR:matterm-web>/demo.html)
+add_dependencies(matterm-web-demo-page matterm-web)

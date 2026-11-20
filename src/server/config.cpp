@@ -791,7 +791,7 @@ CommandLine parseCommandLine(const std::vector<std::string> &arguments) {
             result.help = true;
         }
         else if (option == "--") {
-            result.program = std::vector<std::string>(arguments.begin() + i + 1,
+            result.program = std::vector<std::string>(arguments.begin() + std::ptrdiff_t(i) + 1,
                                                       arguments.end());
             if (result.program->empty())
                 throw ConfigError("--: missing program");

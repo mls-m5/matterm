@@ -162,7 +162,7 @@ inline std::optional<TerminalModel::TextCell> mouseCell(
     const auto column =
         std::size_t(std::clamp(x, 0.0, textWidth - 1) / cellWidth);
     const auto row = std::size_t((std::clamp(y, 0.0, textHeight - 1) -
-                                  viewport.pixelOffset(cellHeight)) /
+                                  double(viewport.pixelOffset(cellHeight))) /
                                  cellHeight);
     return TerminalModel::TextCell{model.firstRetainedRow() +
                                        viewport.firstRow() +

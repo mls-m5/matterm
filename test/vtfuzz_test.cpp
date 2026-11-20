@@ -26,7 +26,7 @@ bool check(bool ok, unsigned trial, std::string_view bytes) {
 bool invariant(const TerminalModel &model) {
     const auto cursor = model.cursor();
     const auto frame = model.frame(16);
-    return cursor.column < model.columns() && cursor.row < model.rows() &&
+    return std::size_t(cursor.column) < model.columns() && std::size_t(cursor.row) < model.rows() &&
            model.historySize() <= 24 &&
            (!model.alternateScreen() || model.historySize() == 0) &&
            frame.cells.rows() == model.rows() &&

@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.23)
 project(matterm LANGUAGES CXX)
 
 include(CTest)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+include(cmake/Warnings.cmake)
 option(MATTERM_BUILD_DEMO "Build the standalone matterm demos" ON)
 option(MATTERM_BUILD_APP "Build the matterm terminal application" ON)
 option(MATTERM_BUILD_SERVER "Build the Linux HTTP/WebSocket server" OFF)
@@ -49,6 +52,25 @@ add_library(matterm::transport ALIAS ttytransport)
 target_compile_features(ttytransport PUBLIC cxx_std_17)
 target_include_directories(ttytransport PUBLIC src/transport)
 target_link_libraries(ttytransport PUBLIC matterm::protocol)
+
+# fakeos: a pretend Unix system with ASCII animations. Pure C++17 with no I/O,
+# clock or process access (enforced by test/check_fakeos_includes.cmake), so the
+# same core runs in the browser, in the native window and in a plain terminal.
+file(GLOB FAKEOS_SOURCES CONFIGURE_DEPENDS src/fakeos/*.cpp)
+add_library(fakeos ${FAKEOS_SOURCES})
+add_library(matterm::fakeos ALIAS fakeos)
+target_compile_features(fakeos PUBLIC cxx_std_17)
+target_include_directories(fakeos PUBLIC src/fakeos)
+# The `about` command prints numbers counted from the repository: a build step
+# writes them to a header (cmake/AboutStats.cmake), so they match what was built.
+set(FAKEOS_ABOUT_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/fakeos_about_stats.h)
+add_custom_target(fakeos_aboutstats
+    COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR} -DOUT=${FAKEOS_ABOUT_HEADER}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/AboutStats.cmake
+    BYPRODUCTS ${FAKEOS_ABOUT_HEADER}
+    COMMENT "Counting the repository for `about`")
+add_dependencies(fakeos fakeos_aboutstats)
+target_include_directories(fakeos PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
 add_library(utf8decoder src/terminal/vt/utf8decoder.cpp)
 add_library(matterm::utf8 ALIAS utf8decoder)
@@ -131,12 +153,25 @@ if(MATTERM_BUILD_DEMO OR BUILD_TESTING)
 endif()
 
 if(MATTERM_BUILD_DEMO)
-    add_executable(matterm-demo demo/main.cpp)
-    target_link_libraries(matterm-demo PRIVATE matterm::renderer democontent)
+    add_executable(matterm-render-demo demo/main.cpp)
+    target_link_libraries(matterm-render-demo PRIVATE matterm::renderer democontent)
+    matterm_application_assets(matterm-render-demo)
+    add_executable(matterm-lib-demo demo/terminalmain.cpp)
+    target_link_libraries(matterm-lib-demo PRIVATE matterm::terminal matterm::utf8 matterm::renderer democontent)
+    matterm_application_assets(matterm-lib-demo)
+endif()
+if(MATTERM_BUILD_DEMO)
+    # The pretend system (src/fakeos) in a window, or with --tty in a terminal.
+    add_executable(matterm-demo app/demo/main.cpp)
+    target_sources(matterm-demo PRIVATE app/demo/beeper.cpp)
+    target_include_directories(matterm-demo PRIVATE src/frontend app/demo)
+    target_link_libraries(matterm-demo PRIVATE matterm::fakeos matterm::transport matterm::vt matterm::renderer)
     matterm_application_assets(matterm-demo)
-    add_executable(matterm-terminal-demo demo/terminalmain.cpp)
-    target_link_libraries(matterm-terminal-demo PRIVATE matterm::terminal matterm::utf8 matterm::renderer democontent)
-    matterm_application_assets(matterm-terminal-demo)
+    if(UNIX)
+        target_sources(matterm-demo PRIVATE app/demo/ttyhost.cpp)
+        target_include_directories(matterm-demo PRIVATE app/demo)
+        target_compile_definitions(matterm-demo PRIVATE MATTERM_DEMO_TTY=1)
+    endif()
 endif()
 if(MATTERM_BUILD_APP)
     add_executable(matterm app/main.cpp)

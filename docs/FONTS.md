@@ -31,8 +31,8 @@ argument to override the bundled default.
 cmake -S . -B build
 cmake --build build
 ./build/matterm
-./build/matterm-demo
-./build/matterm-terminal-demo
+./build/matterm-render-demo
+./build/matterm-lib-demo
 cmake --install build --prefix /path/to/package
 ```
 

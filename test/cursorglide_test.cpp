@@ -43,7 +43,7 @@ TEST_CASE("Retargeting mid-glide continues from the position shown") {
     const float shown = 10 + glide.columnOffset(); // Absolute position now.
     glide.update(10, 3, true, 1.05);               // New target row.
     // Same absolute column right after the retarget; no jump.
-    EXPECT(std::abs((10 + glide.columnOffset()) - shown) < 1e-4);
+    EXPECT(std::abs((10 + double(glide.columnOffset())) - double(shown)) < 1e-4);
     EXPECT(glide.rowOffset() <= 0.0f);
 }
 

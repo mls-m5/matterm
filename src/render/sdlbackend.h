@@ -32,6 +32,13 @@ public:
     // Drawable-pixel metrics; placement in RenderFrame is always in cells.
     int cellWidth() const noexcept;
     int cellHeight() const noexcept;
+    // For frontends that reserve the scrollbar strip in their column count
+    // (columns(true)): without a visible scrollbar, extend each row's last cell
+    // background over the strip so it looks like part of the terminal. Off by
+    // default (then the strip is only used while a scrollbar is visible).
+    void setReserveScrollbarStrip(bool reserve);
+    // Width of the strip reserved at the right edge for the scrollbar.
+    static int scrollbarStrip() noexcept;
     // Reserve the scrollbar strip when computing text width if requested.
     int columns(bool scrollbarVisible = false) const;
     int rows() const;

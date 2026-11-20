@@ -137,6 +137,31 @@ TEST_CASE("Fractional rows are clipped to text bounds and cannot cover the "
 }
 
 TEST_CASE(
+    "A reserved strip without a scrollbar continues the last cell per row") {
+    Fixture fixture;
+    // The frontend's column count leaves the 12 px strip (and any remainder)
+    // to the right of the last column.
+    const auto columns = std::size_t(fixture.backend->columns(true));
+    CellBuffer cells(columns, 4);
+    cells.clear(FChar{U' ', {}, {200, 30, 40}});
+    for (std::size_t y = 0; y < cells.rows(); ++y) {
+        cells.at(columns - 1, y).background =
+            y == 1 ? Rgb8{20, 180, 50} : Rgb8{200, 30, 40};
+    }
+    RenderFrame frame{cells.view(), {}};
+    const int h = fixture.backend->cellHeight();
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(319, 0), Uint32(0x1e1e1e)); // Default: untouched.
+    fixture.backend->setReserveScrollbarStrip(true);
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(319, 0), Uint32(0xc81e28));
+    EXPECT_EQ(fixture.pixel(319, h + 1), Uint32(0x14b432));
+    frame.scrollbar = {true, 0.0f, 0.5f};
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(319, 0), Uint32(0x191d24)); // The track wins.
+}
+
+TEST_CASE(
     "Pixel offset also moves the cursor and invalid offsets fail cleanly") {
     Fixture fixture;
     CellBuffer cells(2, 3);

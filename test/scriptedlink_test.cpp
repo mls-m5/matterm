@@ -87,6 +87,34 @@ struct Screen {
     std::string raw;
     std::vector<int> exits;
 };
+// Emits "." every 100 ms from the time of its first tick.
+class Ticker final : public ScriptedLink::Program {
+public:
+    ScriptedLink::Reaction start() override {
+        return {"start;", std::nullopt};
+    }
+    ScriptedLink::Reaction input(std::string_view bytes) override {
+        return {std::string(bytes), std::nullopt};
+    }
+    void resize(int, int) override {}
+    ScriptedLink::Reaction tick(protocol::Time now) override {
+        if (!next_) {
+            next_ = now + milliseconds(100);
+        }
+        ScriptedLink::Reaction reaction;
+        while (now >= *next_) {
+            reaction.output += ".";
+            *next_ += milliseconds(100);
+        }
+        return reaction;
+    }
+    std::optional<protocol::Time> nextDeadline() const override {
+        return next_;
+    }
+
+private:
+    std::optional<protocol::Time> next_;
+};
 const std::string kPromptRow = "matterm:~$";
 } // namespace
 
@@ -405,6 +433,36 @@ TEST_CASE("A script can lead into the simulator") {
     link.tick();
     EXPECT(out.rfind("boot\r\n", 0) == 0);
     EXPECT(out.find("matterm simulator") != std::string::npos);
+}
+
+TEST_CASE("A program's tick runs on each link tick and sets the deadline") {
+    long long now = 0;
+    ScriptedLink::Config config;
+    config.clock = [&] { return protocol::Time(now); };
+    ScriptedLink link(config, Script(), std::make_unique<Ticker>());
+    std::string out;
+    link.setEvents(
+        {[&](std::string_view b) { out.append(b); }, nullptr, nullptr});
+    link.tick();
+    EXPECT(out == "start;");
+    EXPECT(*link.nextDeadline() == protocol::Time(100));
+    now = 99;
+    link.tick();
+    EXPECT(out == "start;");
+    now = 350;
+    link.tick();
+    EXPECT(out == "start;...");
+    EXPECT(*link.nextDeadline() == protocol::Time(400));
+    link.sendInput("x");
+    EXPECT(*link.nextDeadline() == protocol::Time(350)); // Input is due now.
+    link.tick();
+    EXPECT(out == "start;...x");
+}
+
+TEST_CASE("Programs without tick keep no deadline") {
+    Harness h({}, true);
+    h.at(0);
+    EXPECT(!h.link->nextDeadline());
 }
 
 TEST_SUIT_END

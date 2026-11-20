@@ -1,12 +1,13 @@
 // Browser front end: the terminal model, VT parser and SDL renderer on a
 // canvas, connected to matterm-server through ClientSession (WebSocket). With
-// no server URL it runs an interactive terminal simulator (ScriptedLink).
+// no server URL it runs the pretend system (src/fakeos) through ScriptedLink.
 #include "clientsession.h"
 #include "cursorglide.h"
 #include "framesignature.h"
 #include "inputencoder.h"
 #include "palette.h"
 #include "scriptedlink.h"
+#include "scriptedprogram.h"
 #include "sdlbackend.h"
 #include "sdlinput.h"
 #include "terminalmodel.h"
@@ -38,7 +39,7 @@ struct App {
     std::unique_ptr<VtParser> parser;
     std::unique_ptr<WebSocketChannel> channel;
     std::unique_ptr<ClientSession> session;
-    std::unique_ptr<ScriptedLink> demo; // Simulator when there is no server.
+    std::unique_ptr<ScriptedLink> demo; // The pretend system, no server.
     TerminalLink *link = nullptr;       // session or demo.
     const Palette defaultPalette;
     Palette palette;
@@ -61,6 +62,8 @@ struct App {
     // Idle throttling: full speed for a while after input or any visible
     // change (blink excluded), otherwise one full pass every idleMs.
     Uint64 activeUntil = 0;
+    bool paused = false; // The page is out of view; see frame().
+    Uint64 pauseChecked = 0;
     Uint64 lastFull = 0;
     // Touch: gesture state, scroll remainder in rows, and the font size in CSS
     // pixels (changed by pinch or Ctrl+wheel, applied between frames).
@@ -75,6 +78,24 @@ App *gApp = nullptr; // For matterm_paste.
 
 // The `ws` query parameter (?ws=ws://127.0.0.1:8080/ws) or window.mattermWs
 // (set by login.js). Empty: demo.
+// A query parameter as text (empty when absent); for ?cmd= in the demo.
+std::string queryParam(const char *name) {
+    char *value = static_cast<char *>(EM_ASM_PTR(
+        {
+            const v =
+                new URLSearchParams(location.search).get(UTF8ToString($0)) ||
+                "";
+            const n = lengthBytesUTF8(v) + 1;
+            const p = _malloc(n);
+            stringToUTF8(v, p, n);
+            return p;
+        },
+        name));
+    std::string text = value;
+    std::free(value);
+    return text;
+}
+
 std::string wsUrl() {
     char *value = static_cast<char *>(EM_ASM_PTR({
         const v = new URLSearchParams(location.search).get("ws") ||
@@ -550,6 +571,23 @@ void handleEvent(App &app, const SDL_Event &event) {
 
 // Rebuild the renderer with the pending font size; the next frame notices the
 // new cell size and resizes the model and the link as for a window resize.
+// Tell the page the cell size (device pixels) so it can size the window to
+// whole cells; see snapWindow() in login.js.
+void publishCellSize(const App &app) {
+    if (!app.backend) {
+        return;
+    }
+    EM_ASM(
+        {
+            if (window.mattermCell) {
+                window.mattermCell($0, $1, $2);
+            }
+        },
+        app.backend->cellWidth(),
+        app.backend->cellHeight(),
+        SdlBackend::scrollbarStrip());
+}
+
 void changeFont(App &app) {
     const int wanted = app.pendingFontCss;
     try {
@@ -563,6 +601,7 @@ void changeFont(App &app) {
     app.pendingFontCss = app.fontCss;
     app.lastSignature.reset();
     app.touchRows = 0;
+    publishCellSize(app);
 }
 
 void frame(void *data) {
@@ -570,6 +609,16 @@ void frame(void *data) {
     SDL_Event event;
     constexpr Uint64 activeMs = 500, idleMs = 100;
     const auto start = SDL_GetTicks64();
+    // Out of view (scrolled away in an embedding page, or a hidden tab): no
+    // frames until the page says it is visible again. Asked a few times a
+    // second.
+    if (start - app.pauseChecked >= 200) {
+        app.pauseChecked = start;
+        app.paused = EM_ASM_INT({ return window.mattermPaused ? 1 : 0; }) != 0;
+    }
+    if (app.paused) {
+        return;
+    }
     while (SDL_PollEvent(&event)) {
         app.activeUntil = start + activeMs;
         if (app.link) {
@@ -774,6 +823,8 @@ int main() {
         std::fprintf(stderr, "backend failed: %s\n", error.what());
         return 1;
     }
+    app.backend->setReserveScrollbarStrip(true);
+    publishCellSize(app);
     app.model = std::make_unique<TerminalModel>(
         std::size_t(std::max(1, app.backend->columns(true))),
         std::size_t(std::max(1, app.backend->rows())),
@@ -800,21 +851,24 @@ int main() {
         }
     };
     app.parser = std::make_unique<VtParser>(*app.model, std::move(vtEvents));
-    // ?smooth glides the cursor between positions (off by default);
-    // ?smooth=300 sets the glide time in milliseconds (default 80).
+    // ?smooth glides the cursor between positions; ?smooth=300 sets the glide
+    // time in milliseconds (default 80). It is off for a real terminal session
+    // and on in the static demo (no server URL); ?smooth=0 turns it off there.
+    const auto url = wsUrl();
     CursorGlide::Config glide;
-    const int smoothMs = EM_ASM_INT({
-        const p = new URLSearchParams(location.search);
-        if (!p.has("smooth")) {
-            return 0;
-        }
-        const v = parseInt(p.get("smooth"), 10);
-        return v > 0 ? v : 80;
-    });
+    const int smoothMs = EM_ASM_INT(
+        {
+            const p = new URLSearchParams(location.search);
+            if (!p.has("smooth")) {
+                return $0 ? 80 : 0;
+            }
+            const v = parseInt(p.get("smooth"), 10);
+            return v == 0 ? 0 : (v > 0 ? v : 80);
+        },
+        url.empty() ? 1 : 0);
     glide.enabled = smoothMs > 0;
     glide.durationSeconds = smoothMs / 1000.0;
     app.cursorGlide = CursorGlide(glide);
-    const auto url = wsUrl();
     if (!url.empty()) {
         try {
             app.channel = std::make_unique<WebSocketChannel>(url);
@@ -850,14 +904,56 @@ int main() {
         }
     }
     if (!app.link) {
-        // No server: an interactive terminal simulator (docs/SIMULATOR.md).
+        // No server: the pretend system (docs/FAKEOS.md). ?nointro skips the
+        // intro animation.
         ScriptedLink::Config config;
         config.clock = [] {
             return protocol::Time(std::chrono::milliseconds(SDL_GetTicks64()));
         };
         config.columns = int(app.model->columns());
         config.rows = int(app.model->rows());
-        app.demo = ScriptedLink::simulator(config);
+        fakeos::Config pretend;
+        pretend.columns = config.columns;
+        pretend.rows = config.rows;
+        pretend.intro =
+            EM_ASM_INT({
+                return new URLSearchParams(location.search).has("nointro") ? 0
+                                                                           : 1;
+            }) != 0;
+        // ?cmd=... is typed at the first prompt (printable text only).
+        for (const char c : queryParam("cmd").substr(0, 200)) {
+            if ((unsigned char)c >= 0x20 && c != 0x7f) {
+                pretend.startCommand += c;
+            }
+        }
+        // Program output appears at a pace (any key shows the rest);
+        // ?noreveal prints it at once.
+        pretend.revealCharsPerSecond = EM_ASM_INT({
+            return new URLSearchParams(location.search).has("noreveal") ? 0
+                                                                        : 1250;
+        });
+        // Pips: off unless ?sound=1; the `sound on` command turns them on, and
+        // login.js plays them with WebAudio after a user gesture.
+        pretend.sound =
+            EM_ASM_INT({ return window.mattermSoundWanted ? 1 : 0; }) != 0;
+        pretend.onBeep = [](const fakeos::Beep &beep) {
+            EM_ASM(
+                {
+                    if (window.mattermBeep) {
+                        window.mattermBeep($0, $1, $2);
+                    }
+                },
+                beep.frequency,
+                double(beep.durationMs),
+                beep.volume);
+        };
+        pretend.seed = std::uint64_t(EM_ASM_DOUBLE({ return Date.now(); }));
+        pretend.unixTime = std::int64_t(
+            EM_ASM_DOUBLE({ return Math.floor(Date.now() / 1000); }));
+        app.demo = std::make_unique<ScriptedLink>(
+            config,
+            Script(),
+            std::make_unique<fakeos::ScriptedProgram>(pretend));
         app.link = app.demo.get();
         TerminalLink::Events events;
         events.output = [](std::string_view bytes) {

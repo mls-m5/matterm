@@ -129,7 +129,7 @@ void smoke(SDL_Window &window, SdlBackend &backend, TerminalModel &model) {
 
 int run(const char *font, bool smokeTest) {
     std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(
-        SDL_CreateWindow("matterm-terminal-demo",
+        SDL_CreateWindow("matterm-lib-demo",
                          SDL_WINDOWPOS_CENTERED,
                          SDL_WINDOWPOS_CENTERED,
                          960,
@@ -271,7 +271,7 @@ int run(const char *font, bool smokeTest) {
         auto frame = model->frame(backend.cellHeight());
         frame.cursor.visible = frame.cursor.visible && (now / 500) % 2 == 0;
         const auto title =
-            std::string("matterm-terminal-demo | F2: switch | F3: rows | ") +
+            std::string("matterm-lib-demo | F2: switch | F3: rows | ") +
             (model->alternateScreen() ? "alternate (no history)" : "primary") +
             " | history " + std::to_string(model->historySize());
         SDL_SetWindowTitle(window.get(), title.c_str());
