@@ -1273,6 +1273,22 @@ int cmdSlow(World &w, const Args &args, CommandIo &io) {
     return 0;
 }
 
+// `chat` asks before it connects: what it is, who sees what, and then y or n.
+int cmdChat(World &w, const Args &, CommandIo &io) {
+    io.out += "Live chat, draft sent as you type.\n"
+              "This connects to " +
+              w.chat.server +
+              ". The server sees your IP address;\n"
+              "other users see only your name. Everyone sees what you type "
+              "while you type\n"
+              "it, and a pause of 5 seconds posts it. Messages are public and "
+              "kept only in\n"
+              "the server's memory for a short time.\n"
+              "Connect? [y/N] ";
+    w.chatQuestion = true;
+    return 0;
+}
+
 int cmdHistory(World &w, const Args &, CommandIo &io) {
     for (std::size_t i = 0; i < w.history.size(); ++i) {
         const auto n = std::to_string(i + 1);
@@ -1327,13 +1343,16 @@ int cmdWhich(World &w, const Args &args, CommandIo &io) {
     return status;
 }
 
-int cmdHelp(World &, const Args &, CommandIo &io) {
+int cmdHelp(World &w, const Args &, CommandIo &io) {
     io.out += "Mattrix OS 6.0 Professional Edition, a simulated system.\n"
               "A small Unix that lives in a terminal.\n"
               "Nothing here touches your real computer.\n\n"
               "Commands:\n";
     std::string line;
     for (const auto &c : commands()) {
+        if (!commandAvailable(w, c)) {
+            continue;
+        }
         const std::string entry = std::string(c.name);
         if (line.size() + entry.size() + 2 > 70) {
             io.out += "  " + line + "\n";
@@ -1353,12 +1372,12 @@ int cmdHelp(World &, const Args &, CommandIo &io) {
     return 0;
 }
 
-int cmdMan(World &, const Args &args, CommandIo &io) {
+int cmdMan(World &w, const Args &args, CommandIo &io) {
     if (args.size() < 2) {
         io.err += "What manual page do you want?\n";
         return 1;
     }
-    if (const auto *c = findCommand(args[1])) {
+    if (const auto *c = findCommand(args[1]); c && commandAvailable(w, *c)) {
         io.out += std::string(c->name) + " - " + c->summary + "\n";
         return 0;
     }
@@ -2502,6 +2521,7 @@ const std::vector<CommandInfo> &commands() {
         {"slow", cmdSlow, true, "turn the dramatic typing speed on or off"},
         {"sound", cmdSound, true, "turn the typing pips on or off"},
         {"history", cmdHistory, true, "show the command history"},
+        {"chat", cmdChat, false, "join the live chat (when a server is set)"},
         {"clear", cmdClear, true, "clear the screen"},
         {"reset",
          cmdReset,
@@ -2564,6 +2584,10 @@ const std::vector<CommandInfo> &commands() {
         {"top", cmdTop, false, "watch the processes"},
     };
     return table;
+}
+
+bool commandAvailable(const World &w, const CommandInfo &c) {
+    return std::string(c.name) != "chat" || w.chat.available();
 }
 
 const CommandInfo *findCommand(const std::string &name) {

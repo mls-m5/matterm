@@ -33,6 +33,24 @@ public:
     virtual bool wantsMouse() const {
         return false;
     }
+    // An inline program draws on the normal screen with its own escape
+    // sequences (no alternate screen, no canvas): rawFrame() returns what to
+    // write now, leave() what to write when it ends. The chat is one.
+    virtual bool inlineMode() const {
+        return false;
+    }
+    virtual std::string rawFrame(World &, Time) {
+        return {};
+    }
+    virtual std::string leave(World &) {
+        return {};
+    }
+    // Something from the host (the chat connection): "opened", "line",
+    // "closed".
+    virtual void external(World &,
+                          const std::string &,
+                          std::string_view,
+                          Time) {}
     // Printed after the program ended and the screen was restored.
     virtual std::string farewell() const {
         return {};
@@ -59,6 +77,7 @@ std::unique_ptr<Program> makeTop(const std::vector<std::string> &args);
 std::unique_ptr<Program> makeCrumble(const std::vector<std::string> &args);
 std::unique_ptr<Program> makeMatrix(const std::vector<std::string> &args);
 std::unique_ptr<Program> makeCrash(const std::vector<std::string> &args);
+std::unique_ptr<Program> makeChat(const std::vector<std::string> &args);
 std::unique_ptr<Program> makeSnow(const std::vector<std::string> &args);
 std::unique_ptr<Program> makeLife(const std::vector<std::string> &args);
 std::unique_ptr<Program> makeTrain(const std::vector<std::string> &args);

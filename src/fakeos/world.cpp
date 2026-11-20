@@ -132,7 +132,7 @@ void seedWorld(World &world) {
            base - 3 * day);
     // Programs are files that name what runs them.
     for (const auto &c : commands()) {
-        if (!c.builtin) {
+        if (!c.builtin && commandAvailable(world, c)) {
             fs.put(std::string("/bin/") + c.name,
                    std::string("#!builtin ") + c.name + "\n",
                    "root",
