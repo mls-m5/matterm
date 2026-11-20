@@ -342,3 +342,11 @@ if(TARGET mattrix AND TARGET ptylink)
     add_test(NAME mattrix_tty COMMAND mattrixtty_test)
     set_tests_properties(mattrix_tty PROPERTIES TIMEOUT 60)
 endif()
+
+# chatd over real loopback sockets (plain TCP test listener and WebSocket).
+if(TARGET chatd-core)
+    add_executable(chatd_test chatd_test.cpp mls-unit-test/test_main.cpp)
+    target_link_libraries(chatd_test PRIVATE chatd-core)
+    add_test(NAME chatd COMMAND chatd_test)
+    set_tests_properties(chatd PROPERTIES TIMEOUT 60)
+endif()
