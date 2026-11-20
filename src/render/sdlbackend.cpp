@@ -94,12 +94,12 @@ struct SdlBackend::Impl {
     bool reserveStrip = false;
 
     Impl(SDL_Window &window,
-         const std::string &fontPath,
+         const std::string &path,
          int size,
          bool software)
         : renderer(createRenderer(window, software), SDL_DestroyRenderer)
-        , fontPath(fontPath)
-        , atlas(std::make_unique<GlyphAtlas>(*renderer, fontPath, size))
+        , fontPath(path)
+        , atlas(std::make_unique<GlyphAtlas>(*renderer, path, size))
         , cellWidth(std::max(1, atlas->getOrInsert(U'M').advanceX))
         , cellHeight(std::max(1, atlas->lineHeight())) {
         check(SDL_GetRendererInfo(renderer.get(), &info));
@@ -142,7 +142,7 @@ void SdlBackend::render(const RenderFrame &frame) {
             ? std::size_t(0)
             : std::min(frame.cells.rows(),
                        std::size_t(std::ceil(
-                           (double(textHeight) - frame.verticalOffsetPixels) /
+                           (double(textHeight) - double(frame.verticalOffsetPixels)) /
                            s.cellHeight)));
     s.backgrounds.clear();
     s.glyphs.clear();

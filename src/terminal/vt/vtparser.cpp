@@ -68,12 +68,12 @@ struct VtParser::Impl {
     std::string controlString;
     char32_t lastPainted = 0;
 
-    Impl(TerminalModel &model,
-         VtEvents events,
+    Impl(TerminalModel &terminal,
+         VtEvents handlers,
          ColorReference foreground,
          ColorReference background)
-        : model(model)
-        , events(std::move(events))
+        : model(terminal)
+        , events(std::move(handlers))
         , defaults{foreground, background}
         , primary{defaults, defaults, false}
         , alternate{defaults, defaults, false} {
@@ -247,7 +247,7 @@ struct VtParser::Impl {
             index > 255) {
             return std::nullopt;
         }
-        return std::size_t(index);
+        return static_cast<std::size_t>(index);
     }
     // Accepts rgb:R/G/B with 1-4 hex digits per channel, and #RGB/#RRGGBB/...
     static std::optional<Rgb8> parseColor(std::string_view text) {
@@ -374,7 +374,7 @@ struct VtParser::Impl {
         }
         else if (byte >= 0x20 && byte <= 0x2f) {
             state = State::EscapeIntermediate;
-            charsetSelector = byte == '(' || byte == ')' ? char(byte) : 0;
+            charsetSelector = byte == '(' || byte == ')' ? char(byte) : char(0);
         }
         else {
             state = State::Ground;
@@ -824,7 +824,7 @@ struct VtParser::Impl {
             return;
         }
         if (byte >= 0x20 && byte <= 0x2f) {
-            intermediateChar = intermediate ? 0 : char(byte);
+            intermediateChar = intermediate ? char(0) : char(byte);
             intermediate = true;
             return;
         }

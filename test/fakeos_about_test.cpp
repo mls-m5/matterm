@@ -160,7 +160,7 @@ TEST_CASE("It ends with the credit and the tools") {
             toolsRow = y;
     }
     EXPECT(creditRow > 0 && toolsRow >= creditRow);
-    EXPECT(toolsRow + 2 >= pc.model.cursor().row);
+    EXPECT(toolsRow + 2 >= std::size_t(pc.model.cursor().row));
     // The name is spelled with its ö.
     bool umlaut = false;
     for (std::size_t x = 0; x < pc.model.columns(); ++x) {

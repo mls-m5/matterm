@@ -1,0 +1,42 @@
+# Security- and correctness-focused checks. Run: tools/clang-tidy.sh
+# Style-only checks (init-variables, member-init, int->float narrowing, cloned
+# branches, mt-unsafe libc calls, seeding of the deterministic demo RNG) are off.
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-core.*,
+  clang-analyzer-security.*,
+  clang-analyzer-unix.*,
+  clang-analyzer-cplusplus.*,
+  clang-analyzer-optin.portability.*,
+  concurrency-*,
+  misc-misplaced-const,
+  misc-non-copyable-objects,
+  misc-throw-by-value-catch-by-reference,
+  misc-uniqueptr-reset-release,
+  cppcoreguidelines-narrowing-conversions,
+  cppcoreguidelines-slicing,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-exception-escape,
+  -bugprone-narrowing-conversions,
+  -bugprone-branch-clone,
+  -bugprone-incorrect-roundings,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-suspicious-missing-comma,
+  -bugprone-integer-division,
+  -cert-msc32-c,
+  -cert-msc51-cpp,
+  -cert-err58-cpp,
+  -cert-dcl37-c,
+  -cert-dcl51-cpp,
+  -concurrency-mt-unsafe
+CheckOptions:
+  - key: cppcoreguidelines-narrowing-conversions.WarnOnIntegerToFloatingPointNarrowingConversion
+    value: false
+  - key: cppcoreguidelines-narrowing-conversions.WarnOnFloatingPointNarrowingConversion
+    value: false
+  - key: cppcoreguidelines-narrowing-conversions.WarnOnEquivalentBitWidth
+    value: false
+WarningsAsErrors: ''
+HeaderFilterRegex: '(src|app|demo)/.*'
