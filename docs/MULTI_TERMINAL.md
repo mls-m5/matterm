@@ -334,8 +334,14 @@ Decided:
 - **Scrolling in the alternate screen** is unchanged: without mouse reporting the
   wheel sends Up/Down; there is no history there (docs/SCROLLING_AND_REFLOW.md).
 
-Open: splits at pixel positions instead of whole cells (Shift snaps to cells); the
-exact prefix letters; the divider look; moving a pane between tabs.
+- **Splits at pixel positions** (decided): the divider is dragged freely and the tree
+  stores ratios, not cell counts. A pane gives its program only the whole cells that
+  fit, and the program gets a size change only when a whole cell is gained or lost.
+  The leftover pixels are painted like the cell beside them (as the reserved
+  scrollbar strip already is). Holding Shift while dragging snaps to whole cells. An
+  "even out" command snaps every split to whole cells.
+
+Open: the exact prefix letters; the divider look; moving a pane between tabs.
 
 Suggested phases: 1) chrome layer, cell tab strip; 2) pane tree, dividers, focus;
 3) prefix keys and activity marks; 4) scrollbar placement.
