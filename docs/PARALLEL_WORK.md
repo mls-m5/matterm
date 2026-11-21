@@ -68,9 +68,8 @@ clang-tidy (`docs/STATIC_ANALYSIS.md`).
 
 - `docs/CHAT.md`: the Mattrix OS chat (ChatRoom core, `chatd`, `mattrix-chat`).
   Worktree `.tmp/agent3`, branch `agent3-fakeos`.
-- `docs/tasks/web-sessions.md`: browser tabs/terminal views on top of the server
-  sessions (phase 2 of docs/MULTI_TERMINAL.md); plan first, implement after the
-  operator agrees. Worktree `.tmp/agent2`, branch `agent2-websessions`.
+- `docs/tasks/web-sessions.md`: browser tabs/terminal views. **Paused** while the
+  operator plans them; the implementation is archived on `archive/web-tabs`.
 - Width reflow: designed only (docs/SCROLLING_AND_REFLOW.md), not assigned.
 
 Agents can be reached through the MCP message tools (`list_peers`,
