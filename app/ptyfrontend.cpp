@@ -5,8 +5,8 @@
 #include "ptysession.h"
 #include "sdlbackend.h"
 #include "sdlinput.h"
-#include "windowsnap.h"
 #include "terminalmodel.h"
+#include "windowsnap.h"
 
 #include <SDL.h>
 #include <SDL_ttf.h>
@@ -305,6 +305,7 @@ int runPtyFrontend(const char *font,
     CursorGlide cursorGlide(glideConfig);
     bool skipText = false;
     Uint64 lastFrame = SDL_GetTicks64();
+    Uint64 snapDue = 0; // when to snap the window to whole cells
     while (running) {
         skipText = false;
         resize();
@@ -424,25 +425,10 @@ int runPtyFrontend(const char *font,
                 // Leave no partial cell at the right or bottom edge. Maximized,
                 // full-screen and tiled windows are sized by the window manager
                 // and keep the leftover as terminal background.
-                const auto flags = SDL_GetWindowFlags(window.get());
-                if (!(flags & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP |
-                               SDL_WINDOW_MAXIMIZED | SDL_WINDOW_MINIMIZED))) {
-                    frontend::WindowSize current, drawable;
-                    SDL_GetWindowSize(window.get(), &current.width, &current.height);
-                    SDL_GetRendererOutputSize(SDL_GetRenderer(window.get()),
-                                              &drawable.width,
-                                              &drawable.height);
-                    const auto snapped = frontend::snappedWindowSize(
-                        current,
-                        drawable,
-                        backend.cellWidth(),
-                        backend.cellHeight(),
-                        SdlBackend::scrollbarStrip());
-                    if (!(snapped == current)) {
-                        SDL_SetWindowSize(
-                            window.get(), snapped.width, snapped.height);
-                    }
-                }
+                // Snapping while the window manager is still dragging the
+                // edge makes the window jump back and forth (GNOME Shell), so
+                // wait until the size has been quiet for a moment.
+                snapDue = SDL_GetTicks64() + 150;
             }
             else if (event.type == SDL_WINDOWEVENT &&
                      (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST ||
@@ -566,6 +552,30 @@ int runPtyFrontend(const char *font,
                 }
                 else if (mod.control && key >= 0 && key <= 127) {
                     send(InputEncoder::control(char(key), mod.alt));
+                }
+            }
+        }
+        if (snapDue != 0 && SDL_GetTicks64() >= snapDue) {
+            snapDue = 0;
+            const auto flags = SDL_GetWindowFlags(window.get());
+            if (!(flags &
+                  (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP |
+                   SDL_WINDOW_MAXIMIZED | SDL_WINDOW_MINIMIZED))) {
+                frontend::WindowSize current, drawable;
+                SDL_GetWindowSize(
+                    window.get(), &current.width, &current.height);
+                SDL_GetRendererOutputSize(SDL_GetRenderer(window.get()),
+                                          &drawable.width,
+                                          &drawable.height);
+                const auto snapped =
+                    frontend::snappedWindowSize(current,
+                                                drawable,
+                                                backend.cellWidth(),
+                                                backend.cellHeight(),
+                                                SdlBackend::scrollbarStrip());
+                if (!(snapped == current)) {
+                    SDL_SetWindowSize(
+                        window.get(), snapped.width, snapped.height);
                 }
             }
         }
