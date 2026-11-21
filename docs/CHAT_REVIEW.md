@@ -204,3 +204,80 @@ descriptors from `/proc/self`:
 It found no defect in chatd. It does not cover TLS or the proxy, and with one
 source address (loopback) it cannot show the per-source fairness across many
 addresses (see F4 in section 2).
+
+## 7. Deployment files (secondary review)
+
+A read-through of `deploy/chatd/` against what chatd does (idle timeout 90 s with
+keep-alive pings, 5 s handshake deadline, one request per connection, exact
+Origin, X-Forwarded-For only from `--trust-proxy`) and against nginx and Caddy as
+the reviewer knows them. **Nothing here was run**: no nginx, Caddy or Podman is
+available, and no documentation was fetched, so every "correct" below is from
+knowledge of those programs and is **unverified** until someone runs it
+(`nginx -t` at least).
+
+Correct as written (unverified in practice): `map $http_upgrade` with
+`proxy_http_version 1.1` and the two `Upgrade`/`Connection` headers; the
+`X-Forwarded-For $remote_addr` replacement (never `$proxy_add_x_forwarded_for`);
+`Origin` passed through untouched; `proxy_read_timeout 120s` above chatd's pings
+(they reach nginx every 45 s of silence); `limit_req` on the upgrade request
+only (one per connection); `client_max_body_size 1k`; `access_log off`; the
+Containerfile needs no libsodium (chatd-core has none) and `libboost-dev` is
+enough because Asio and Beast are header-only; Caddy upgrades WebSocket by
+itself and replaces X-Forwarded-For from an untrusted client.
+
+Findings and suggestions (for the owner of the files):
+
+1. **nginx: no `ssl_protocols`.** Before nginx 1.23.4 the default includes TLS 1.0
+   and 1.1; the matterm-server example sets `ssl_protocols TLSv1.2 TLSv1.3`.
+   Add it here too.
+2. **nginx: the comment "Only the WebSocket path exists; anything else is refused"
+   is not what `location /` does.** nginx forwards everything; chatd refuses
+   what is not an upgrade. Either say so or use `location = /` and `return 404`
+   elsewhere.
+3. **nginx: slow headers.** `client_header_timeout`/`client_body_timeout` default
+   to 60 s and chatd's 5 s handshake deadline does not apply because nginx reads
+   the request first. The matterm-server example sets 10 s; set it here.
+4. **nginx and Caddy: IP addresses outlive `access_log off`.** The error log
+   records the client address for refused requests (`limit_req`, `limit_conn`,
+   bad requests; nginx `limit_req_log_level` defaults to `error`), and Caddy logs
+   errors to stderr, which Podman/journald keep. Say so in the README and
+   suggest `error_log ... crit;` (nginx) if the operator wants no addresses at
+   all.
+5. **nginx: `limit_conn 4` per address** is a shared-address trap (mobile
+   carriers, universities, offices behind one NAT): five people in one office
+   cannot all be in the room. Pick the number knowingly (chatd's own cap is 3
+   per source, `maxPerSource`). IPv6: `$binary_remote_addr` is per /128, so one
+   /64 owner gets 2^64 addresses; chatd groups by /64 but nginx does not
+   (a `map` that keeps the /64 is the usual answer; unverified).
+6. **nginx: `listen 443 ssl http2;`** is deprecated since nginx 1.25.1 (`http2 on;`).
+   Harmless. Browsers still use HTTP/1.1 for the WebSocket because nginx does
+   not offer the extended CONNECT of RFC 8441 (unverified).
+7. **Caddy: no per-address limit and no timeouts.** Stock Caddy has no
+   `limit_conn` (a plugin is needed), so only chatd's caps apply; and the default
+   server timeouts for reading headers and the body are unset in the versions the
+   reviewer knows. Suggest `request_body { max_size 1KB }` and a global
+   `servers { timeouts { read_header 10s read_body 10s } }` (check against the
+   installed version), and say that the rate limits then depend on chatd.
+8. **compose.yaml: `${CHAT_PROXY_IP:-none}`** (see SECURITY_REVIEW.md, risk 2):
+   require the variable (`:?`) or print a warning, because the room is then
+   limited as if every visitor were one.
+9. **compose.yaml: the address chatd sees.** Whether chatd sees the host side
+   of the container network (the README's `10.89.0.1`), `127.0.0.1` or another
+   address depends on the Podman version and its network backend (rootless
+   Podman is the doubtful case). The README should tell the operator to check
+   with the console's `list` (the source shown for the first visitor) before
+   trusting it. Unverified.
+10. **compose.yaml: `podman attach` and Ctrl-C.** `podman attach` proxies signals
+    by default, so Ctrl-C from the operator's terminal stops chatd and the room
+    with it. Document `--sig-proxy=false` or detaching with the detach keys
+    only (unverified for the installed Podman).
+11. **compose.yaml: outbound network.** chatd never connects out; an `internal`
+    network would remove the route (published ports on an internal network are
+    unverified, as for matterm-server). `image: mattrix-chatd` is an unqualified
+    name; `localhost/mattrix-chatd` avoids a registry search.
+12. **Containerfile:** the base image is a floating tag (`debian:12-slim`); pin a
+    digest for repeatable builds if that matters. `COPY test`/`demo`/`bench` are
+    needed only because the top CMakeLists adds them; a `.containerignore`
+    would keep the context small. Static glibc linking works for chatd
+    (numeric addresses only); a `getpwnam`-style warning would be the sign that
+    something started to need NSS.
