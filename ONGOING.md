@@ -24,12 +24,14 @@ Last updated 2026-11-21. `main` is pushed up to `128707c` (plus the chat design 
 
 - Chat for Mattrix OS (`docs/CHAT.md`, agent3): ChatRoom core, codec, ChatClient,
   `chatd`, web bridge, Podman, `mattrix-chat`. Design agreed; build order in section 9.
-- Tabs, panes and chrome in cells: planned in `docs/TABS_PLAN.md` (decisions in
-  `docs/MULTI_TERMINAL.md` section 13); not started. Earlier: browser tabs and terminal views were paused. The finished implementation (TerminalView,
-  TabModel, tab bar, two split panes) is on `archive/web-tabs`; `main` keeps only the
-  design docs (`docs/tasks/web-sessions.md`, `docs/MULTI_TERMINAL.md` section 5).
+- Tabs, panes and chrome in cells: `docs/TABS_PLAN.md` (decisions in
+  `docs/MULTI_TERMINAL.md` section 13). Native app done and on `main` (tabs, pane
+  tree, dividers, strip in cells, hidden tabs keep running); browser side in progress
+  (agent3, against `src/frontend/workspaceview.h`); phase 4 (scrollbar polish, moving
+  a pane between tabs, atlas generations) open. Not seen on a real screen yet. Old
+  browser-only version: `archive/web-tabs`.
 - Width reflow (`docs/SCROLLING_AND_REFLOW.md` lists what is open).
-- Unverified on real hardware: native window snapping, Termux, Podman/nginx deployment,
+- Unverified on real hardware: native tabs/panes and divider dragging, Termux, Podman/nginx deployment,
   sound in a browser and in the SDL window.
 - Old unmerged branches kept for reference: `agent2-fastjson`, `agent2-fuzz`,
   `agent2-sessions`, `agent3-resize`, `agent3-selection`, `agent3-url`,
@@ -41,5 +43,6 @@ Last updated 2026-11-21. `main` is pushed up to `128707c` (plus the chat design 
 - Native window: in a fairly new window, while the user resized it, the window
   jumped back and forth as if something kept triggering a resize (possibly a
   resize loop between the window snapping/size rounding and the window manager).
-  Not reproduced yet; no details on the compositor or the steps. See
-  `src/frontend/windowsnap.h`.
+  Not reproduced yet; no details on the compositor or the steps. The native app
+  no longer snaps the window (`windowsnap.h` is unused there), which removes the
+  suspected loop; confirm on the owner's machine.

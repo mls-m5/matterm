@@ -7,7 +7,8 @@ reusable cell-grid renderer and a small terminal model.
 
 ## What is in here
 
-- `matterm`: the native terminal (SDL2, a real PTY), Linux.
+- `matterm`: the native terminal (SDL2, a real PTY), Linux, with tabs and split panes
+  (Ctrl+Shift+T, Ctrl+Shift+E/O; see [docs/OVERVIEW.md](docs/OVERVIEW.md)).
 - `matterm-server` and the web client: the same terminal in a browser, with a
   password-protected server that owns the shell (see
   [docs/SERVER.md](docs/SERVER.md), [web/README.md](web/README.md)).

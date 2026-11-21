@@ -301,7 +301,7 @@ and the cursor position), and is the feature worth having if it only works when 
 user opts in. Nothing is decided; no code.
 
 
-## 13. Tabs, panes and chrome: decisions of 2026-11-21 (owner), not built
+## 13. Tabs, panes and chrome: decisions of 2026-11-21 (owner); native built, browser in progress
 
 Context: Termux plus tmux would not solve mouse scrolling, so the tabs and panes are
 built into matterm itself, native and browser alike. The browser tab strip of

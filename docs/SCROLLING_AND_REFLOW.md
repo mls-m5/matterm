@@ -163,3 +163,124 @@ Two approaches, not exclusive (decide before implementing; nothing is started):
 The alternate screen stays out of both: full-screen programs redraw after SIGWINCH.
 Resize bursts need coalescing either way (a divider drag; see `TABS_PLAN.md`
 section 6), and the written-extent question (trailing spaces) above applies to both.
+
+## Design: narrowing without loss (2026-11-21, proposal, nothing implemented)
+
+Written against the code as it is: `TerminalMemory` (ring of fixed-width rows, `columns_`
+wide, `resizeColumns` copies and clips), `TerminalModel::Impl::Screen` (a
+`TerminalMemory`, a parallel `std::deque<bool> softWrap`, `firstRow` as the absolute id
+of the oldest retained row), and `Impl::resized()`, which builds a *new* screen by
+appending every old row (so `append` clips or pads it) and sets `softWrap` only if the
+width did not change (`width == columns && old.softWrap[y]`). A row has no written
+extent: a cell never written and a blank cell look the same. Selection and links use
+absolute row ids plus `selectionEpoch`, bumped by every resize. The alternate screen
+is a separate screen without history.
+
+### What each approach needs, measured against that representation
+
+| | Reflow | Keep clipped cells |
+|---|---|---|
+| Storage | Rows change number and identity: every row id after the first joined line moves; `firstRow`, `softWrap`, ring contents are rebuilt | Rows keep their ids; only the row width in memory differs from the visible width |
+| Needs a written extent | Yes (trailing blanks vs text) and correct `softWrap` on every wrapping path (nothing relies on it today) | No: cells are kept as they are, blanks included |
+| Cursor, saved cursor, viewport anchor, deferred wrap | Must be mapped through logical-line offsets (hard) | Unchanged rules (clamp the column as today) |
+| Shell redraw after SIGWINCH (readline, zsh) | Rows above the cursor change under the shell, which counts rows by its own width: known prompt duplication and artifacts in emulators that reflow | Same screen as xterm after narrowing, so shells behave as they do now |
+| Time | O(retained cells) with a new allocation per width change, at every divider event | O(rows) to mark overflow, no copying when the stored width is enough |
+| Result when narrowed | Text wraps on screen; readable | Text is cut on screen; restored when widened again |
+| Lossless for narrow, then wide | Mostly (hard lines wider than the pane wrap and unwrap) | Exactly, for every cell not rewritten meanwhile |
+| Alternate screen | Out | Out |
+
+The dividers case (a pane narrowed during a drag, widened again a moment later) is a
+round trip, which keep-clipped does exactly and cheaply. What it does not give is a
+readable narrow history; that is the one thing reflow does better, and it can be had
+later for the history region only (below).
+
+### Recommendation
+
+1. **Step 1: keep clipped cells** on the primary screen (live rows and history). Small,
+   compatible with xterm, bounded memory, fast enough for a drag.
+2. **Step 2, optional and later: reflow the saved history only.** Rows above the live
+   screen are never redrawn by programs, so the shell-redraw problem does not apply
+   to them; the live screen stays keep-clipped. Needs the written-extent decision and
+   correct `softWrap`; not designed further here.
+
+### Step 1, exact changes
+
+Memory: a row is stored at `storedColumns_ >= columns_` cells; the visible width is
+`columns_`. Rows are already handed out as `FStringView(slot, columns_)`, so views and
+frames do not change.
+
+1. `src/core/terminalmemory.h/.cpp`
+   - Add `storedColumns_`, `maxStoredColumns` (constructor argument, default 512, see
+     "bounds"), and per-row `overflow` counts (`std::deque<std::uint16_t>`, cells at or
+     right of `columns_` that differ from the fill, 0 for most rows).
+   - `resizeColumns(columns, fill)`: if `columns <= storedColumns_`, only set
+     `columns_` and recompute the overflow counts (O(rows x (stored - columns)), no
+     copying); otherwise allocate `min(columns, ...)` stored columns, copy whole stored
+     rows, fill the new cells with `fill`. The widening case never loses cells that are
+     still stored; the narrowing case beyond `maxStoredColumns` drops the cells right of
+     the cap (document: a 2000-column window narrowed to 100 keeps 512).
+   - `storedRow(index)` (stored width view, for rebuilding) and
+     `append(FStringView stored, fill)` taking a stored row, so a rebuilt screen keeps
+     the overflow; plain `append` pads the whole stored width with `fill`.
+   - `dropOverflow(index, fill)`: fill `[columns_, storedColumns_)` of one row, set its
+     count to 0.
+2. `src/terminal/terminalmodel.cpp`
+   - `Impl::resized()`: for the primary screen copy `storedRow(y)` (not `row(y)`) and
+     create the new memory with `max(old stored, width)` capped; for the alternate
+     screen keep today's clipping (`stored == visible`).
+   - Keep `softWrap` through width changes (the flag describes how the line was
+     written, clipping does not change it): drop the `width == columns` condition for
+     the primary screen. `copyText` and word/line selection still read visible cells
+     only; document that a clipped row copies as what is visible.
+   - Every mutation of a row calls `dropOverflow` first, so a row written after
+     narrowing never mixes old hidden text with new visible text: `fillRow` (line 127),
+     `copyRow` (139, destination row), `shiftRows` (147), `write` (the cell store
+     near 438), `eraseCharacters`, `insertCharacters`, `deleteCharacters`
+     (477-520), `insertLines`/`deleteLines`/scrolls through `fillRow`/`copyRow`. Rows
+     created by scrolling are new rows and have no overflow.
+   - `eraseScrollback()` and `reset()` go through `resized()`/the constructor and need
+     no extra work; `resize()` bumps `selectionEpoch` as today.
+3. Config: `TerminalViewConfig`/`TerminalModel` constructor get `keptColumns`
+   (default 512; 0 means "clip as today").
+
+### Bounds and costs (state them in the code comments)
+
+Memory is history rows x `max(columns, keptColumns)` x `sizeof(FChar)` per primary
+screen (check `sizeof(FChar)`; at 12 bytes, 1000 rows x 512 = about 6 MB per pane,
+about 50 MB for eight panes); the default can be lowered per pane or per build. It
+only grows when a window is wider than before, and never shrinks while the screen
+lives (`reset()` and `eraseScrollback()` rebuild it). A resize costs O(rows) with no
+allocation when narrowing, and one allocation of all rows when the stored width
+grows. Resize bursts still need the 40 ms throttle of `WorkspaceView`.
+
+### Tests (all CPU-only, `terminalmodel_test` or a new `terminalresize_test`)
+
+- Round trip: random content with colors and attributes in screen and history; narrow
+  to every width from 1 to W-1, widen back to W; all visible cells equal the original
+  (seeded property test, 200 rounds, also with several steps in between).
+- Cells beyond the cap are lost and the loss is exactly the documented amount;
+  `keptColumns == 0` equals today's behavior byte for byte (existing tests unchanged).
+- A write, erase (`EL`, `ED`, `ECH`), `ICH`, `DCH`, `IL`, `DL`, scroll or tab after
+  narrowing drops the overflow of the touched rows only; untouched rows still restore;
+  a widened row never shows old text to the right of new text.
+- New rows created by scrolling or by height growth have no overflow; history
+  eviction (the ring wraps) keeps the overflow counts aligned with the rows.
+- Height and width changed together; resize while the alternate screen is active
+  (the alternate screen clips, the primary underneath keeps its overflow);
+  `eraseScrollback()` keeps the live rows' overflow and drops the history's.
+- Cursor, saved cursor, deferred wrap and viewport anchors behave as in today's
+  resize tests (add the width cases to each).
+- Soft-wrap flags survive a narrow/wide round trip and word/line selection joins the
+  same rows afterwards; selection epoch changes on every resize.
+- A bound test: stored cells never exceed `rows x max(columns, keptColumns)`; a
+  1000-step random resize sequence does not grow allocation beyond that.
+- A resize burst benchmark (`bench/`, width changes on a full history) before and after,
+  with the numbers recorded here.
+
+### Open questions
+
+- The default `keptColumns` (512 covers wide terminals, costs memory for every pane).
+- Wide characters (not supported in `FChar` yet): a clip boundary must never split one;
+  decide with the wide-cell work.
+- Whether a clipped row should show a marker (for example a dim `>` in the last column)
+  so the user knows text is hidden; a rendering decision for the owner.

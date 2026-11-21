@@ -1,6 +1,17 @@
 # Tabs, panes and windows: architecture and implementation plan
 
-Status: plan only, nothing of this is built on `main`. Decisions of the owner are in
+Status (2026-11-21): phases 0, 1 (A model, B rendering, C strip) and 2 (native app) are
+built and on `main`; the browser (phase 3) is in progress; phase 4 is open. What exists:
+`src/frontend/panetree.h`, `workspace.h`, `prefixkeys.h`, `tabstrip.h`,
+`workspaceview.h` (the SDL-free glue: frame plan and input routing), the native app
+in `app/ptyfrontend.cpp`, `SdlBackend::beginFrame/render(frame, PaneArea)/drawRect`.
+Tests: `panetree`, `workspace`, `prefixkeys`, `workspace_view`, `tabs_stress` (real
+shells: close sends SIGHUP and kills after 100 ms, no zombies or descriptors left,
+hidden panes served, resize storm throttled) and `pty_frontend_tabs_smoke` (real SDL
+events in the dummy driver: splits, a hidden tab that keeps running, a divider
+drag). Run under address and undefined sanitizers without findings. Not verified on a
+real screen or window manager. Native window snapping is gone (pixel splits make it
+unnecessary). Decisions of the owner are in
 `docs/MULTI_TERMINAL.md` section 13 (chrome in cells, tree of panes, a tab is a whole
 layout, pixel splits, prefix keys in the browser, GNOME Terminal keys in the desktop
 app). Written 2026-11-21 after a discussion with the owner.
@@ -163,3 +174,28 @@ recording and playback, shell integration.
 - Native window resize: snap to whole cells only after the size was quiet (see
   `ONGOING.md`); with pixel splits the window need not snap at all.
 - Open: the prefix letters, the divider look, the limit on panes per tab.
+
+## 7. Lifecycle review of the native app (2026-11-21)
+
+Checked with `test/tabs_stress_test.cpp` (real shells) and the sanitizer build:
+
+- **Closing a pane or tab** destroys its `PtyProcess`: the PTY master is closed, SIGHUP
+  goes to the process group and the child, and after 100 ms without exit both get
+  SIGKILL and are reaped. A normal shell ends in a few ms; a program that ignores
+  SIGHUP costs the GUI thread 100 ms (an 8-pane tab of such programs about 0.8 s,
+  because the wait is blocking). A background job of the shell is in the same group
+  and is hung up too. No zombies remain (`waitpid(-1)` says no children).
+- **A program that exits** (also in a hidden tab) is noticed in the pump loop; its pane
+  closes, the tab with its last pane, the window with its last tab. The exit notice
+  the view writes is never seen, since the pane is gone at once; a "keep the pane open
+  after exit" option would need a view state in the strip. The window's exit code is
+  that of the last pane that ended.
+- **Descriptors:** 40 rounds of new tab, three splits and close (alternately whole tab
+  and pane by pane) end with the same number of open descriptors as they started.
+- **Resize storm:** 3000 divider events at 1 ms spacing give at most one size change
+  per 40 ms, and at the end every program reports (`stty size`) the planned size.
+  Throttling is by `ViewConfig::resizeIntervalMs`.
+- **Open:** new panes are forked after SDL has started threads (the first one before);
+  the child only closes descriptors and execs, but a reaper thread or a helper process
+  started early would be safer. Hidden panes are parsed on the GUI thread (up to
+  64 KiB per pane per frame), so many busy panes cost frame time.

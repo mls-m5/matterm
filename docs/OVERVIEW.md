@@ -74,6 +74,15 @@ without a flag. There is no `--smooth-scroll` option, and live program output
 still advances by whole rows. Cursor animation and smooth history navigation
 are separate features.
 
+Tabs and panes (native): one tab at start. Ctrl+Shift+T opens a tab, Ctrl+Shift+W
+closes it, Ctrl+PgUp/PgDn or Alt+1..9 switch, Ctrl+Shift+E / Ctrl+Shift+O split side
+by side / stacked, Alt+Shift+arrows move the focus, Alt+Shift+W closes a pane,
+Alt+Shift+E evens out the splits. Click a tab or a pane; drag a divider (Shift snaps
+to whole cells; a program is told its size only when a whole cell is gained or lost).
+A hidden tab keeps its programs running; a pane closes when its program exits and
+the window when the last one does. Closing a pane or tab hangs up its program (SIGHUP,
+SIGKILL after 100 ms). Design: [Tabs plan](TABS_PLAN.md).
+
 In native terminal mode, Escape/function keys go to the program. Ctrl+C and Ctrl+D
 are tty input, not GUI shortcuts. Close the window or press Ctrl+Shift+Q to quit.
 Shift+Page Up/Down and Ctrl+Shift+Home/End navigate scrollback; ordinary navigation
