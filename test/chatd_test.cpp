@@ -237,6 +237,8 @@ TEST_CASE("Fuzz: garbage, fragments and floods over TCP leave the server up "
           "and clean") {
     chatd::Options o = quick();
     o.room.maxPerSource = 64;
+    o.room.connectBurst = 1000000; // Many connections from one address.
+    o.maxPendingPerPeer = 1000;
     o.room.violationsToKick =
         100000; // Everyone is 127.0.0.1: no bans in this test.
     Running r(o);

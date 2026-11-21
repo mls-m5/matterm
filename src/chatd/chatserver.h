@@ -34,6 +34,9 @@ struct Options {
     std::uint16_t tcpPort = 0;
     // Connections that have not finished the handshake yet.
     std::size_t maxPending = 128;
+    // ... and how many of them one peer address may hold (not applied to the
+    // trusted proxy, which stands for everybody).
+    std::size_t maxPendingPerPeer = 4;
     chat::RoomConfig room;
 };
 

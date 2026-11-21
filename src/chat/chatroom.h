@@ -39,10 +39,18 @@ struct RoomConfig {
     std::size_t maxTypersShown = 6;
     Millis onlineInterval = 1000;
     Millis nickInterval = 10000;
-    std::size_t maxBacklogBytes = 16 * 1024; // A slower reader is dropped.
-    int violationsToKick = 5;                // Within violationWindow.
+    // A slower reader is dropped. Must hold the whole history a newcomer gets
+    // in one go (ringSlots lines of up to about 260 bytes).
+    std::size_t maxBacklogBytes = 64 * 1024;
+    int violationsToKick = 5; // Within violationWindow.
     Millis violationWindow = 60 * 1000;
     Millis kickBan = 5 * 60 * 1000;
+    // New connections per source: `connectBurst` at once, then one per
+    // `connectRefill`.
+    int connectBurst = 5;
+    Millis connectRefill = 6000;
+    // Bound of the tables of bans, mutes and per-source buckets.
+    std::size_t maxTableEntries = 4096;
 };
 
 struct Action {
@@ -101,8 +109,6 @@ private:
         Millis forwardedAt = -1000000;
         bool shown = false; // Others currently see this draft.
         // Limits.
-        double tokens = 0;
-        Millis tokenAt = 0;
         int draftsThisSecond = 0;
         Millis draftSecondStart = 0;
         int violations = 0;
@@ -110,12 +116,22 @@ private:
         Millis lastNick = -1000000;
     };
 
+    // A token bucket; messages share one per source, so that three connections
+    // are not three times the rate.
+    struct Bucket {
+        double tokens = 0;
+        Millis at = 0;
+    };
+
     void send(Actions &out, ConnId id, const ServerLine &line);
     void sendError(Actions &out, ConnId id, ErrorCode code, const char *text);
     void sendAll(Actions &out, const ServerLine &line, ConnId except = 0);
     void drop(Actions &out, ConnId id, Millis now, bool announce);
     void violation(Actions &out, ConnId id, Millis now, const char *why);
-    bool takeToken(Conn &c, Millis now);
+    bool takeToken(Bucket &b, double burst, Millis refill, Millis now);
+    void setUntil(std::map<std::string, Millis> &table,
+                  const std::string &source,
+                  Millis until);
     bool lockBubble(
         Actions &out, ConnId id, Conn &c, Millis now, bool explicitLock);
     void clearDraft(Actions &out, ConnId id, Conn &c);
@@ -130,8 +146,10 @@ private:
     std::map<std::string, std::size_t> perSource_;
     std::map<std::string, Millis> bans_;  // Source to the time the ban ends.
     std::map<std::string, Millis> mutes_; // Source to the time the mute ends.
-    std::vector<Entry> ring_;             // Oldest first.
-    std::vector<Millis> recentMessages_;  // For the room's per-minute cap.
+    std::map<std::string, Bucket> messageBuckets_; // By source.
+    std::map<std::string, Bucket> connectBuckets_; // By source.
+    std::vector<Entry> ring_;                      // Oldest first.
+    std::vector<Millis> recentMessages_; // For the room's per-minute cap.
     std::uint64_t nextSerial_ = 1;
     std::uint64_t messages_ = 0, violations_ = 0;
     bool locked_ = false;

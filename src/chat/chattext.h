@@ -66,6 +66,10 @@ enum class NameError { None, Length, Characters, Reserved };
 NameError checkName(std::string_view name);
 // The form used to compare names: ASCII lower case.
 std::string nameKey(std::string_view name);
+// What a name looks like: lower case, 0/o, 1/i/l, 5/s, 3/e, rn/m and vv/w
+// folded together, and `_` and `-` dropped. Two names with the same skeleton
+// count as the same name, and the reserved names are matched by it too.
+std::string nameSkeleton(std::string_view name);
 
 // For text received from the network: always yields valid UTF-8 of at most
 // `maxChars` code points with no control or format character. Invalid UTF-8 and

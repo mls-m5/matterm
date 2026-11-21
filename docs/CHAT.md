@@ -65,8 +65,10 @@ are **not** reused; chat needs a per-connection token bucket and fixed slots.
 
 One **WebSocket text frame = one line**, UTF-8, fields separated by a single TAB,
 at most **1 KiB** per frame (in practice under about 260 bytes). Binary frames,
-fragmented messages, permessage-deflate, unknown commands and extra fields are
-rejected (Beast: `read_message_max`, no deflate, `got_text()`). No JSON parser.
+permessage-deflate, unknown commands and extra fields are rejected (Beast:
+`read_message_max`, no deflate, `got_text()`). A text message that arrives in
+fragments is assembled by Beast and accepted if the whole is within the limit;
+the bound is on the whole message, not on the fragments. No JSON parser.
 `B` is a **bubble number** the client increments per bubble (a small integer).
 
 Client to server:
@@ -303,6 +305,18 @@ The shared validator is the single point to fuzz hardest.
   repeated violations, a global cap on messages per minute for the whole room,
   and the remote `lock` as an emergency brake. The room never announces that no
   moderator is present.
+* **Limits added after the review** (docs/CHAT_REVIEW.md): the join history
+  fits the backlog limit (64 KiB); the message rate is one bucket per *source*
+  (three connections are not three times the rate) and hitting the room's cap is
+  nobody's violation; new connections per source are rate limited (burst 5, one
+  per 6 s); at most 4 not-yet-handshaken sockets per peer address (not for the
+  trusted proxy); bans, mutes and the buckets are bounded (4096, the entry that
+  ends first is evicted); names are compared by *skeleton* (`l/I/1`, `0/O`,
+  `5/S`, `3/E`, `rn/m`, `vv/w`, `_` and `-` folded), also against the reserved
+  names.
+* **Behind a proxy always set `--trust-proxy`.** Without it every visitor has the
+  proxy's address, so the per-source limits, bans and mutes count everybody
+  together. The `--test-tcp` listener (loopback, tests only) has no idle timeout.
 * **Secrets:** none in the repo; configuration is the listen address, the
   Origin list and the numeric limits; the repo has a template with placeholders.
 * The proxy's access log is where visitor IPs live; keep it short-lived.
