@@ -35,6 +35,10 @@ The demo retains up to 256 rows in reusable 16-row blocks. Controls:
 
 `mattrix` is the pretend operating system of `matterm-demo` as a program for the terminal it is started from: `./build/mattrix [--no-intro] [--no-reveal] [--cmd TEXT] [--seed N]`. It needs only the fakeos core and POSIX (no SDL, no renderer), is built by default (`-DMATTERM_BUILD_MATTRIX=OFF` skips it) and installed to `bin/` by `cmake --install`. It also runs in matterm (`matterm -- ./build/mattrix`), which gives it truecolor. It calls itself Mattrix OS, not matterm. See [FAKEOS.md](FAKEOS.md).
 
+## Chat (`chatd`, `mattrix-chat`)
+
+`chatd` is a chat server (Boost.Beast, one thread): one room, short plain-text messages, kept only in RAM, strict input checks in layers, moderation from its own console. `mattrix-chat` is the terminal client: `chatd --origin http://localhost:8080 --test-tcp 127.0.0.1:8098`, then `mattrix-chat --tcp 127.0.0.1:8098 --name ada`. The text and the room rules live in a pure library (`src/chat`, no I/O), tested with fuzz, and the same client runs inside Mattrix OS (the `chat` command appears only when a host gives it a server). Design, protocol, security layers, local test runs and a Podman setup: [CHAT.md](CHAT.md), `deploy/chatd/`. Built by default when Boost is found (`-DMATTERM_BUILD_CHATD=OFF` skips it).
+
 ## Terminal Model Demo
 
 `matterm-lib-demo` uses the model's direct API, not escape sequences:
