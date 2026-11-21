@@ -276,3 +276,19 @@ Ideas to keep (not scheduled):
 5. **A tmux-compatible escape hatch.** If tmux is run inside matterm it works as
    usual; matterm should then not try to replay across a tmux restart. No special
    support planned.
+
+Combined idea (operator): **a checkpointed on-disk scrollback.** The raw stream is
+stored on disk in segments (rotated, size-limited, wiped when the session ends); each
+checkpoint (idea 1) is recorded in that log as a marker plus the serialized screen
+state. To go back in time, or to play a recording from a given moment, a client
+loads the nearest earlier checkpoint and replays from there instead of from the
+start. Recording with timecodes (idea 3) uses the same log. Open: segment and
+checkpoint format, size and retention limits, privacy (the log holds everything that
+was on screen, including anything typed at a password prompt that echoes), and
+whether replay starts from the server or from a downloaded copy.
+
+Note on idea 4 (OSC 133): the shell prints invisible markers around the prompt, the
+command and its output (and the exit status). A terminal that understands them can
+jump between prompts, select or fold one command's output and flag failed commands.
+It needs a small snippet in the shell's startup file; without it nothing changes.
+
