@@ -376,40 +376,6 @@
     }
   }
 
-  // ?demo skips the login and runs the in-browser pretend system (no server
-  // needed). demo.html (generated from shell.html, see web/CMakeLists.txt) is the
-  // same page with a marker, so a static host can serve it without a query.
-  if (new URLSearchParams(location.search).has("demo") ||
-      document.querySelector('meta[name="matterm-static-demo"]')) {
-    start(true);
-    return;
-  }
-
-  form.addEventListener("submit", async function (event) {
-    event.preventDefault();
-    message.textContent = "";
-    let response;
-    try {
-      response = await fetch("/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: password.value }),
-        credentials: "same-origin",
-      });
-    } catch (error) {
-      message.textContent = "Could not reach the server.";
-      return;
-    }
-    password.value = "";
-    if (response.ok) {
-      start();
-    } else if (response.status === 429) {
-      const wait = response.headers.get("Retry-After");
-      message.textContent = "Too many attempts. Try again in " + wait + " s.";
-    } else {
-      message.textContent = "Login failed.";
-    }
-  });
   // The chat connection of the demo (?chat=wss://host/path, see docs/CHAT.md).
   // The program in the pretend system opens it, and only after the visitor has
   // read the notice and answered y. Everything it receives is handed to the
@@ -463,4 +429,39 @@
       },
     };
   })();
+
+  // ?demo skips the login and runs the in-browser pretend system (no server
+  // needed). demo.html (generated from shell.html, see web/CMakeLists.txt) is the
+  // same page with a marker, so a static host can serve it without a query.
+  if (new URLSearchParams(location.search).has("demo") ||
+      document.querySelector('meta[name="matterm-static-demo"]')) {
+    start(true);
+    return;
+  }
+
+  form.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    message.textContent = "";
+    let response;
+    try {
+      response = await fetch("/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: password.value }),
+        credentials: "same-origin",
+      });
+    } catch (error) {
+      message.textContent = "Could not reach the server.";
+      return;
+    }
+    password.value = "";
+    if (response.ok) {
+      start();
+    } else if (response.status === 429) {
+      const wait = response.headers.get("Retry-After");
+      message.textContent = "Too many attempts. Try again in " + wait + " s.";
+    } else {
+      message.textContent = "Login failed.";
+    }
+  });
 })();
