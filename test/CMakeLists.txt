@@ -351,6 +351,16 @@ if(TARGET chatd-core)
     set_tests_properties(chatd PROPERTIES TIMEOUT 60)
 endif()
 
+# Threat-model checks of the chat server (docs/CHAT_REVIEW.md): hostile clients
+# over real loopback sockets. chatissues_test holds the gaps found, one suite
+# each, registered as expected failures until they are fixed.
+if(TARGET chatd-core)
+    add_executable(chatd_security_test chatd_security_test.cpp mls-unit-test/test_main.cpp)
+    target_link_libraries(chatd_security_test PRIVATE chatd-core)
+    add_test(NAME chatd_security COMMAND chatd_security_test)
+    set_tests_properties(chatd_security PROPERTIES TIMEOUT 90)
+endif()
+
 # mattrix-chat in pseudo-terminals against a real chatd.
 if(TARGET mattrix-chat AND TARGET ptylink AND TARGET chatd-core)
     add_executable(chatterm_test chatterm_test.cpp mls-unit-test/test_main.cpp)
