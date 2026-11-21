@@ -331,7 +331,8 @@ ChatView::Rendered ChatView::bubble(const BubbleSpec &spec) const {
     }
     std::string face;
     if (spec.own) {
-        face = caps.unicode ? "\xE2\x98\xBA " : ":) "; // A small face.
+        face = caps.unicode ? encodeUtf8(std::u32string(1, kOwnFace)) + " "
+                            : ":) "; // A small face.
     }
     std::string name = spec.name + "";
     std::string rest;
