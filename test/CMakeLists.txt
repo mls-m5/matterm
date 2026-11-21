@@ -81,6 +81,17 @@ if(BUILD_TESTING)
     target_link_libraries(tabstrip_test PRIVATE palette)
     add_test(NAME tab_strip COMMAND tabstrip_test)
 
+    add_executable(layoutsnapshot_test layoutsnapshot_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(layoutsnapshot_test PRIVATE ../src/frontend)
+    add_test(NAME layout_snapshot COMMAND layoutsnapshot_test)
+
+    find_program(MATTERM_NODE node)
+    if(MATTERM_NODE)
+        # The browser's remembered session ids (web/sessionids.js), pure JS.
+        add_test(NAME web_sessionids
+            COMMAND ${MATTERM_NODE} ${PROJECT_SOURCE_DIR}/web/tools/test-sessionids.js)
+    endif()
+
     add_executable(cursorglide_test cursorglide_test.cpp mls-unit-test/test_main.cpp)
     target_link_libraries(cursorglide_test PRIVATE cellbuffer)
     add_test(NAME cursor_glide COMMAND cursorglide_test)

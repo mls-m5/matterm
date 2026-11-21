@@ -78,6 +78,21 @@ Pure C++17, header-only like the rest of `src/frontend/`, native tests only.
   (cells, disjoint `StripRegion`s, `hit(column)`, mode, firstVisible/visibleCount).
   Numbers are 1-based. Hit kinds: Tab, Close, NewTab, ScrollLeft, ScrollRight.
 
+### Phase 3 prep (browser), what exists
+
+- `src/frontend/layoutsnapshot.h`: `LayoutSnapshot` (tabs, pane tree shape, split
+  ratios in per mille, one session id per pane) with a strict `parse` / `serialize`
+  for sessionStorage (limits: 16 tabs, 8 panes per tab, 16 panes in all, depth 8,
+  ids 32 lower-case hex, each id once). Tested natively incl. a mutation fuzz.
+  Still to add with the workspace glue: `Workspace` export to / restore from it.
+- `web/sessionids.js` (+ `web/tools/test-sessionids.js`, ctest `web_sessionids`)
+  taken from `archive/web-tabs`: own ids (sessionStorage) and known ids
+  (localStorage), valid-only. Copied next to the page by the web CMake; not yet
+  loaded by `shell.html` (nothing uses it until the per-pane sessions are wired).
+- Not done: the `web/main.cpp` port (ClientSession + channel per pane, prefix keys,
+  strip clicks, wasm exports) -- needs the Emscripten build and agent2's
+  `workspaceview.h` glue.
+
 ## Later (integrator): native app, then the browser
 
 See `TABS_PLAN.md` section 5, phases 2 and 3.
