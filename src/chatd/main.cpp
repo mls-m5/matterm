@@ -99,6 +99,9 @@ int main(int argc, char **argv) {
         }
     }
     try {
+        options.warn = [](const std::string &text) {
+            std::cerr << "chatd: WARNING: " << text << '\n';
+        };
         boost::asio::io_context io;
         chatd::ChatServer server(io, options);
         server.start();

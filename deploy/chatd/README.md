@@ -23,6 +23,10 @@ Things to know:
 * `--origin` is an exact `Origin` (scheme, host, port); repeat it for each site that
   uses the chat. A page on another origin cannot open the socket from a browser.
   (It is not authentication: other programs can send any header.)
+* `CHAT_PROXY_IP` is **required** by compose (no default): without `--trust-proxy` every
+  visitor shares the proxy's address and one person's ban or the 3-connection cap
+  hits everybody. chatd also prints a warning once if a request carries
+  `X-Forwarded-For` while `--trust-proxy` is unset.
 * `--trust-proxy` takes the one address nginx/Caddy connects from; the container
   sees the host side of its network (for example `10.89.0.1`), not `127.0.0.1`.
   Without it, every visitor looks like the proxy and the per-address limits count

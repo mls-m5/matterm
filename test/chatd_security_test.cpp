@@ -4,6 +4,8 @@
 // are in chatissues_test.cpp (docs/CHAT_REVIEW.md).
 #include "chatdfixture.h"
 #include "mls-unit-test/unittest.h"
+#include <atomic>
+#include <memory>
 
 #include <chrono>
 #include <random>
@@ -54,6 +56,40 @@ TEST_CASE("X-Forwarded-For from an untrusted peer never makes a new source") {
         junk.send("hello\tjunk");
         EXPECT(!junk.expect("welcome") || joined < 3);
     }
+}
+
+TEST_CASE("chatd warns once when a proxy forwards but --trust-proxy is not "
+          "set") {
+    auto warnings = std::make_shared<std::atomic<int>>(0);
+    chatd::Options o = quick();
+    o.warn = [warnings](const std::string &text) {
+        if (text.find("--trust-proxy") != std::string::npos) {
+            ++*warnings;
+        }
+    };
+    Running r(o);
+    { // No header: nothing to warn about.
+        WsClient plain(r.server->wsPort(), kOrigin);
+        EXPECT(plain.handshake());
+    }
+    EXPECT_EQ(warnings->load(), 0);
+    for (int i = 0; i < 2; ++i) {
+        WsClient proxied(
+            r.server->wsPort(), kOrigin, {{"X-Forwarded-For", "203.0.113.9"}});
+        EXPECT(proxied.handshake());
+    }
+    EXPECT_EQ(warnings->load(), 1); // Once, however many requests.
+
+    auto quiet = std::make_shared<std::atomic<int>>(0);
+    chatd::Options t = quick();
+    t.trustProxy = "127.0.0.1";
+    t.warn = [quiet](const std::string &) { ++*quiet; };
+    Running trusted(t);
+    WsClient ok(trusted.server->wsPort(),
+                kOrigin,
+                {{"X-Forwarded-For", "203.0.113.9"}});
+    EXPECT(ok.handshake());
+    EXPECT_EQ(quiet->load(), 0);
 }
 
 TEST_CASE("Only the exact Origin passes, in every disguise") {
