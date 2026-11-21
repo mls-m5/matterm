@@ -60,6 +60,12 @@ if(BUILD_TESTING)
     target_link_libraries(cellhit_test PRIVATE matterm::terminal matterm::vt)
     add_test(NAME cell_hit COMMAND cellhit_test)
 
+    foreach(name panetree workspace prefixkeys)
+        add_executable(${name}_test ${name}_test.cpp mls-unit-test/test_main.cpp)
+        target_include_directories(${name}_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+        add_test(NAME ${name} COMMAND ${name}_test)
+    endforeach()
+
     add_executable(textselection_test textselection_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(textselection_test PRIVATE ../src/frontend)
     target_link_libraries(textselection_test PRIVATE matterm::terminal)
