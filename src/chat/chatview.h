@@ -19,6 +19,13 @@ namespace chat {
 // terminal without Unicode. It goes when the message is posted.
 constexpr char32_t kLiveMarker = 0x25C0;
 constexpr char32_t kLiveMarkerAscii = U'<';
+// The small face before the own name, and the ellipsis after "typing".
+constexpr char32_t kOwnFace = 0x263A;
+constexpr char32_t kEllipsis = 0x2026;
+
+// Every non-ASCII, non-Latin glyph the chat view draws. The terminal's font
+// must have them all (a test checks that against the bundled font).
+inline constexpr char32_t kViewGlyphs[] = {kLiveMarker, kOwnFace, kEllipsis};
 
 struct TermCaps {
     bool truecolor = false;
