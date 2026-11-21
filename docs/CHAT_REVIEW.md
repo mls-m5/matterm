@@ -225,7 +225,7 @@ Containerfile needs no libsodium (chatd-core has none) and `libboost-dev` is
 enough because Asio and Beast are header-only; Caddy upgrades WebSocket by
 itself and replaces X-Forwarded-For from an untrusted client.
 
-Findings and suggestions (for the owner of the files):
+Findings and suggestions (for the owner of the files). **Status: 1-11 applied to the example files (still unverified); 12 left as is.**
 
 1. **nginx: no `ssl_protocols`.** Before nginx 1.23.4 the default includes TLS 1.0
    and 1.1; the matterm-server example sets `ssl_protocols TLSv1.2 TLSv1.3`.

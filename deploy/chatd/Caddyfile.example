@@ -1,7 +1,22 @@
 # Caddy in front of chatd (it gets and renews the certificate by itself and
 # handles WebSocket upgrades; X-Forwarded-For is set by Caddy). An example, not
-# a tested file.
+# a tested file; check the options against your Caddy version.
+# Stock Caddy has no per-address connection limit (needs a plugin), so only
+# chatd's own caps apply. Caddy logs errors to stderr, which Podman or journald
+# keep, and those lines can name client addresses.
+{
+	servers {
+		timeouts {
+			read_header 10s
+			read_body 10s
+		}
+	}
+}
+
 chat.example.org {
+	request_body {
+		max_size 1KB
+	}
 	reverse_proxy 127.0.0.1:8097
 	log {
 		output discard
