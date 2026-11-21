@@ -34,3 +34,11 @@ Last updated 2026-11-21. `main` is pushed up to `128707c` (plus the chat design 
   `agent2-sessions`, `agent3-resize`, `agent3-selection`, `agent3-url`,
   `archive/agent3-resize-59308b7`. Check before deleting; the work was most likely
   integrated by cherry-pick.
+
+## To investigate (reported by the owner, 2026-11-21)
+
+- Native window: in a fairly new window, while the user resized it, the window
+  jumped back and forth as if something kept triggering a resize (possibly a
+  resize loop between the window snapping/size rounding and the window manager).
+  Not reproduced yet; no details on the compositor or the steps. See
+  `src/frontend/windowsnap.h`.

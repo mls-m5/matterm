@@ -300,3 +300,42 @@ so no user file changes), what can be guessed without any markers (the prompt li
 and the cursor position), and is the feature worth having if it only works when the
 user opts in. Nothing is decided; no code.
 
+
+## 13. Tabs, panes and chrome: decisions of 2026-11-21 (owner), not built
+
+Context: Termux plus tmux would not solve mouse scrolling, so the tabs and panes are
+built into matterm itself, native and browser alike. The browser tab strip of
+section 5 (HTML above the canvas, two panes) is the first version; this replaces its
+plan. The old implementation is on `archive/web-tabs`.
+
+Decided:
+
+- **Chrome in cells.** The tab strip is a row of cells drawn by the same cell renderer
+  in the browser and in the native app, so both look and behave alike. Screen-reader
+  access is not a goal now (the HTML strip had it; that is given up).
+- **Panes form a tree.** A node is a pane (one terminal) or a split (horizontal or
+  vertical, with a ratio). Example: one pane on the left, two stacked on the right.
+- **A tab is a whole layout** (the tmux "window"): the tree of panes. Switching tabs
+  switches the whole layout. Background processes keep running: sessions belong to
+  the server, hidden views keep parsing, a tab can show an activity mark.
+- **Switching panes:** mouse click; the keyboard in the prefix style below.
+- **Keys, desktop app:** the usual GNOME Terminal ones (Ctrl+Shift+T new tab,
+  Ctrl+Shift+W close, Ctrl+PgUp/PgDn switch, Alt+1..9 go to tab, Ctrl+Shift+C/V),
+  plus own keys for splitting and moving between panes.
+- **Keys, browser:** a prefix (Ctrl+B by default, configurable) followed by letters,
+  together with the mouse. The browser keeps Ctrl+T/N/W (also with Shift), Ctrl+Tab
+  and more; see section 11.
+- **Scrollbar** (idea, undecided in detail): between two panes it lives in the divider
+  strip, the left half for the left pane and the right half for the right pane, drawn
+  in pixels by the renderer (so it is not available in a plain text terminal
+  front end, which is accepted). A pane at the window edge keeps a reserved strip as
+  today (12 px, `scrollbarWidth` in `sdlbackend.cpp`). The divider strip is chrome,
+  so the scrollbar takes no columns from the programs.
+- **Scrolling in the alternate screen** is unchanged: without mouse reporting the
+  wheel sends Up/Down; there is no history there (docs/SCROLLING_AND_REFLOW.md).
+
+Open: splits at pixel positions instead of whole cells (Shift snaps to cells); the
+exact prefix letters; the divider look; moving a pane between tabs.
+
+Suggested phases: 1) chrome layer, cell tab strip; 2) pane tree, dividers, focus;
+3) prefix keys and activity marks; 4) scrollbar placement.
