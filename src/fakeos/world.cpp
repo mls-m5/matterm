@@ -151,6 +151,13 @@ void seedWorld(World &world) {
         "/usr/games/snow", "#!builtin snow\n", "root", 0755, base - 30 * day);
     fs.put(
         "/usr/games/life", "#!builtin life\n", "root", 0755, base - 30 * day);
+    for (const char *toy : {"clock", "starfield", "aquarium"}) {
+        fs.put(std::string("/usr/games/") + toy,
+               std::string("#!builtin ") + toy + "\n",
+               "root",
+               0755,
+               base - 30 * day);
+    }
     // A shy one, hidden by its dot.
     fs.put("/usr/games/.crumble",
            "#!builtin crumble\n",
