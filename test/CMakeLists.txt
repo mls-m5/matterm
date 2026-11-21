@@ -337,7 +337,7 @@ if(BUILD_TESTING)
 endif()
 
 # mattrix needs no SDL: its terminal test runs wherever the PTY adapter does.
-if(TARGET mattrix AND TARGET ptylink)
+if(BUILD_TESTING AND TARGET mattrix AND TARGET ptylink)
     add_executable(mattrixtty_test mattrixtty_test.cpp mls-unit-test/test_main.cpp)
     target_link_libraries(mattrixtty_test PRIVATE matterm::ptylink)
     target_compile_definitions(mattrixtty_test PRIVATE MATTRIX_BINARY="$<TARGET_FILE:mattrix>")
@@ -347,7 +347,7 @@ if(TARGET mattrix AND TARGET ptylink)
 endif()
 
 # chatd over real loopback sockets (plain TCP test listener and WebSocket).
-if(TARGET chatd-core)
+if(BUILD_TESTING AND TARGET chatd-core)
     add_executable(chatd_test chatd_test.cpp mls-unit-test/test_main.cpp)
     target_link_libraries(chatd_test PRIVATE chatd-core)
     add_test(NAME chatd COMMAND chatd_test)
@@ -357,7 +357,7 @@ endif()
 # Threat-model checks of the chat server (docs/CHAT_REVIEW.md): hostile clients
 # over real loopback sockets. chatissues_test holds the gaps found, one suite
 # each, registered as expected failures until they are fixed.
-if(TARGET chatd-core)
+if(BUILD_TESTING AND TARGET chatd-core)
     add_executable(chatd_security_test chatd_security_test.cpp mls-unit-test/test_main.cpp)
     target_link_libraries(chatd_security_test PRIVATE chatd-core)
     add_test(NAME chatd_security COMMAND chatd_security_test)
@@ -379,7 +379,7 @@ if(TARGET chatd-core)
 endif()
 
 # mattrix-chat in pseudo-terminals against a real chatd.
-if(TARGET mattrix-chat AND TARGET ptylink AND TARGET chatd-core)
+if(BUILD_TESTING AND TARGET mattrix-chat AND TARGET ptylink AND TARGET chatd-core)
     add_executable(chatterm_test chatterm_test.cpp mls-unit-test/test_main.cpp)
     target_link_libraries(chatterm_test PRIVATE matterm::ptylink chatd-core)
     target_compile_definitions(chatterm_test PRIVATE CHAT_BINARY="$<TARGET_FILE:mattrix-chat>")
