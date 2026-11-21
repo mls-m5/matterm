@@ -266,7 +266,7 @@ if(BUILD_TESTING)
     endif()
 
     if(TARGET matterm-server-core)
-        foreach(name IN ITEMS serverauth serverratelimiter serverintegration serverlifecycle serverconfig serversecurity serverproxysecurity serverreplay serverregistry serversessions sessionsreview)
+        foreach(name IN ITEMS serverauth serverratelimiter serverintegration serverlifecycle serverconfig serversecurity serverproxysecurity serverreplay serverregistry serversessions sessionsreview tabsreview)
             if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${name}_test.cpp")
                 add_executable(${name}_test ${name}_test.cpp mls-unit-test/test_main.cpp)
                 target_link_libraries(${name}_test PRIVATE matterm-server-core)
