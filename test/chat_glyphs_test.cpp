@@ -3,6 +3,7 @@
 // TrueType file); without it the check is skipped.
 #include "chatview.h"
 #include "mls-unit-test/unittest.h"
+#include "tabstrip.h"
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
@@ -71,6 +72,8 @@ TEST_CASE("The font has every glyph the chat view draws") {
     EXPECT_GT(font.d.size(), 1000u);
     EXPECT_TRUE(font.has(U'A')); // The parser itself works.
     for (const char32_t cp : chat::kViewGlyphs)
+        EXPECT(font.has(cp));
+    for (const char32_t cp : frontend::kStripGlyphs)
         EXPECT(font.has(cp));
 }
 TEST_SUIT_END

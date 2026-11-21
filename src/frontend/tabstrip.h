@@ -24,6 +24,10 @@
 
 namespace frontend {
 
+// Every non-ASCII glyph the strip draws (the font must have them; see
+// test/chat_glyphs_test.cpp): activity mark, close button, ellipsis.
+inline constexpr char32_t kStripGlyphs[] = {U'●', U'×', U'…'};
+
 inline constexpr int kMaxTitle = 20; // Columns of a title at most.
 inline constexpr int kMinTitle = 4;  // Shrinking stops here.
 
