@@ -218,7 +218,7 @@ if(BUILD_TESTING)
     endif()
 
     if(TARGET matterm-server-core)
-        foreach(name IN ITEMS serverauth serverratelimiter serverintegration serverlifecycle serverconfig serversecurity serverproxysecurity serverreplay serverregistry serversessions)
+        foreach(name IN ITEMS serverauth serverratelimiter serverintegration serverlifecycle serverconfig serversecurity serverproxysecurity serverreplay serverregistry serversessions sessionsreview)
             if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${name}_test.cpp")
                 add_executable(${name}_test ${name}_test.cpp mls-unit-test/test_main.cpp)
                 target_link_libraries(${name}_test PRIVATE matterm-server-core)
@@ -226,6 +226,16 @@ if(BUILD_TESTING)
                 set_tests_properties(${name} PROPERTIES TIMEOUT 60)
                 target_compile_definitions(${name}_test PRIVATE MATTERM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
             endif()
+        endforeach()
+    endif()
+
+    if(TARGET matterm-server-core AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sessionsissues_test.cpp")
+        # Known gaps from docs/SESSIONS_REVIEW.md: expected to fail until fixed.
+        add_executable(sessionsissues_test sessionsissues_test.cpp mls-unit-test/test_main.cpp)
+        target_link_libraries(sessionsissues_test PRIVATE matterm-server-core)
+        foreach(suite IN ITEMS RefusedResize)
+            add_test(NAME sessions_issue_${suite} COMMAND sessionsissues_test SessionsIssue${suite})
+            set_tests_properties(sessions_issue_${suite} PROPERTIES WILL_FAIL TRUE TIMEOUT 60 LABELS "known-issue")
         endforeach()
     endif()
 
@@ -362,6 +372,12 @@ if(TARGET chatd-core)
     target_link_libraries(chatd_security_test PRIVATE chatd-core)
     add_test(NAME chatd_security COMMAND chatd_security_test)
     set_tests_properties(chatd_security PROPERTIES TIMEOUT 90)
+
+    # Load and soak (docs/CHAT_REVIEW.md): CHATD_SOAK_SECONDS sets each phase.
+    add_executable(chatd_soak_test chatd_soak_test.cpp mls-unit-test/test_main.cpp)
+    target_link_libraries(chatd_soak_test PRIVATE chatd-core)
+    add_test(NAME chatd_soak COMMAND chatd_soak_test)
+    set_tests_properties(chatd_soak PROPERTIES TIMEOUT 120 LABELS "soak")
 
     add_executable(chatissues_test chatissues_test.cpp mls-unit-test/test_main.cpp)
     target_link_libraries(chatissues_test PRIVATE chatd-core)

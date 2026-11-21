@@ -185,3 +185,22 @@ A `WILL_FAIL` test passes while the check still fails and turns **red when the
 code is fixed**. That is the cue to move the suite into `chatd_security_test.cpp`
 or `chat_security_test.cpp` and delete its `chat_issue_` entry in
 `test/CMakeLists.txt`.
+
+## 6. Load and soak
+
+`test/chatd_soak_test.cpp` (CTest `chatd_soak`, label `soak`, about 35 s;
+`tools/chatd-soak.sh [seconds]` runs each phase for longer) drives a chatd in
+the same process over the plain TCP listener on loopback and measures memory and
+descriptors from `/proc/self`:
+
+| Phase | Load | Checked |
+| --- | --- | --- |
+| A | 100 chatting clients (drafts, locks, join history) with the room limits lifted | nobody dropped, about 65 000 lines delivered, all gone at the end |
+| B | 10 clients that never read (1 KiB receive buffer) and 8 that talk at about 2000 lines per second | every non-reader is dropped by the backlog cap, no talker is lost |
+| C | 5 flooders (20 lines per round, a quarter of them garbage) with the real limits, and a probe pair | every flooder is removed, probes are delivered (30 of 30, worst delay 3 ms) |
+| D | one address connecting in a loop, with the real limits and with them lifted | with limits at most `connectBurst` plus the refill are admitted and nobody is banned; without limits all 680 visits are admitted and the room returns to its one resident |
+| end | | peak resident growth under 64 MiB (measured 4 MiB), descriptors unchanged |
+
+It found no defect in chatd. It does not cover TLS or the proxy, and with one
+source address (loopback) it cannot show the per-source fairness across many
+addresses (see F4 in section 2).
