@@ -66,6 +66,11 @@ if(BUILD_TESTING)
         add_test(NAME ${name} COMMAND ${name}_test)
     endforeach()
 
+    add_executable(workspaceview_test workspaceview_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(workspaceview_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+    target_link_libraries(workspaceview_test PRIVATE matterm::transport matterm::vt matterm::terminal)
+    add_test(NAME workspace_view COMMAND workspaceview_test)
+
     add_executable(textselection_test textselection_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(textselection_test PRIVATE ../src/frontend)
     target_link_libraries(textselection_test PRIVATE matterm::terminal)
