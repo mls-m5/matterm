@@ -67,6 +67,77 @@ TEST_CASE("sl: the train crosses and leaves by itself") {
     EXPECT(pc.last() == kPrompt);
 }
 
+TEST_CASE("clock: a big clock, space switches to 12 hours, q leaves") {
+    Pc pc(false, 80, 24, 2);
+    pc.run("clock");
+    EXPECT(pc.sys.inProgram());
+    runFor(pc, 1200);
+    EXPECT(pc.shows("UTC   q quit"));
+    EXPECT(litCells(pc) > 60); // Big digits.
+    pc.type(" ");
+    runFor(pc, 300);
+    EXPECT(pc.shows("AM   q quit"));
+    pc.type("q");
+    EXPECT(!pc.sys.inProgram());
+    EXPECT(pc.shows("Time flies."));
+    EXPECT(pc.last() == kPrompt);
+}
+
+TEST_CASE("starfield: stars move, speed keys work, q leaves") {
+    Pc pc(false, 80, 24, 4);
+    pc.run("/usr/games/starfield");
+    runFor(pc, 800);
+    EXPECT(pc.shows("starfield   q quit"));
+    const int before = litCells(pc);
+    EXPECT(before > 30);
+    pc.type("+");
+    pc.type("-");
+    runFor(pc, 2000);
+    EXPECT(litCells(pc) > 30);
+    EXPECT(pc.sys.inProgram());
+    pc.type("q");
+    EXPECT(pc.shows("Warp drive disengaged."));
+    EXPECT(pc.last() == kPrompt);
+}
+
+TEST_CASE("aquarium: fish swim, space feeds them, q leaves") {
+    Pc pc(false, 80, 24, 6);
+    pc.run("aquarium");
+    EXPECT(pc.sys.inProgram()); // It lives in /usr/games, which is in the PATH.
+    runFor(pc, 1500);
+    EXPECT(pc.shows("aquarium   q quit"));
+    EXPECT(pc.shows("><") || pc.shows("<>") || pc.shows("))>") ||
+           pc.shows("<(("));
+    pc.type(" ");
+    runFor(pc, 1500);
+    EXPECT(pc.sys.inProgram());
+    pc.type("q");
+    EXPECT(pc.shows("The fish have already forgotten you."));
+    EXPECT(pc.last() == kPrompt);
+}
+
+TEST_CASE("More small eggs: ping, ssh, curl, git, python, apt") {
+    Pc pc;
+    pc.run("ping example.org");
+    EXPECT(pc.shows("The network is a rumor here"));
+    pc.run("clear");
+    pc.run("ssh me@elsewhere");
+    EXPECT(pc.shows("no network. It has opinions"));
+    pc.run("clear");
+    pc.run("curl https://example.org");
+    EXPECT(pc.shows("There is only this."));
+    pc.run("clear");
+    pc.run("git status");
+    EXPECT(pc.shows("not a git repository"));
+    pc.run("clear");
+    pc.run("python3 -c 1");
+    EXPECT(pc.shows("vibes"));
+    pc.run("clear");
+    pc.run("apt install reality");
+    EXPECT(pc.shows("Unable to locate package reality"));
+    EXPECT(pc.last() == kPrompt);
+}
+
 TEST_CASE("the small courtesies") {
     Pc pc;
     pc.run("please");

@@ -13,8 +13,9 @@ namespace {
 class Clock final : public Program {
 public:
     void key(World &, const Key &key) override {
-        if (key.is(Key::Type::Escape) || (key.is(Key::Type::Ctrl) && key.text == "c") ||
-            key.isText("q") || key.isText("Q")) {
+        if (key.is(Key::Type::Escape) ||
+            (key.is(Key::Type::Ctrl) && key.text == "c") || key.isText("q") ||
+            key.isText("Q")) {
             finished_ = true;
         }
         else if (key.isText(" ")) {
@@ -33,16 +34,25 @@ public:
         if (twelve_) {
             hour = hour % 12 == 0 ? 12 : hour % 12;
         }
-        const std::string digits = std::string(1, char('0' + hour / 10)) + char('0' + hour % 10) +
-                                   char('0' + minute / 10) + char('0' + minute % 10) +
-                                   char('0' + second / 10) + char('0' + second % 10);
-        // Three pairs of digits with two colons: 6 glyphs of 5, gaps of 1, colons of 3.
+        const std::string digits =
+            std::string(1, char('0' + hour / 10)) + char('0' + hour % 10) +
+            char('0' + minute / 10) + char('0' + minute % 10) +
+            char('0' + second / 10) + char('0' + second % 10);
+        // Three pairs of digits with two colons: 6 glyphs of 5, gaps of 1,
+        // colons of 3.
         const int total = 6 * 5 + 3 + 2 * 3;
         const bool big = w >= total + 2 && h >= 9;
         const double t = double(now.count()) / 1000.0;
         if (!big) {
-            const std::string text = digits.substr(0, 2) + ":" + digits.substr(2, 2) + ":" + digits.substr(4, 2);
-            canvas.text(std::max(0, (w - int(text.size())) / 2), h / 2, text, hsv(t * 0.05, 0.5, 1), {10, 10, 16}, true);
+            const std::string text = digits.substr(0, 2) + ":" +
+                                     digits.substr(2, 2) + ":" +
+                                     digits.substr(4, 2);
+            canvas.text(std::max(0, (w - int(text.size())) / 2),
+                        h / 2,
+                        text,
+                        hsv(t * 0.05, 0.5, 1),
+                        {10, 10, 16},
+                        true);
         }
         else {
             int x = (w - total) / 2;
@@ -52,22 +62,43 @@ public:
                 for (int gy = 0; gy < 5; ++gy) {
                     for (int gx = 0; gx < 5; ++gx) {
                         if (glyph[gy][gx] == '#') {
-                            canvas.put(x + gx, y + gy, U'#', hsv(t * 0.05 + (x + gx) * 0.01, 0.55, 1), {10, 10, 16}, true);
+                            canvas.put(x + gx,
+                                       y + gy,
+                                       U'#',
+                                       hsv(t * 0.05 + (x + gx) * 0.01, 0.55, 1),
+                                       {10, 10, 16},
+                                       true);
                         }
                     }
                 }
                 x += 5 + (i % 2 == 1 ? 0 : 1);
                 if (i % 2 == 1 && i < 5) {
                     if (second % 2 == 0) { // The colon blinks.
-                        canvas.put(x + 1, y + 1, U'#', {200, 200, 210}, {10, 10, 16}, true);
-                        canvas.put(x + 1, y + 3, U'#', {200, 200, 210}, {10, 10, 16}, true);
+                        canvas.put(x + 1,
+                                   y + 1,
+                                   U'#',
+                                   {200, 200, 210},
+                                   {10, 10, 16},
+                                   true);
+                        canvas.put(x + 1,
+                                   y + 3,
+                                   U'#',
+                                   {200, 200, 210},
+                                   {10, 10, 16},
+                                   true);
                     }
                     x += 3;
                 }
             }
         }
-        const std::string note = std::string(twelve_ ? (pm ? "PM" : "AM") : "UTC") + "   q quit   space 12/24 h";
-        canvas.text(std::max(0, (w - int(note.size())) / 2), h - 1, note, {150, 150, 165}, {10, 10, 16});
+        const std::string note =
+            std::string(twelve_ ? (pm ? "PM" : "AM") : "UTC") +
+            "   q quit   space 12/24 h";
+        canvas.text(std::max(0, (w - int(note.size())) / 2),
+                    h - 1,
+                    note,
+                    {150, 150, 165},
+                    {10, 10, 16});
     }
 
     bool finished() const override {

@@ -15,8 +15,9 @@ public:
         last_ = now;
     }
     void key(World &, const Key &key) override {
-        if (key.is(Key::Type::Escape) || (key.is(Key::Type::Ctrl) && key.text == "c") ||
-            key.isText("q") || key.isText("Q")) {
+        if (key.is(Key::Type::Escape) ||
+            (key.is(Key::Type::Ctrl) && key.text == "c") || key.isText("q") ||
+            key.isText("Q")) {
             finished_ = true;
         }
         else if (key.isText("+") || key.isText("=")) {
@@ -53,11 +54,25 @@ public:
                 continue;
             }
             const double near = 1.0 - std::min(1.0, s.z);
-            const char32_t glyph = near > 0.8 ? U'@' : near > 0.55 ? U'*' : near > 0.3 ? U'+' : U'.';
+            const char32_t glyph = near > 0.8    ? U'@'
+                                   : near > 0.55 ? U'*'
+                                   : near > 0.3  ? U'+'
+                                                 : U'.';
             const int v = 90 + int(165 * near);
-            canvas.put(ix, iy, glyph, {std::uint8_t(v), std::uint8_t(v), std::uint8_t(std::min(255, v + 25))}, {0, 0, 6}, near > 0.6);
+            canvas.put(ix,
+                       iy,
+                       glyph,
+                       {std::uint8_t(v),
+                        std::uint8_t(v),
+                        std::uint8_t(std::min(255, v + 25))},
+                       {0, 0, 6},
+                       near > 0.6);
         }
-        canvas.text(1, h - 1, " starfield   q quit   + / - speed ", {200, 200, 215}, {20, 20, 40});
+        canvas.text(1,
+                    h - 1,
+                    " starfield   q quit   + / - speed ",
+                    {200, 200, 215},
+                    {20, 20, 40});
     }
     bool finished() const override {
         return finished_;
