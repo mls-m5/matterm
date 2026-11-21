@@ -359,6 +359,14 @@ if(TARGET chatd-core)
     target_link_libraries(chatd_security_test PRIVATE chatd-core)
     add_test(NAME chatd_security COMMAND chatd_security_test)
     set_tests_properties(chatd_security PROPERTIES TIMEOUT 90)
+
+    add_executable(chatissues_test chatissues_test.cpp mls-unit-test/test_main.cpp)
+    target_link_libraries(chatissues_test PRIVATE chatd-core)
+    foreach(issue IN ITEMS JoinBurst PendingBudget LookAlikeNames RoomBudget BanTable ReconnectChurn)
+        add_test(NAME chat_issue_${issue} COMMAND chatissues_test ChatIssue${issue})
+        set_tests_properties(chat_issue_${issue} PROPERTIES WILL_FAIL TRUE TIMEOUT 60
+            LABELS "known-issue")
+    endforeach()
 endif()
 
 # mattrix-chat in pseudo-terminals against a real chatd.
