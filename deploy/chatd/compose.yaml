@@ -5,12 +5,14 @@
 #
 # CHAT_ORIGIN: the page that may use the chat (an exact Origin; repeat the
 #   "--origin" pair below for more sites).
+# Operator console: `podman attach --sig-proxy=false chatd` (otherwise Ctrl-C
+#   stops chatd); detach with Ctrl-P Ctrl-Q.
 # CHAT_PROXY_IP: the address nginx/Caddy connects from, as the container sees it
 #   (the host side of the container network); X-Forwarded-For is trusted from it
 #   and from nobody else.
 services:
   chatd:
-    image: mattrix-chatd
+    image: localhost/mattrix-chatd
     build:
       context: ../..
       dockerfile: deploy/chatd/Containerfile
@@ -24,6 +26,8 @@ services:
       - "${CHAT_PROXY_IP:?set CHAT_PROXY_IP to the address the proxy connects from, or every visitor shares one address}"
       - "--console" # Operator commands: podman attach chatd
     stdin_open: true
+    # chatd never connects out; an `internal` network would remove the route too
+    # (published ports on it are unverified).
     ports:
       - "127.0.0.1:8097:8097" # Loopback only; the proxy does TLS in front.
     read_only: true
