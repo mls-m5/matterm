@@ -118,6 +118,38 @@ const std::vector<Egg> &eggs() {
             egg("neo", T::Command, "neo").print("The Matrix has you.\n"),
             // Typos and small courtesies.
             egg("sl", T::Command, "sl").launch("sl"),
+            egg("ping", T::Command, "ping")
+                .print("PING the-internet (0.0.0.0): 56 data bytes\n"
+                       "Request timeout for icmp_seq 0\n"
+                       "Request timeout for icmp_seq 1\n"
+                       "--- the-internet ping statistics ---\n"
+                       "2 packets transmitted, 0 received. The network is a "
+                       "rumor here.\n"),
+            egg("ssh", T::Command, "ssh")
+                .print("ssh: this machine has no network. It has opinions, "
+                       "though.\n"),
+            egg("curl", T::Command, "curl")
+                .print("curl: (6) Could not resolve host. There is no host. "
+                       "There is only this.\n"),
+            egg("wget", T::Command, "wget")
+                .print("wget: nothing to fetch from here; try 'fortune'.\n"),
+            egg("git", T::Command, "git")
+                .print("fatal: not a git repository (or any of the parent "
+                       "directories): .git\n"
+                       "(There is no history here either, apart from "
+                       "'history'.)\n"),
+            egg("python", T::Command, "python")
+                .print("No interpreters are installed. There is the shell, and "
+                       "vibes.\n"),
+            egg("python3", T::Command, "python3")
+                .print("No interpreters are installed. There is the shell, and "
+                       "vibes.\n"),
+            egg("node", T::Command, "node")
+                .print("No interpreters are installed. There is the shell, and "
+                       "vibes.\n"),
+            egg("apt", T::Command, "apt")
+                .print("E: Unable to locate package reality.\n"
+                       "Everything here is already installed, and pretend.\n"),
             egg("please", T::Command, "please")
                 .print("Polite! Still no. But thank you for asking.\n"),
             egg("thanks", T::Command, "thanks")
