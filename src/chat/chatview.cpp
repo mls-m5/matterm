@@ -413,6 +413,27 @@ std::string ChatView::banner(Millis) const {
     return line("Live chat, draft sent as you type", false, true);
 }
 
+// The room's errors are short on purpose; the person gets a bit more.
+namespace {
+std::string friendlyError(ErrorCode code, const std::string &text) {
+    switch (code) {
+    case ErrorCode::Rate:
+        return text + " (one message every 2 seconds, a few can be saved up)";
+    case ErrorCode::NameTaken:
+        return "that name is taken, or looks too much like another name";
+    case ErrorCode::BadName:
+        return "names are 2-16 letters, digits, _ or -, and some words are "
+               "kept";
+    case ErrorCode::BadLine:
+        return "the room did not understand that";
+    case ErrorCode::TooLong:
+        return "that message is too long (200 characters at most)";
+    default:
+        return text;
+    }
+}
+} // namespace
+
 std::vector<std::string> ChatView::printable(ChatClient &client, Millis now) {
     std::vector<std::string> lines;
     const auto state = client.state();
@@ -455,7 +476,8 @@ std::vector<std::string> ChatView::printable(ChatClient &client, Millis now) {
             lines.push_back(line(" ! " + e.text, false, true));
             break;
         case ChatClient::Event::Kind::Error:
-            lines.push_back(line(" ! " + e.text, false, true));
+            lines.push_back(
+                line(" ! " + friendlyError(e.code, e.text), false, true));
             break;
         case ChatClient::Event::Kind::Hide:
             lines.push_back(
