@@ -1,11 +1,65 @@
-# Security Review: server, browser client, deployment files
+# Security Review: server, browser client, chat, deployment files
 
-Scope: `src/server/**`, `src/protocol/**`, `web/login.js`, `web/shell.html`,
-`web/main.cpp` (paste, title), `web/websocketchannel.*`, `deploy/podman/**`.
-Threat model: a patient remote attacker who can send arbitrary bytes, plus a
-hostile web page open in the owner's browser. Method: reading the code, then
-probing the running server with raw sockets (`test/serversecurity_test.cpp`).
-Base: `main` at debd8f0.
+Scope: `src/server/**` (login, sessions, registry, replay), `src/protocol/**`,
+`src/chat/**`, `src/chatd/**`, `app/chat/**`, `web/login.js`, `web/shell.html`,
+`web/main.cpp` (paste, title), `web/websocketchannel.*`, `deploy/podman/**`,
+`deploy/chatd/**`. Threat model: a patient remote attacker who can send
+arbitrary bytes, plus a hostile web page open in the owner's browser.
+Method: reading the code, then probing the running server with raw sockets and
+a model/fuzz test per area. Updated on `main` at 6b96852 (first written at
+debd8f0); the detailed reviews are [SESSIONS_REVIEW.md](SESSIONS_REVIEW.md) and
+[CHAT_REVIEW.md](CHAT_REVIEW.md).
+
+## Remaining risks (read this first)
+
+Ordered by what an operator should decide or watch before exposing anything.
+
+1. **The deployment files have never run.** No container, compose file, nginx
+   or Caddy configuration was executed here; they were parsed with the
+   server's own flag parser or read. Unverified: the peer address the server
+   sees from rootless Podman, a port published from an `internal` network, the
+   static `chatd` image on `scratch`, TLS handshakes, the browser client with a
+   real Emscripten build, `connect-src` for WebSocket in each browser.
+2. **Proxy trust is a configuration risk, not a code one.** `trusted_proxy=any`
+   on a backend that is directly reachable lets anyone forge a source (and the
+   loopback exemption of the login limiter); too many `trusted_proxy_hops`
+   selects attacker input. chatd's compose file defaults `--trust-proxy` to
+   `none` when `CHAT_PROXY_IP` is unset: then every visitor shares the proxy's
+   address, the per-source caps (3 connections, the connect and message
+   buckets, any ban) count all of them together, and a single abuser can lock
+   everyone out. Set the address; chatd prints nothing to warn about it.
+3. **The shell is the product.** A logged-in owner has the server user's
+   rights (config directory with the password hash, the server's own memory,
+   the ability to kill it); isolation is the container. One password, one
+   owner; the login limiter's global budget still allows a distributed
+   attacker to lock the owner out of logging in (nginx's per-client limit is
+   the second layer). No second factor; lockout state is not persisted.
+4. **Persistent sessions keep terminal output in memory.** With
+   `persistent_sessions` on (default off) the replay ring holds the last
+   `replay_buffer_bytes` of every shell's raw output for up to
+   `detached_timeout` (default one hour), up to `replay_total_bytes` (64 MiB).
+   It is wiped when dropped, but copies in output messages and socket buffers
+   are not, and a secret a program prints stays until it falls out of the ring.
+   Detached shells survive cookie expiry and login rotation (the password gets
+   them back); logout and `/sessions/close-all` kill them all. Resume is a
+   best-effort raw-stream reconstruction, not a VT checkpoint (PROTOCOL.md
+   11.4). One exception from the registry tick closes every session.
+5. **Volume attacks are out of scope of the code.** Bandwidth and connection
+   floods at the network layer, and many addresses (an IPv6 range, a botnet),
+   are only bounded by per-source caps and the proxy: the chat room's budgets
+   are per source key (IPv6 /64), so a few hundred sources can still fill a
+   64-seat room; the fixes of CHAT_REVIEW.md F1-F6 make that harder, not
+   impossible. The chat has no accounts and no persistence by design; the
+   operator console has no login (whoever can `podman attach` is the operator).
+6. **Static file responses are copied per connection** (finding 5, accepted):
+   up to 16 unauthenticated connections times the largest file (the WebAssembly
+   module). Bounded by nginx and the 512 MiB container limit.
+7. **No `__Host-` cookie prefix** (finding 6, accepted): a sibling subdomain can
+   deny the WebSocket upgrade by planting a same-named cookie. Decide with the
+   TLS work.
+8. **Not scanned:** dependency vulnerabilities (Boost, libsodium, Beast), OS
+   settings (firewall, swap, core dumps), timing side channels below loopback
+   granularity, the terminal parser beyond the fuzz tests.
 
 ## Findings, ranked
 
@@ -107,6 +161,28 @@ plain-HTTP laptop setup on some browsers; decide with the TLS work.
 - `connect-src 'self'` must cover `ws:`/`wss:` for the same host. Current
   browsers do; older Safari did not (not verified here).
 
+### 8. Sessions and chat since the first review (summary)
+
+Both got their own independent review with tests written first.
+
+- **Sessions** ([SESSIONS_REVIEW.md](SESSIONS_REVIEW.md)): one low finding (S1:
+  a refused attach still resized the terminal), fixed by taking the lease before
+  the resize. Everything else held: id guessing, hostile Hellos, takeover
+  fences, rotated and expired cookies, replay bounds against a model, lease
+  balance, tombstones, close-all and logout.
+- **Chat** ([CHAT_REVIEW.md](CHAT_REVIEW.md)): six findings (F1-F6: a full
+  history blocking every join, a few spammers using up the room's message
+  budget and getting others banned, shared handshake budget, look-alike names,
+  unbounded ban tables, no connect rate limit), all fixed with their tests now
+  regular. Escape injection from a hostile server, Origin checks, forwarded
+  headers, slowloris and the loopback-only test listener held. A load and soak
+  test (100 clients, non-readers, floods, churn) found nothing and shows memory
+  and descriptors bounded.
+- **Deployment of chatd** (`deploy/chatd`): read-only root, no capabilities,
+  non-root, no volumes, `scratch` image, loopback port, memory and process
+  limits; the flags in compose.yaml are the ones `chatd --help` accepts. Not
+  run (risk 1) and the `trust-proxy` default is risk 2.
+
 ## Checked and found fine
 
 - Login: rate limit and lockout run before hashing; unknown, wrong, malformed
@@ -159,7 +235,7 @@ plain-HTTP laptop setup on some browsers; decide with the TLS work.
 ## Not checked
 
 - Containers cannot run here: none of the compose, Containerfile or nginx
-  behavior was executed (only parsed with the server's own parser or read).
+  behavior (matterm-server and chatd alike) was executed (only parsed with the server's own parser or read).
   Unverified in particular: a published port on an `internal` network, the
   peer address the server sees from rootless Podman (loopback, gateway or the
   real client), setuid binaries in the Debian image under `cap_drop: ALL`, and
