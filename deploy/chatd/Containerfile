@@ -21,7 +21,7 @@ COPY bench ./bench
 COPY lib ./lib
 COPY web ./web
 COPY matperf ./matperf
-RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
         -DMATTERM_BUILD_RENDERER=OFF -DMATTERM_BUILD_DEMO=OFF \
         -DMATTERM_BUILD_APP=OFF -DMATTERM_BUILD_MATTRIX=OFF \
         -DMATTERM_CHATD_STATIC=ON \
