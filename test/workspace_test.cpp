@@ -402,4 +402,22 @@ TEST_CASE("Random commands keep every pane owned exactly once") {
     }
 }
 
+TEST_CASE("foldTabs gives every tab's shape in tab order") {
+    Maker m;
+    Space w(m.factory());
+    w.setLayoutSpec(bigSpec());
+    w.apply(Command::NewTab);
+    w.apply(Command::SplitSideBySide);
+    w.apply(Command::NewTab);
+    const auto shapes = w.foldTabs<std::string>(
+        [](PaneId, const Fake &f) { return f.title; },
+        [](SplitDirection, double, std::string a, std::string b) { return "(" + a + "," + b + ")"; });
+    EXPECT_EQ(shapes.size(), std::size_t(2));
+    EXPECT_EQ(shapes[0], std::string("(p1,p2)"));
+    EXPECT_EQ(shapes[1], std::string("p3"));
+    EXPECT(w.setParentRatio(2, 0.3));  // Pane 2 is in the first tab, which is not active.
+    EXPECT(!w.setParentRatio(3, 0.3)); // A single pane has no split above it.
+    EXPECT(!w.setParentRatio(77, 0.3));
+}
+
 TEST_SUIT_END

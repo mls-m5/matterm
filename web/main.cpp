@@ -9,6 +9,7 @@
 #include "cursorglide.h"
 #include "framesignature.h"
 #include "inputencoder.h"
+#include "layoutsnapshot.h"
 #include "palette.h"
 #include "scriptedlink.h"
 #include "scriptedprogram.h"
@@ -39,6 +40,15 @@ using namespace frontend;
 using MouseEvent = InputEncoder::MouseEvent;
 
 namespace {
+// Trace to the browser console (stderr), only with ?debug in the page URL.
+bool gDebug = false; // ?debug
+#define DBG(...)                                                               \
+    do {                                                                       \
+        if (gDebug) {                                                          \
+            std::fprintf(stderr, "[dbg] " __VA_ARGS__);                        \
+            std::fputc('\n', stderr);                                          \
+        }                                                                      \
+    } while (0)
 // One terminal of the window: the link that feeds it and the TerminalView that
 // owns everything the link produced. Pointer state (a drag, mouse capture)
 // belongs to App, not to a pane.
@@ -98,7 +108,11 @@ struct App {
     int fontCss = 18;
     int pendingFontCss = 18;
     std::string shownTitle;
-    int pointerShape = 0;                   // 0 arrow, 1 columns, 2 rows.
+    int pointerShape = 0;       // 0 arrow, 1 columns, 2 rows.
+    std::string pendingSession; // For the next pane the factory makes.
+    std::string savedLayout;    // What sessionStorage holds.
+    bool keyShift = false; // Shift held at the last key press (not live state).
+    bool leaving = false;  // Reloading to the login form.
     std::unique_ptr<CellBuffer> stripCells; // The tab strip row as cells.
 
     WebPane *focused() const {
@@ -292,6 +306,8 @@ std::optional<UrlMatch> hoveredLink(const App &app,
     return cell ? urlAt(pane.view().model(), *cell) : std::nullopt;
 }
 
+void forgetLayout();
+
 // The layout changed (a pane, tab or split came or went): redraw, and let go of
 // pointer state that belonged to what was shown.
 void layoutChanged(App &app, bool empty) {
@@ -305,6 +321,7 @@ void layoutChanged(App &app, bool empty) {
     app.activeUntil = SDL_GetTicks64() + 500;
     if (empty) {
         // The last pane is gone: back to the login form.
+        forgetLayout();
         EM_ASM({ location.reload(); });
     }
 }
@@ -346,6 +363,19 @@ std::string prefixBytes(const App &app) {
 // the program (after the prefix, if the layout says so).
 bool layoutKey(App &app, const KeyChord &chord) {
     const auto result = app.layout->key(chord, nowMs());
+    DBG("layout key=%d ctrl=%d shift=%d alt=%d -> commands=%zu changed=%d "
+        "empty=%d fwdPrefix=%d fwdKey=%d tabs=%zu panes=%zu",
+        chord.key,
+        chord.ctrl,
+        chord.shift,
+        chord.alt,
+        result.commands.size(),
+        result.changed,
+        result.empty,
+        result.forwardPrefix,
+        result.forwardKey,
+        app.workspace->tabCount(),
+        app.workspace->paneCount());
     if (result.changed || result.empty) {
         layoutChanged(app, result.empty);
     }
@@ -432,6 +462,16 @@ void handleKey(App &app, const SDL_KeyboardEvent &key) {
     }
     const auto mod = modifiers(SDL_Keymod(key.keysym.mod));
     const auto sym = key.keysym.sym;
+    if (!isModifierKey(sym)) {
+        app.keyShift = mod.shift; // From the event itself: text arrives later.
+    }
+    DBG("keydown sym=%d ctrl=%d shift=%d alt=%d repeat=%d layoutKeys=%d",
+        int(sym),
+        mod.control,
+        mod.shift,
+        mod.alt,
+        key.repeat,
+        app.layoutKeys());
     if (app.layoutKeys() && !key.repeat && !isModifierKey(sym)) {
         if (const auto chord = chordFor(sym, mod)) {
             if (layoutKey(app, *chord)) {
@@ -492,6 +532,7 @@ void handleKey(App &app, const SDL_KeyboardEvent &key) {
 // Text from the keyboard (or the on-screen one): the layout sees a single
 // character first (the second key of the prefix), the program gets the rest.
 void handleText(App &app, const char *text, bool alt) {
+    DBG("text '%s' layoutKeys=%d", text ? text : "", app.layoutKeys());
     if (app.layoutKeys() && text && *text) {
         const auto *p = reinterpret_cast<const unsigned char *>(text);
         const std::size_t length = p[0] < 0x80   ? 1
@@ -506,8 +547,19 @@ void handleText(App &app, const char *text, bool alt) {
             for (std::size_t i = 1; i < length; ++i) {
                 cp = (cp << 6) | (p[i] & 0x3f);
             }
-            const auto mod = modifiers(SDL_GetModState());
-            if (layoutKey(app, KeyChord{int(cp), false, mod.shift, alt})) {
+            // Shift as it was when the key went down; by the time the text
+            // arrives the live state may be gone.
+            const bool shift = std::exchange(app.keyShift, false);
+            // Shift is part of the character. Some key sources (automation, a
+            // US keyboard model) report Shift+5 / Shift+' as the unshifted
+            // text; the prefix commands are '%' and '"'.
+            if (shift && cp == U'5') {
+                cp = U'%';
+            }
+            else if (shift && cp == U'\'') {
+                cp = U'"';
+            }
+            if (layoutKey(app, KeyChord{int(cp), false, false, alt})) {
                 return;
             }
         }
@@ -898,11 +950,20 @@ void handleEvent(App &app, const SDL_Event &event) {
     if (!pane) {
         return;
     }
-    if (app.ended(*pane)) {
-        if (event.type == SDL_KEYDOWN &&
-            (event.key.keysym.sym == SDLK_RETURN ||
-             event.key.keysym.sym == SDLK_KP_ENTER)) {
+    if (app.ended(*pane) && event.type == SDL_KEYDOWN &&
+        (event.key.keysym.sym == SDLK_RETURN ||
+         event.key.keysym.sym == SDLK_KP_ENTER)) {
+        // The session is over: Enter starts again (the login form for the
+        // only pane, otherwise the pane goes away). Other keys still reach
+        // the layout (prefix commands); the dead program gets no input.
+        if (app.workspace->paneCount() <= 1) {
+            forgetLayout();
             EM_ASM({ location.reload(); });
+        }
+        else {
+            const auto outcome =
+                app.workspace->closePane(app.workspace->focusedPaneId());
+            layoutChanged(app, outcome == Outcome::Empty);
         }
         return;
     }
@@ -1019,6 +1080,7 @@ void connectPane(App &app,
     pane.channel.reset();
     pane.link = nullptr;
     pane.requested = sessionId;
+    DBG("connectPane url=%s session=%s", app.url.c_str(), sessionId.c_str());
     try {
         pane.channel = std::make_unique<WebSocketChannel>(app.url);
         ClientSession::Config config;
@@ -1029,6 +1091,7 @@ void connectPane(App &app,
         auto *session = pane.session.get();
         pane.terminal.attach(*session,
                              [session] { return session->errorCode(); });
+        DBG("connectPane: channel+session created");
     }
     catch (const std::exception &error) {
         std::fprintf(stderr, "link failed: %s\n", error.what());
@@ -1131,9 +1194,159 @@ std::unique_ptr<WebPane> makePane(App &app) {
         startDemoPane(*pane);
     }
     else {
-        connectPane(app, *pane, std::string(), 0);
+        connectPane(app, *pane, std::move(app.pendingSession), 0);
+        app.pendingSession.clear();
     }
     return pane;
+}
+
+// ---- remembered layout (sessionStorage) ----
+// The tabs, splits and terminal ids of this window, so that a reload attaches
+// to the same terminals again. Ids only (docs: layoutsnapshot.h); the stored
+// text is untrusted and parsed strictly.
+
+constexpr const char *kLayoutKey = "matterm.layout";
+
+// The id the server keeps a pane's terminal under; else the one it was asked
+// for (so a refused attach is still remembered); else none yet.
+std::string paneSessionId(const WebPane &pane) {
+    if (pane.session &&
+        (pane.session->negotiatedFeatures() & protocol::featureReplay) != 0 &&
+        LayoutSnapshot::validId(pane.session->sessionId())) {
+        return pane.session->sessionId();
+    }
+    return LayoutSnapshot::validId(pane.requested) ? pane.requested
+                                                   : std::string();
+}
+
+std::optional<LayoutSnapshot> currentLayout(const App &app) {
+    bool complete = true;
+    using NodePtr = std::unique_ptr<SnapshotNode>;
+    LayoutSnapshot snapshot;
+    snapshot.tabs = app.workspace->foldTabs<NodePtr>(
+        [&complete](PaneId, const WebPane &pane) {
+            auto id = paneSessionId(pane);
+            complete = complete && !id.empty();
+            return SnapshotNode::pane(std::move(id));
+        },
+        [](SplitDirection direction, double ratio, NodePtr a, NodePtr b) {
+            const int permille =
+                std::clamp(int(std::lround(ratio * 1000)), 1, 999);
+            return SnapshotNode::split(
+                direction, permille, std::move(a), std::move(b));
+        });
+    snapshot.active = app.workspace->activeIndex();
+    if (!complete || !snapshot.valid()) {
+        return std::nullopt;
+    }
+    return snapshot;
+}
+
+// Nothing left to come back to (the last terminal ended or was closed).
+void forgetLayout() {
+    EM_ASM(
+        {
+            try {
+                sessionStorage.removeItem(UTF8ToString($0));
+            }
+            catch (e) {
+            }
+        },
+        kLayoutKey);
+    if (gApp) {
+        gApp->savedLayout.clear();
+        gApp->leaving = true; // The page reloads; do not write it back.
+    }
+}
+
+// Writes the layout when it changed and every pane has its id.
+void saveLayout(App &app) {
+    if (app.url.empty() || app.leaving) {
+        return;
+    }
+    const auto snapshot = currentLayout(app);
+    if (!snapshot) {
+        return;
+    }
+    const auto text = snapshot->serialize();
+    if (text == app.savedLayout) {
+        return;
+    }
+    app.savedLayout = text;
+    EM_ASM(
+        {
+            try {
+                sessionStorage.setItem(UTF8ToString($0), UTF8ToString($1));
+            }
+            catch (e) {
+            }
+        },
+        kLayoutKey,
+        text.c_str());
+}
+
+std::optional<LayoutSnapshot> storedLayout() {
+    char *value = static_cast<char *>(EM_ASM_PTR(
+        {
+            let v = "";
+            try {
+                v = sessionStorage.getItem(UTF8ToString($0)) || "";
+            }
+            catch (e) {
+            }
+            const n = lengthBytesUTF8(v) + 1;
+            const p = _malloc(n);
+            stringToUTF8(v, p, n);
+            return p;
+        },
+        kLayoutKey));
+    const std::string text = value;
+    std::free(value);
+    return LayoutSnapshot::parse(text);
+}
+
+const std::string &firstSession(const SnapshotNode &node) {
+    return node.leaf ? node.session : firstSession(*node.first);
+}
+
+// Rebuilds a tab's splits below the pane `pane` (the tab's first, which
+// already shows the first leaf of `node`).
+void restoreNode(App &app, const SnapshotNode &node, PaneId pane) {
+    if (node.leaf) {
+        return;
+    }
+    app.workspace->focusPane(pane);
+    app.pendingSession = firstSession(*node.second);
+    const auto outcome = app.workspace->apply(
+        node.direction == SplitDirection::SideBySide ? Command::SplitSideBySide
+                                                     : Command::SplitStacked);
+    app.pendingSession.clear();
+    // The new pane has the focus; its split sits above it.
+    const auto created =
+        outcome == Outcome::Done ? app.workspace->focusedPaneId() : PaneId(0);
+    if (created != 0) {
+        app.workspace->setParentRatio(created, node.permille / 1000.0);
+    }
+    restoreNode(app, *node.first, pane);
+    if (created != 0) {
+        restoreNode(app, *node.second, created);
+    }
+}
+
+// True when at least one tab came back.
+bool restoreLayout(App &app, const LayoutSnapshot &snapshot) {
+    for (const auto &tab : snapshot.tabs) {
+        app.pendingSession = firstSession(*tab);
+        const auto outcome = app.workspace->apply(Command::NewTab);
+        app.pendingSession.clear();
+        app.layout->setWindow(app.layout->window()); // The strip may appear.
+        if (outcome != Outcome::Done) {
+            continue;
+        }
+        restoreNode(app, *tab, app.workspace->focusedPaneId());
+    }
+    app.workspace->select(snapshot.active);
+    return app.workspace->tabCount() > 0;
 }
 
 // ---- frame ----
@@ -1196,6 +1409,16 @@ void frame(void *data) {
         if (pane.demo) {
             pane.demo->tick();
         }
+        if (app.ended(pane) && !pane.hinted) {
+            pane.hinted = true;
+            DBG("pane %u ended: state=%d exit=%d",
+                unsigned(id),
+                int(pane.view().state()),
+                pane.view().exitCode());
+            pane.view().note(app.workspace->paneCount() <= 1
+                                 ? "Press Enter to log in again"
+                                 : "Press Enter to close this pane");
+        }
         if (pane.changed) {
             pane.changed = false;
             if (!visible) {
@@ -1231,7 +1454,31 @@ void frame(void *data) {
             }
         }
     }
+    saveLayout(app);
     const auto plan = app.layout->plan();
+    if (gDebug) {
+        static std::string lastPlan;
+        std::string text =
+            "tabs=" + std::to_string(app.workspace->tabCount()) +
+            " panes=" + std::to_string(app.workspace->paneCount()) +
+            " strip=" + std::to_string(plan.stripRect.h) +
+            " focus=" + std::to_string(plan.focus);
+        for (const auto &p : plan.panes) {
+            text += " [pane " + std::to_string(p.id) + " " +
+                    std::to_string(p.rect.x) + "," + std::to_string(p.rect.y) +
+                    " " + std::to_string(p.rect.w) + "x" +
+                    std::to_string(p.rect.h) + " cells " +
+                    std::to_string(p.columns) + "x" + std::to_string(p.rows);
+            if (auto *w = app.workspace->pane(p.id)) {
+                text += " state=" + std::to_string(int(w->view().state()));
+            }
+            text += "]";
+        }
+        if (text != lastPlan) {
+            lastPlan = text;
+            DBG("plan %s", text.c_str());
+        }
+    }
     const auto now = SDL_GetTicks64();
     const double dt = double(now - app.last) / 1000;
     app.last = now;
@@ -1371,15 +1618,16 @@ void frame(void *data) {
         }
     }
     app.backend->beginFrame(app.chromePalette.background);
+    // Gutters first: a pane draws its scrollbar in the half next to it.
+    for (const auto &divider : plan.dividers) {
+        app.backend->drawRect(box(divider.rect), app.chromePalette.colors[8]);
+    }
     if (stripFrame) {
         app.backend->render(*stripFrame, PaneArea{box(plan.stripRect), {}});
     }
     for (const auto &d : drawn) {
         app.backend->render(d.frame,
                             PaneArea{box(d.plan.rect), box(d.plan.scrollbar)});
-    }
-    for (const auto &divider : plan.dividers) {
-        app.backend->drawRect(box(divider.rect), app.chromePalette.background);
     }
     app.backend->present();
 }
@@ -1466,6 +1714,10 @@ int main() {
     }
     static App app;
     gApp = &app;
+    gDebug =
+        EM_ASM_INT({
+            return new URLSearchParams(location.search).has("debug") ? 1 : 0;
+        }) != 0;
     // Touches arrive as fingers only; taps are replayed as clicks by
     // touchTap and drags are gestures, so SDL must not also fake a mouse.
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
@@ -1513,7 +1765,7 @@ int main() {
     layoutConfig.palette = app.chromePalette;
     layoutConfig.showStripWithOneTab = false; // Hidden until there is a choice.
     layoutConfig.desktopShortcuts = false;    // The browser keeps Ctrl+T/N/W.
-    layoutConfig.prefixKeys = false;          // Step 2 turns this on (server).
+    layoutConfig.prefixKeys = !app.url.empty(); // Off in the static demo.
     layoutConfig.scrollbarStrip = SdlBackend::scrollbarStrip();
     app.layout =
         std::make_unique<WorkspaceView<WebPane>>(*app.workspace, layoutConfig);
@@ -1523,8 +1775,17 @@ int main() {
     metrics.cellWidth = app.backend->cellWidth();
     metrics.cellHeight = app.backend->cellHeight();
     app.layout->setWindow(metrics);
-    if (app.workspace->apply(Command::NewTab) == Outcome::Ignored ||
-        !app.focused()) {
+    // After a reload: the tabs and splits this window had, attached to their
+    // terminals again; otherwise one new terminal.
+    if (!app.url.empty()) {
+        if (const auto stored = storedLayout()) {
+            restoreLayout(app, *stored);
+        }
+    }
+    if (app.workspace->tabCount() == 0) {
+        app.workspace->apply(Command::NewTab);
+    }
+    if (!app.focused()) {
         std::fprintf(stderr, "no terminal\n");
         return 1;
     }

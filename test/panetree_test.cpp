@@ -558,4 +558,32 @@ TEST_CASE("The tree owns its panes and releases them exactly once") {
     EXPECT_EQ(Fake::alive, before);
 }
 
+TEST_CASE("fold reports the shape, and setParentRatio sets the proportion above a pane") {
+    Tree t;
+    t.setRoot(1, make(1));
+    const LayoutSpec sp = spec(1000, 600);
+    auto p2 = make(2);
+    EXPECT(t.split(1, SplitDirection::SideBySide, 2, p2, sp) == SplitResult::Ok);
+    auto p3 = make(3);
+    EXPECT(t.split(2, SplitDirection::Stacked, 3, p3, sp) == SplitResult::Ok);
+    const auto shape = [&t] {
+        return t.fold<std::string>(
+            [](PaneId id, const Fake &) { return std::to_string(id); },
+            [](SplitDirection d, double ratio, std::string a, std::string b) {
+                return std::string(d == SplitDirection::SideBySide ? "H" : "V") +
+                       std::to_string(int(ratio * 1000 + 0.5)) + "(" + a + "," + b + ")";
+            });
+    };
+    EXPECT_EQ(shape(), std::string("H500(1,V500(2,3))"));
+    EXPECT(t.setParentRatio(3, 0.25));
+    EXPECT(t.setParentRatio(1, 0.7)); // Either child names the same split.
+    EXPECT_EQ(shape(), std::string("H700(1,V250(2,3))"));
+    EXPECT(!t.setParentRatio(1, 0.0));  // Bad ratio.
+    EXPECT(!t.setParentRatio(1, 1.0));
+    EXPECT(!t.setParentRatio(99, 0.5)); // Unknown pane.
+    Tree single;
+    single.setRoot(5, make(5));
+    EXPECT(!single.setParentRatio(5, 0.5)); // The root has no split above it.
+}
+
 TEST_SUIT_END

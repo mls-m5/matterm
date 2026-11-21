@@ -239,6 +239,26 @@ public:
         return {minExtent(*root_, true, spec), minExtent(*root_, false, spec)};
     }
 
+    // Walks the tree bottom up without exposing its nodes (to export its shape).
+    // onLeaf(PaneId, const Pane &) -> T for a pane; onSplit(SplitDirection,
+    // double ratio, T first, T second) -> T for a split, first = left or upper.
+    // The tree must not be empty.
+    template <class T, class OnLeaf, class OnSplit>
+    T fold(OnLeaf &&onLeaf, OnSplit &&onSplit) const {
+        return foldNode<T>(*root_, onLeaf, onSplit);
+    }
+
+    // Sets the ratio of the split that is the parent of `id` (the one that made
+    // room for it): how a restored shape gets its proportions right after the
+    // split that created `id`. False for the root, an unknown pane or a bad ratio.
+    bool setParentRatio(PaneId id, double ratio) {
+        if (!(ratio > 0.0) || !(ratio < 1.0)) return false;
+        Node *parent = parentOf(root_.get(), id);
+        if (parent == nullptr) return false;
+        parent->ratio = ratio;
+        return true;
+    }
+
     // Set a split's ratio directly (0 < ratio < 1, clamped by the minimums at layout).
     bool setRatio(SplitId split, double ratio) {
         Node *n = findSplit(root_.get(), split);
@@ -312,6 +332,22 @@ private:
         n->id = id;
         n->pane = std::move(p);
         return n;
+    }
+
+    template <class T, class OnLeaf, class OnSplit>
+    static T foldNode(const Node &n, OnLeaf &onLeaf, OnSplit &onSplit) {
+        if (n.leaf()) return onLeaf(n.id, std::as_const(*n.pane));
+        T first = foldNode<T>(*n.first, onLeaf, onSplit);
+        T second = foldNode<T>(*n.second, onLeaf, onSplit);
+        return onSplit(n.direction, n.ratio, std::move(first), std::move(second));
+    }
+
+    static Node *parentOf(Node *n, PaneId id) {
+        if (n == nullptr || n->leaf()) return nullptr;
+        if (n->first->leaf() && n->first->id == id) return n;
+        if (n->second->leaf() && n->second->id == id) return n;
+        Node *found = parentOf(n->first.get(), id);
+        return found != nullptr ? found : parentOf(n->second.get(), id);
     }
 
     static const Node *find(const Node *n, PaneId id) {

@@ -112,6 +112,23 @@ public:
         for (const auto &p : parked_) visit(p.id, *p.pane, false);
     }
 
+    // The shape of every tab, in tab order (see PaneTree::fold).
+    template <class T, class OnLeaf, class OnSplit>
+    std::vector<T> foldTabs(OnLeaf &&onLeaf, OnSplit &&onSplit) const {
+        std::vector<T> out;
+        for (const auto &t : tabs_) {
+            if (!t.tree.empty()) out.push_back(t.tree.template fold<T>(onLeaf, onSplit));
+        }
+        return out;
+    }
+    // The ratio of the split above `id`, in whichever tab it is (restoring a shape).
+    bool setParentRatio(PaneId id, double ratio) {
+        for (auto &t : tabs_) {
+            if (t.tree.contains(id)) return t.tree.setParentRatio(id, ratio);
+        }
+        return false;
+    }
+
     // One entry per tab for the strip. A tab is titled by its focused pane.
     template <class TitleOf>
     std::vector<TabInfo> tabInfos(TitleOf &&titleOf) const {
