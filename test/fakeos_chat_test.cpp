@@ -63,6 +63,16 @@ TEST_CASE("Without a server the chat command does not exist") {
     EXPECT_EQ(host.opened, 0);
 }
 
+TEST_CASE("The cursor sits right after the question") {
+    Host host;
+    Pc pc(withChat(host));
+    pc.run("chat");
+    const auto c = pc.model.cursor();
+    EXPECT_EQ(pc.last(), std::string("Connect? [y/N]"));
+    EXPECT_EQ(c.column, 15);
+    EXPECT(c.visible);
+}
+
 TEST_CASE("The notice comes first and n connects nothing") {
     Host host;
     Pc pc(withChat(host));
