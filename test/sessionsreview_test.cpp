@@ -293,6 +293,34 @@ TEST_CASE("Hostile Hellos never evict, leak a lease, echo the id or disturb "
     registry.closeAll(now());
     EXPECT(until(registry, [&] { return registry.size() == 0; }));
 }
+TEST_CASE("A refused attach leaves the terminal size of a live session alone") {
+    server::SessionRegistry registry(persistentConfig(), process(), {});
+    Leases leases;
+    Conn owner(leases), refused(leases);
+    owner.attachment = registry.attach(hello(), owner.transport(), now());
+    EXPECT(owner.attachment.has_value());
+    EXPECT(seen(registry, owner, "ready"));
+    owner.messages.clear();
+    registry.onMessage(
+        *owner.attachment, wire(protocol::Input{"stty size\n"}), now());
+    EXPECT(seen(registry, owner, "24 80"));
+    // The upgrade lease is refused (limit reached elsewhere), the Hello asks
+    // for 50x200.
+    refused.refuseAdmit = true;
+    auto other = hello(owner.attachment->id);
+    other.columns = 200;
+    other.rows = 50;
+    EXPECT_FALSE(
+        registry.attach(other, refused.transport(), now()).has_value());
+    EXPECT_EQ(owner.closes, 0u);
+    owner.messages.clear();
+    registry.onMessage(
+        *owner.attachment, wire(protocol::Input{"stty size\n"}), now());
+    EXPECT(seen(registry, owner, "24 80"));
+    EXPECT_EQ(owner.output().find("50 200"), std::string::npos);
+    registry.closeAll(now());
+    EXPECT(until(registry, [&] { return registry.size() == 0; }));
+}
 TEST_CASE("A second Hello on an attached connection cannot reach another "
           "session") {
     server::SessionRegistry registry(persistentConfig(), process(), {});

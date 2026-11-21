@@ -285,17 +285,6 @@ std::optional<SessionRegistry::Attachment> SessionRegistry::attach(
             start = entry->ring.safeStart();
             flags |= welcomeOutputLost;
         }
-        // Preflight before evicting the current attachment. A one-cell toggle
-        // forces SIGWINCH even when the requested dimensions are unchanged.
-        try {
-            entry->pty.resizeProcess(
-                hello.columns == 1 ? 2 : hello.columns - 1, hello.rows, 0, 0);
-            entry->pty.resizeProcess(hello.columns, hello.rows, 0, 0);
-        }
-        catch (const std::exception &) {
-            reject(transport, ErrorCode::Internal, "could not attach");
-            return {};
-        }
     }
     else {
         if (impl_->entries.size() >= impl_->config.maxSessions) {
@@ -322,6 +311,22 @@ std::optional<SessionRegistry::Attachment> SessionRegistry::attach(
     if (transport.admit && !transport.admit(transfer)) {
         reject(transport, ErrorCode::LimitExceeded, "upgrade limit");
         return {};
+    }
+    if (resume) {
+        // After the lease and before the old attachment is evicted: a refused
+        // attach must not touch the terminal. A one-cell toggle forces SIGWINCH
+        // even when the requested dimensions are unchanged.
+        try {
+            entry->pty.resizeProcess(
+                hello.columns == 1 ? 2 : hello.columns - 1, hello.rows, 0, 0);
+            entry->pty.resizeProcess(hello.columns, hello.rows, 0, 0);
+        }
+        catch (const std::exception &) {
+            if (transport.release)
+                transport.release();
+            reject(transport, ErrorCode::Internal, "could not attach");
+            return {};
+        }
     }
     if (!resume)
         impl_->entries.emplace(entry->id, entry);

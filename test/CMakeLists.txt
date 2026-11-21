@@ -229,16 +229,6 @@ if(BUILD_TESTING)
         endforeach()
     endif()
 
-    if(TARGET matterm-server-core AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sessionsissues_test.cpp")
-        # Known gaps from docs/SESSIONS_REVIEW.md: expected to fail until fixed.
-        add_executable(sessionsissues_test sessionsissues_test.cpp mls-unit-test/test_main.cpp)
-        target_link_libraries(sessionsissues_test PRIVATE matterm-server-core)
-        foreach(suite IN ITEMS RefusedResize)
-            add_test(NAME sessions_issue_${suite} COMMAND sessionsissues_test SessionsIssue${suite})
-            set_tests_properties(sessions_issue_${suite} PROPERTIES WILL_FAIL TRUE TIMEOUT 60 LABELS "known-issue")
-        endforeach()
-    endif()
-
     if(TARGET matterm)
         add_test(NAME terminal_cli_help
             COMMAND "${CMAKE_COMMAND}" "-DAPP=$<TARGET_FILE:matterm>"

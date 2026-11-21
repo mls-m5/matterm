@@ -5,7 +5,7 @@ An independent review of the persistent terminal sessions of `matterm-server`
 attach/close paths in `server.cpp`) against the contract in
 [PROTOCOL.md](PROTOCOL.md) section 11 and [SERVER.md](SERVER.md). Method: read
 the code, write a threat model, write negative, model-based and fuzz tests, run
-them. No production code was changed. One gap was found (S1, low); everything
+them. No production code was changed by the review itself. One gap was found (S1, low); everything
 else listed under "Holds" is covered by passing tests.
 
 ## 1. Threat model
@@ -26,7 +26,7 @@ to tell tabs apart.
 | --- | --- | --- |
 | Guessing or enumerating ids | 128 random bits, exactly 32 lowercase hex, generic `session unavailable`, auth first | **Holds** (3000 mutated ids, 25 over sockets: same reason, id never echoed) |
 | A bad Hello evicts the live attachment | validation before any state change | **Holds** (live attachment never closed, no lease held after a refusal) |
-| A refused attempt changes something | nothing may change | the PTY size changes before the lease check: **S1** |
+| A refused attempt changes something | nothing may change | **Holds** since S1 was fixed (the PTY size changed before the lease check) |
 | Old attachment acts after a takeover | attachment generation fence | **Holds** (input, resize, close, ack, detach, fail all ignored; also across three takeovers) |
 | Old cookie acts after login rotation | `attachedValid` on every message and every 10 ms | **Holds** (20 inputs sent right after the rotation never reach the shell) |
 | Expired cookie keeps a socket | same check; detached shells wait for the next login | **Holds** |
@@ -52,8 +52,10 @@ cookie can do it to the owner) but it needs the lease limit to be full, so the
 severity is low, and it contradicts "failed attempts never disturb an existing
 attachment" (11.3).
 
-Reproduce: `ctest -R sessions_issue_RefusedResize` (an expected failure).
-Fix: take the lease first (as a takeover transfer when the previous attachment
+**Fixed:** the lease is now taken first, then the size is changed (a failing
+resize gives the lease back); the test is `SessionsReview` "A refused attach
+leaves the terminal size...".
+Original suggestion: take the lease first (as a takeover transfer when the previous attachment
 is from the same login), then resize; if the resize throws, give the lease back
 (`transport.release`). Moving the check keeps the intent ("preflight before
 evicting the current attachment") because the old attachment is evicted only
@@ -117,8 +119,4 @@ method checks, concurrent upgrade limits, resume with replay.
 
 | File | What | Registered as |
 | --- | --- | --- |
-| `test/sessionsreview_test.cpp` | ring model, hostile Hellos, fences, timeouts, tombstones, close-all, lease model, socket checks | `sessionsreview` |
-| `test/sessionsissues_test.cpp` | S1 | `sessions_issue_RefusedResize`, `WILL_FAIL`, label `known-issue` |
-
-A `WILL_FAIL` test turns red when the code is fixed; then move the suite into
-`sessionsreview_test.cpp` and delete its `sessions_issue_` entry.
+| `test/sessionsreview_test.cpp` | ring model, hostile Hellos, refused attach, fences, timeouts, tombstones, close-all, lease model, socket checks | `sessionsreview` |
