@@ -376,7 +376,7 @@
     }
   }
 
-  // The chat connection of the demo (?chat=wss://host/path, see docs/CHAT.md).
+  // The chat connection of the demo (default server, or ?chat=wss://host/path; ?chat=off disables; see docs/CHAT.md).
   // The program in the pretend system opens it, and only after the visitor has
   // read the notice and answered y. Everything it receives is handed to the
   // terminal as text frames; the C++ side checks and cleans it.
@@ -389,7 +389,7 @@
     }
     return {
       open: function () {
-        const url = new URLSearchParams(location.search).get("chat") || "";
+        const url = window.mattermChatUrl || ""; // set by main.cpp (default or ?chat=)
         try {
           socket = new WebSocket(url);
         } catch (e) {

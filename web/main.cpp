@@ -965,7 +965,15 @@ int main() {
         // otherwise). It still asks before it connects and names the server.
         // login.js opens the WebSocket (window.mattermChat).
         {
-            const std::string chat = queryParam("chat");
+            // The demo's own chat server unless ?chat= names another one
+            // (?chat=off turns the command off). wss://: a page served over
+            // https cannot open a plain ws:// socket.
+            std::string chat = queryParam("chat");
+            if (chat.empty()) {
+                chat = "wss://xn--laserskld-67a.se/matterm";
+            } else if (chat == "off") {
+                chat.clear();
+            }
             const auto scheme = chat.rfind("wss://", 0) == 0  ? 6u
                                 : chat.rfind("ws://", 0) == 0 ? 5u
                                                               : 0u;
@@ -975,6 +983,8 @@ int main() {
                 plain = plain && (unsigned char)c > 0x20 && c != 0x7f;
             }
             if (plain) {
+                EM_ASM({ window.mattermChatUrl = UTF8ToString($0); },
+                       chat.c_str());
                 pretend.chat.server =
                     chat.substr(scheme, chat.find('/', scheme) - scheme);
                 pretend.chat.open = [] {

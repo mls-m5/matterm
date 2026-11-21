@@ -13,11 +13,18 @@
 	}
 }
 
-chat.example.org {
+xn--laserskld-67a.se {
 	request_body {
 		max_size 1KB
 	}
-	reverse_proxy 127.0.0.1:8097
+	# chatd wants the path /; the demo connects to /matterm.
+	handle /matterm {
+		rewrite * /
+		reverse_proxy 127.0.0.1:8097
+	}
+	handle {
+		respond 404
+	}
 	log {
 		output discard
 	}
