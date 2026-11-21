@@ -8,6 +8,7 @@
 #include "programs.h"
 
 #include <algorithm>
+#include <limits>
 
 namespace fakeos {
 namespace {
@@ -18,7 +19,7 @@ public:
         return true;
     }
     Time interval() const override {
-        return Time(100);
+        return Time(33); // Other people's text appears a character at a time.
     }
     void frame(World &, Time, AsciiCanvas &) override {} // rawFrame() draws.
 
@@ -83,19 +84,32 @@ public:
         bool changed = false;
         switch (key.type) {
         case Key::Type::Text:
-            changed = input_.insertText(key.text);
+            if (key.alt && key.text == "d") {
+                changed = input_.killWordForward();
+            }
+            else if (key.alt && key.text == "b") {
+                input_.wordLeft();
+            }
+            else if (key.alt && key.text == "f") {
+                input_.wordRight();
+            }
+            else if (!key.alt) {
+                changed = input_.insertText(key.text);
+            }
             break;
         case Key::Type::Backspace:
-            changed = input_.backspace();
+            changed =
+                key.alt || key.ctrl ? input_.killWord() : input_.backspace();
             break;
         case Key::Type::Delete:
-            changed = input_.del();
+            changed =
+                key.alt || key.ctrl ? input_.killWordForward() : input_.del();
             break;
         case Key::Type::Left:
-            input_.left();
+            key.alt || key.ctrl ? input_.wordLeft() : input_.left();
             break;
         case Key::Type::Right:
-            input_.right();
+            key.alt || key.ctrl ? input_.wordRight() : input_.right();
             break;
         case Key::Type::Home:
             input_.home();
@@ -147,8 +161,10 @@ public:
             return {};
         }
         apply(client_->tick(nowMs));
-        if (const auto frame = view_->nextFrame(nowMs);
-            frame && *frame <= nowMs) {
+        if (nowMs >= nextFrameAt_) {
+            dirty_ = true; // An animation (the pulse) moves on.
+        }
+        if (client_->takeTypersChanged()) {
             dirty_ = true;
         }
         if (client_->state() == chat::ChatClient::State::Closed) {
@@ -159,6 +175,9 @@ public:
         if (dirty_) {
             dirty_ = false;
             out += view_->render(*client_, input_, nowMs);
+            const auto frame = view_->nextFrame(nowMs);
+            nextFrameAt_ =
+                frame ? *frame : std::numeric_limits<long long>::max();
         }
         if (client_->state() == chat::ChatClient::State::Closed) {
             done_ = true;
@@ -243,6 +262,7 @@ private:
     chat::ChatInput input_;
     std::string pending_;
     long long lastNow_ = 0;
+    long long nextFrameAt_ = 0;
     bool dirty_ = false, done_ = false, leaving_ = false, closedHost_ = false;
 };
 

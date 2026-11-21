@@ -29,6 +29,14 @@ public:
         std::size_t maxUsers = 256;
         std::size_t maxEvents = 1000; // Unread events kept.
         int maxBadLines = 20;         // A server that sends more is dropped.
+        // Other people's live text arrives in snapshots; it is shown one
+        // character at a time, as if it was being typed here (docs/CHAT.md).
+        Millis minCharMs = 25; // Floor and ceiling per character...
+        Millis maxCharMs = 120;
+        Millis maxLagMs = 1500;  // ...but never further behind than this.
+        Millis finalCharMs = 10; // Catching up when the text is posted.
+        int jitterPercent = 20;  // A little unevenness, seeded.
+        std::uint32_t jitterSeed = 1;
     };
 
     // What to do with the connection after a call.
@@ -46,7 +54,12 @@ public:
     };
     struct Typer {
         std::string name;
-        std::string text;
+        std::string text;   // What is shown now (it follows `target`).
+        std::string target; // The latest snapshot from the server.
+        Millis nextAt = 0;  // When the next character appears or goes.
+        Millis interval = 60;
+        Millis updatedAt = -1;
+        bool finalizing = false; // Posted: finished quickly, then a message.
     };
     enum class OwnState {
         Idle,      // Nothing typed.
@@ -125,6 +138,13 @@ public:
         return users_;
     }
     std::vector<Event> takeEvents();
+    // True once after the shown text of the other people changed (a character
+    // appeared or went): a screen that redraws on demand asks this.
+    bool takeTypersChanged() {
+        const bool changed = typersChanged_;
+        typersChanged_ = false;
+        return changed;
+    }
     const std::string &closeReason() const noexcept {
         return reason_;
     }
@@ -135,6 +155,10 @@ private:
     void flushDraft(Out &out, Millis now, bool force);
     void startNextBubble();
     void addHistory(Bubble b);
+    void emitMessage(Bubble b);
+    void releaseDelayed(Millis now, bool all);
+    bool stepTypers(Millis now);
+    Millis jittered(Millis interval);
 
     Config config_;
     State state_ = State::Off;
@@ -148,6 +172,13 @@ private:
     bool offline_ = false; // Text typed while not joined, or after a drop.
     std::deque<Bubble> history_;
     std::vector<Typer> typers_;
+    struct Delayed {
+        Bubble bubble;
+        Millis releaseAt = 0;
+    };
+    std::deque<Delayed> delayed_; // Messages waiting for their live text.
+    std::uint32_t jitterState_ = 1;
+    bool typersChanged_ = false;
     std::uint32_t hidden_ = 0, online_ = 0;
     std::vector<std::string> users_, pendingUsers_;
     std::vector<Event> events_;

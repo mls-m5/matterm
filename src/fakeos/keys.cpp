@@ -44,6 +44,7 @@ void KeyDecoder::textByte(unsigned char byte, std::vector<Key> &out) {
 }
 
 void KeyDecoder::finishCsi(std::vector<Key> &out) {
+    const std::size_t before = out.size();
     // params_ holds the parameter and intermediate bytes plus the final byte.
     const char final = params_.back();
     std::string args = params_.substr(0, params_.size() - 1);
@@ -62,7 +63,8 @@ void KeyDecoder::finishCsi(std::vector<Key> &out) {
         if (text.empty()) {
             return fallback;
         }
-        // Parameters come from the (untrusted) terminal input: clamp, never overflow.
+        // Parameters come from the (untrusted) terminal input: clamp, never
+        // overflow.
         const long value = std::strtol(text.c_str(), nullptr, 10);
         return int(std::clamp(value, 0L, 100000L));
     };
@@ -129,6 +131,16 @@ void KeyDecoder::finishCsi(std::vector<Key> &out) {
     default:
         break; // Cursor position reports and other replies.
     }
+    // A modifier parameter ("1;5D", "3;5~"): 1 + (shift 1, alt 2, ctrl 4).
+    const int modifier = number(1, 1) - 1;
+    for (std::size_t i = before; i < out.size(); ++i) {
+        if (modifier & 2) {
+            out[i].alt = true;
+        }
+        if (modifier & 4) {
+            out[i].ctrl = true;
+        }
+    }
 }
 
 std::vector<Key> KeyDecoder::feed(std::string_view bytes) {
@@ -153,10 +165,9 @@ std::vector<Key> KeyDecoder::feed(std::string_view bytes) {
                 out.push_back(simple(Key::Type::Escape));
                 state_ = State::Esc;
             }
-            else { // Alt+key.
-                std::vector<Key> inner;
-                textByte(byte, inner);
-                for (auto &key : inner) {
+            else { // Alt+key: the byte is read as it would be on its own.
+                const char one = char(byte);
+                for (auto &key : feed(std::string_view(&one, 1))) {
                     key.alt = true;
                     out.push_back(std::move(key));
                 }

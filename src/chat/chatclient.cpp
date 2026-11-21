@@ -3,10 +3,96 @@
 #include <algorithm>
 
 namespace chat {
+namespace {
+
+std::u32string decodeLenient(const std::string &s) {
+    std::u32string out;
+    if (!decodeUtf8Strict(s, out)) {
+        out.clear();
+    }
+    return out;
+}
+
+std::size_t commonPrefix(const std::u32string &a, const std::u32string &b) {
+    std::size_t n = 0;
+    while (n < a.size() && n < b.size() && a[n] == b[n]) {
+        ++n;
+    }
+    return n;
+}
+
+// Characters to delete and then add to turn `shown` into `target`.
+std::size_t stepsBetween(const std::u32string &shown,
+                         const std::u32string &target) {
+    const auto common = commonPrefix(shown, target);
+    return (shown.size() - common) + (target.size() - common);
+}
+
+} // namespace
 
 ChatClient::ChatClient(Config config)
     : config_(std::move(config))
-    , name_(config_.name) {}
+    , name_(config_.name)
+    , jitterState_(config_.jitterSeed ? config_.jitterSeed : 1) {}
+
+Millis ChatClient::jittered(Millis interval) {
+    jitterState_ = jitterState_ * 1664525u + 1013904223u;
+    const int span = std::max(config_.jitterPercent, 0);
+    const int pick =
+        int((jitterState_ >> 16) % std::uint32_t(2 * span + 1)) - span;
+    return std::max<Millis>(1, interval + interval * pick / 100);
+}
+
+void ChatClient::emitMessage(Bubble b) {
+    addHistory(b);
+    Event e;
+    e.kind = Event::Kind::Message;
+    e.bubble = std::move(b);
+    push(std::move(e));
+}
+
+// Messages whose live text has caught up (all of them when `all`).
+void ChatClient::releaseDelayed(Millis now, bool all) {
+    while (!delayed_.empty() && (all || delayed_.front().releaseAt <= now)) {
+        Delayed d = std::move(delayed_.front());
+        delayed_.pop_front();
+        typers_.erase(std::remove_if(typers_.begin(),
+                                     typers_.end(),
+                                     [&](const Typer &t) {
+                                         return t.finalizing &&
+                                                t.name == d.bubble.name;
+                                     }),
+                      typers_.end());
+        emitMessage(std::move(d.bubble));
+    }
+}
+
+// One step for every typer whose time has come: a character appears, or one
+// is taken away (a backspace in the other client).
+bool ChatClient::stepTypers(Millis now) {
+    bool changed = false;
+    for (auto &t : typers_) {
+        int guard = 0;
+        while (t.text != t.target && now >= t.nextAt && guard++ < 400) {
+            std::u32string shown = decodeLenient(t.text);
+            const std::u32string target = decodeLenient(t.target);
+            const auto common = commonPrefix(shown, target);
+            if (shown.size() > common) {
+                shown.pop_back();
+            }
+            else {
+                shown.push_back(target[shown.size()]);
+            }
+            t.text = encodeUtf8(shown);
+            t.nextAt += jittered(t.interval);
+            changed = true;
+        }
+        if (t.text == t.target) {
+            t.nextAt = std::max(t.nextAt, now);
+        }
+    }
+    return changed;
+}
 
 void ChatClient::setState(State s) {
     if (state_ == s) {
@@ -90,8 +176,9 @@ ChatClient::Out ChatClient::rename(const std::string &name, Millis) {
     return out;
 }
 
-ChatClient::Out ChatClient::leave(Millis) {
+ChatClient::Out ChatClient::leave(Millis now) {
     Out out;
+    releaseDelayed(now, true);
     if (state_ != State::Off && state_ != State::Closed) {
         out.close = true;
         reason_ = "you left";
@@ -105,8 +192,9 @@ ChatClient::Out ChatClient::leave(Millis) {
     return out;
 }
 
-ChatClient::Out ChatClient::closed(Millis) {
+ChatClient::Out ChatClient::closed(Millis now) {
     Out out;
+    releaseDelayed(now, true);
     if (state_ != State::Closed && state_ != State::Off) {
         if (reason_.empty()) {
             reason_ = "the connection closed";
@@ -174,6 +262,10 @@ ChatClient::Out ChatClient::submit(Millis now) {
 
 ChatClient::Out ChatClient::tick(Millis now) {
     Out out;
+    if (stepTypers(now)) {
+        typersChanged_ = true;
+    }
+    releaseDelayed(now, false);
     if (state_ != State::Joined) {
         return out;
     }
@@ -186,15 +278,23 @@ ChatClient::Out ChatClient::tick(Millis now) {
 }
 
 std::optional<Millis> ChatClient::nextDeadline() const {
-    if (state_ != State::Joined || lockSent_) {
-        return std::nullopt;
-    }
     std::optional<Millis> best;
     auto consider = [&](Millis t) {
         if (!best || t < *best) {
             best = t;
         }
     };
+    for (const auto &t : typers_) {
+        if (t.text != t.target) {
+            consider(t.nextAt);
+        }
+    }
+    if (!delayed_.empty()) {
+        consider(delayed_.front().releaseAt);
+    }
+    if (state_ != State::Joined || lockSent_) {
+        return best;
+    }
     if (!trimSpaces(draft_).empty()) {
         consider(editedAt_ + config_.idleLock);
     }
@@ -258,20 +358,50 @@ ChatClient::Out ChatClient::receive(std::string_view frame, Millis now) {
                 std::find_if(typers_.begin(),
                              typers_.end(),
                              [&](const Typer &t) { return t.name == l.name; });
-            if (it != typers_.end()) {
-                it->text = l.text;
+            if (it == typers_.end() && typers_.size() < 16) {
+                typers_.push_back({});
+                typers_.back().name = l.name;
+                typers_.back().nextAt = now;
+                it = typers_.end() - 1;
             }
-            else if (typers_.size() < 16) {
-                typers_.push_back({l.name, l.text});
+            if (it != typers_.end() && !it->finalizing) {
+                Typer &t = *it;
+                const bool idle = t.text == t.target;
+                t.target = l.text;
+                const auto steps = stepsBetween(decodeLenient(t.text),
+                                                decodeLenient(t.target));
+                if (steps > 0) {
+                    // The new characters are spread over the time since the
+                    // last snapshot, within the floor and ceiling, and never
+                    // more than maxLag behind.
+                    const Millis gap =
+                        t.updatedAt < 0
+                            ? 333
+                            : std::max<Millis>(now - t.updatedAt, 1);
+                    Millis interval = std::clamp<Millis>(gap / Millis(steps),
+                                                         config_.minCharMs,
+                                                         config_.maxCharMs);
+                    if (interval * Millis(steps) > config_.maxLagMs) {
+                        interval = std::max<Millis>(
+                            1, config_.maxLagMs / Millis(steps));
+                    }
+                    t.interval = interval;
+                    if (idle) {
+                        t.nextAt = now;
+                    }
+                }
+                t.updatedAt = now;
             }
         }
         break;
     case ServerLine::Kind::Gone:
-        typers_.erase(
-            std::remove_if(typers_.begin(),
-                           typers_.end(),
-                           [&](const Typer &t) { return t.name == l.name; }),
-            typers_.end());
+        typers_.erase(std::remove_if(typers_.begin(),
+                                     typers_.end(),
+                                     [&](const Typer &t) {
+                                         return t.name == l.name &&
+                                                !t.finalizing;
+                                     }),
+                      typers_.end());
         break;
     case ServerLine::Kind::Typers:
         hidden_ = l.count;
@@ -280,22 +410,42 @@ ChatClient::Out ChatClient::receive(std::string_view frame, Millis now) {
         online_ = l.count;
         break;
     case ServerLine::Kind::Msg: {
-        typers_.erase(
-            std::remove_if(typers_.begin(),
-                           typers_.end(),
-                           [&](const Typer &t) { return t.name == l.name; }),
-            typers_.end());
         Bubble b;
         b.serial = l.serial;
         b.name = l.name;
         b.text = l.text;
         b.at = now;
         b.own = l.name == name_;
-        addHistory(b);
-        Event e;
-        e.kind = Event::Kind::Message;
-        e.bubble = b;
-        push(std::move(e));
+        // The live text of this person is finished quickly before the message
+        // appears; messages keep their order, so later ones wait behind it.
+        Millis releaseAt = now;
+        const auto it =
+            std::find_if(typers_.begin(), typers_.end(), [&](const Typer &t) {
+                return t.name == l.name;
+            });
+        if (it != typers_.end()) {
+            it->target = l.text;
+            it->finalizing = true;
+            const auto steps = stepsBetween(decodeLenient(it->text),
+                                            decodeLenient(it->target));
+            it->interval = config_.finalCharMs;
+            if (it->text != it->target) {
+                it->nextAt = std::max(it->nextAt, now);
+            }
+            releaseAt = now + Millis(steps) * config_.finalCharMs;
+        }
+        if (!delayed_.empty()) {
+            releaseAt = std::max(releaseAt, delayed_.back().releaseAt);
+        }
+        if (releaseAt <= now && delayed_.empty()) {
+            if (it != typers_.end()) {
+                typers_.erase(it);
+            }
+            emitMessage(std::move(b));
+        }
+        else {
+            delayed_.push_back({std::move(b), releaseAt});
+        }
         break;
     }
     case ServerLine::Kind::Ack:
@@ -347,6 +497,12 @@ ChatClient::Out ChatClient::receive(std::string_view frame, Millis now) {
         }
         break;
     case ServerLine::Kind::Hide: {
+        delayed_.erase(std::remove_if(delayed_.begin(),
+                                      delayed_.end(),
+                                      [&](const Delayed &d) {
+                                          return d.bubble.serial == l.serial;
+                                      }),
+                       delayed_.end());
         history_.erase(std::remove_if(history_.begin(),
                                       history_.end(),
                                       [&](const Bubble &b) {

@@ -310,9 +310,11 @@ TEST_CASE(
     Scripted s;
     s.feed("join\tbo");
     s.feed("draft\tbo\tthinking about");
+    s.advance(2000);
     EXPECT(s.client.typers().size() == std::size_t(1));
     EXPECT(s.client.typers()[0].text == "thinking about");
     s.feed("draft\tbo\tthinking about it");
+    s.advance(2000);
     EXPECT(s.client.typers().size() == std::size_t(1));
     s.feed("msg\t3\tbo\tthinking about it");
     EXPECT(s.client.typers().empty());
@@ -377,7 +379,7 @@ TEST_CASE(
     EXPECT(ada.state() == Client::State::Joined);
     EXPECT(bo.users().size() == std::size_t(2));
     w.edit(1, "anyone seen the crumble game?");
-    w.advance(500);
+    w.advance(2500);
     EXPECT(bo.typers().size() == std::size_t(1));
     EXPECT(bo.typers()[0].text == "anyone seen the crumble game?");
     EXPECT(ada.typers().empty());

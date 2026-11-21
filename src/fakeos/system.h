@@ -90,6 +90,9 @@ private:
     std::string promptText(std::size_t *width = nullptr) const;
     void redrawLine();
     void handleShellKey(const Key &key);
+    void deleteWordBack();
+    void deleteWordForward();
+    void moveWord(int direction);
     void insert(const std::string &character);
     void eraseRange(std::size_t from, std::size_t to);
     void complete();
