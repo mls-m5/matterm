@@ -31,6 +31,9 @@ struct Term {
             else if (cp == 0xB7) {
                 text.push_back('.');
             }
+            else if (cp == 0x25C0) {
+                text.push_back('<'); // The live marker.
+            }
             else if (cp == 0x2026) {
                 text.push_back('~');
             }
@@ -215,6 +218,10 @@ TEST_CASE(
     // Someone else types, then locks.
     j.now += 100;
     j.client.receive("draft\tbo\tthinking about it", j.now);
+    for (int i = 0; i < 60; ++i) { // The text appears a character at a time.
+        j.now += 50;
+        j.client.tick(j.now);
+    }
     t.write(view.render(j.client, j.input, j.now));
     EXPECT(t.shows("bo  typing~"));
     EXPECT(t.shows("thinking about it"));
@@ -307,6 +314,58 @@ TEST_CASE("A note is printed once above the region, and cannot carry escapes") {
     EXPECT(t.count("here: ada, bo") == 1);
     EXPECT(t.count("@ mia  ready") == 1);
     EXPECT(t.shows("here: ada, bo [2J"));
+}
+
+TEST_CASE("Other people's live text ends in a marker; yours and finished ones "
+          "do not") {
+    Joined j;
+    ViewConfig c = config();
+    c.animations = true;
+    ChatView view(c);
+    Term t;
+    j.client.receive("draft\tbo\tthinking", j.now);
+    for (int i = 0; i < 40; ++i) {
+        j.now += 50;
+        j.client.tick(j.now);
+    }
+    j.input.insertText("mine");
+    const std::string raw = view.render(j.client, j.input, j.now);
+    t.write(raw);
+    EXPECT(t.shows("thinking<")); // Right after the text.
+    EXPECT(raw.find("\xE2\x97\x80") != std::string::npos); // U+25C0
+    EXPECT_EQ(t.count("<"), 1); // Not on the own bubble.
+    EXPECT(t.shows("mine") && !t.shows("mine<"));
+    EXPECT(kLiveMarker == char32_t(0x25C0));
+    // It pulses: another phase, other bytes; the text itself is unchanged.
+    const std::string later = view.render(j.client, j.input, j.now + 600);
+    EXPECT(later != raw);
+    EXPECT(later.find("\xE2\x97\x80") != std::string::npos);
+    EXPECT(view.nextFrame(j.now + 600)
+               .has_value()); // Frames are wanted for the pulse.
+    // Posted: it becomes a finished bubble, without the marker.
+    j.client.receive("msg\t1\tbo\tthinking", j.now);
+    j.client.receive("gone\tbo", j.now);
+    t.write(view.render(j.client, j.input, j.now + 1200));
+    EXPECT_EQ(t.count("<"), 0);
+    EXPECT(t.shows("bo  14:06  sent") || t.shows("14:06  sent"));
+}
+
+TEST_CASE("Without Unicode the marker is a plain <") {
+    Joined j;
+    ViewConfig c = config();
+    c.caps = TermCaps{false, false, false};
+    ChatView view(c);
+    Term t;
+    j.client.receive("draft\tbo\thi", j.now);
+    for (int i = 0; i < 20; ++i) {
+        j.now += 50;
+        j.client.tick(j.now);
+    }
+    const std::string raw = view.render(j.client, j.input, j.now);
+    t.write(raw);
+    EXPECT(t.shows("hi<"));
+    EXPECT(raw.find("\xE2\x97\x80") == std::string::npos);
+    EXPECT(kLiveMarkerAscii == U'<');
 }
 
 TEST_CASE("A resize starts a new region below the old one") {

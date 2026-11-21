@@ -127,6 +127,31 @@ duplicate is better than lost typing).
 * The client shows the author's bubble as `draft sent` while it is being sent
   live and `sent` after `ack`, so it is clear that typing goes out at once.
 
+### How other people's live text is shown
+
+Drafts arrive as whole snapshots (about three a second), but they are shown as if
+they were being typed here: **one character at a time**. The rule (pure logic in
+`ChatClient`, driven by the injected clock, deterministic for a given seed):
+
+* Per person the client keeps the text **shown** and the latest **target**. A step
+  either removes the last shown character (when the shown text is not a prefix of
+  the target: a backspace or an edit in the middle) or appends the next one.
+* The characters of a new snapshot are spread over the time since the previous
+  snapshot (`gap / steps`), but each step takes **at least 25 ms and at most
+  120 ms**, with a little seeded unevenness (plus or minus 20 percent). The first
+  character of a burst appears at once.
+* The display never lags more than **1.5 s**: when the backlog would take longer,
+  the steps are made shorter than the floor.
+* When the text is **posted** (`msg`), the rest is typed at 10 ms a character and
+  only then does the finished bubble appear. Messages keep their order: later ones
+  wait behind it. `gone`, which the room sends right after `msg`, does not cut the
+  catch-up short; a moderator's `hide` removes a message that is still waiting; a
+  closed connection shows what was waiting at once.
+* Constants are `ChatClient::Config::{minCharMs, maxCharMs, maxLagMs, finalCharMs,
+  jitterPercent, jitterSeed}`; tests: `test/chat_livetext_test.cpp`.
+
+The own caret and the own bubble are not delayed; only what arrives from others.
+
 ## 5. The chat screen
 
 ### Look
@@ -165,6 +190,11 @@ title row's background and `░` the body's (not drawn in the real thing):
 * Title rows: `name  14:06  sent` (locked), `name  typing…` (someone else's live
   bubble), `☺ name  draft sent` / `sent` / `not sent` (own). Name in bold, time
   and state dimmer.
+* **The live marker.** Another person's text that is still being typed ends in a
+  filled left-pointing triangle, `◀` (U+25C0, constant `chat::kLiveMarker`; a plain
+  `<` without Unicode, `kLiveMarkerAscii`), in an accent color that pulses slowly
+  between bright and dim. It is not on your own bubble (that has the terminal's
+  caret) and it goes when the message is posted.
 * When a bubble locks it flashes briefly, becomes a locked bubble (time and
   `sent` appear, the shade changes) and a new empty bubble opens for the author.
 * More typers than six: "+3 typing…". The count of people online is in a status
@@ -199,6 +229,10 @@ title row's background and `░` the body's (not drawn in the real thing):
   `chat` behaves like any long-running command.
 
 ### Input
+
+Word keys (also at the Mattrix OS prompt): Ctrl-W, Alt+Backspace and Ctrl+Backspace
+(terminals send it as Ctrl-W) delete a word back; Alt+D and Ctrl+Delete a word
+forward; Ctrl+Left/Right and Alt+B/Alt+F move by words.
 
 One-line editor (Backspace, Ctrl-U/W/A/E, arrows), 200 characters with a visible
 counter, paste is sanitized and truncated. Commands: `/help`, `/nick NAME`,

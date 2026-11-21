@@ -446,20 +446,31 @@ private:
         bool changed = false;
         switch (k.type) {
         case T::Text:
-            changed = editor_.insertText(k.text);
+            if (k.alt && k.text == "d") {
+                changed = editor_.killWordForward();
+            }
+            else if (k.alt && (k.text == "b" || k.text == "f")) {
+                k.text == "b" ? editor_.wordLeft() : editor_.wordRight();
+                redraw();
+            }
+            else if (!k.alt) {
+                changed = editor_.insertText(k.text);
+            }
             break;
         case T::Backspace:
-            changed = editor_.backspace();
+            changed =
+                k.alt || k.ctrl ? editor_.killWord() : editor_.backspace();
             break;
         case T::Delete:
-            changed = editor_.del();
+            changed =
+                k.alt || k.ctrl ? editor_.killWordForward() : editor_.del();
             break;
         case T::Left:
-            changed = editor_.left();
+            k.alt || k.ctrl ? editor_.wordLeft() : editor_.left();
             redraw();
             break;
         case T::Right:
-            changed = editor_.right();
+            k.alt || k.ctrl ? editor_.wordRight() : editor_.right();
             redraw();
             break;
         case T::Home:

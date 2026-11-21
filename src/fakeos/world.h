@@ -5,6 +5,7 @@
 #include "types.h"
 #include "virtualfs.h"
 
+#include <functional>
 #include <map>
 #include <optional>
 #include <set>
@@ -12,6 +13,20 @@
 #include <vector>
 
 namespace fakeos {
+
+// How the chat reaches a server. The core opens no sockets: the host provides
+// these (the browser: a JavaScript WebSocket) and reports what happens through
+// System::chatOpened(), chatLine() and chatClosed(). Empty: no chat; the `chat`
+// command does not exist then.
+struct ChatLink {
+    std::string server; // Shown in the notice, e.g. "chat.example.org".
+    std::function<void()> open;
+    std::function<void(const std::string &)> send;
+    std::function<void()> close;
+    bool available() const {
+        return bool(open) && bool(send) && bool(close);
+    }
+};
 
 // Everything a command, a program or an easter egg may read or change: the
 // virtual file system, the shell's state, the clock and the discoveries made so
@@ -49,6 +64,8 @@ struct World {
     // A yes/no question the system waits to have answered with one key; yes
     // crashes the machine (the rm -rf --no-preserve-root egg).
     std::string crashQuestion;
+    ChatLink chat;
+    bool chatQuestion = false; // `chat` asked "Connect? [y/N]" and waits.
     bool slowAsked =
         false; // `slow on` was typed: reveal even if the host set no pace.
     std::vector<Beep> beeps;

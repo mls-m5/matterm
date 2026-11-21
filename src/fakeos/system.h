@@ -22,6 +22,8 @@ struct Config {
     std::string user = "guest";
     std::string hostname = "matterm";
     Capabilities capabilities;
+    // The chat server link (off when empty); see ChatLink.
+    ChatLink chat;
     // The standalone `mattrix` program: branded as Mattrix OS only.
     bool standalone = false;
     bool intro = true;
@@ -62,6 +64,11 @@ public:
     Reaction input(std::string_view bytes);
     Reaction tick(Time now);
     void resize(int columns, int rows);
+    // The chat connection, reported by the host: it opened, a text frame came
+    // in, it closed. Ignored unless the chat program runs.
+    Reaction chatOpened();
+    Reaction chatLine(std::string_view line);
+    Reaction chatClosed();
     // When tick() next has something to do; empty when only input can wake it.
     std::optional<Time> nextDeadline() const;
 
@@ -83,6 +90,9 @@ private:
     std::string promptText(std::size_t *width = nullptr) const;
     void redrawLine();
     void handleShellKey(const Key &key);
+    void deleteWordBack();
+    void deleteWordForward();
+    void moveWord(int direction);
     void insert(const std::string &character);
     void eraseRange(std::size_t from, std::size_t to);
     void complete();
@@ -99,6 +109,7 @@ private:
     void flushReveal();
     void forwardBeeps();
     void answerQuestion(const Key &key);
+    Reaction external(const std::string &kind, std::string_view data);
     void startCrash();
     void refreshUptimeFile();
     int revealRate() const;
@@ -107,6 +118,8 @@ private:
     std::string lineText() const;
     Reaction take();
 
+    enum class Question { Crash, Chat };
+    Question question_ = Question::Crash;
     Config config_;
     World world_;
     Shell shell_;

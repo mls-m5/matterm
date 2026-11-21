@@ -74,7 +74,8 @@ struct App {
     std::string shownTitle;
 };
 
-App *gApp = nullptr; // For matterm_paste.
+App *gApp = nullptr;                      // For matterm_paste.
+fakeos::ScriptedProgram *gChat = nullptr; // For matterm_chat_event.
 
 // The `ws` query parameter (?ws=ws://127.0.0.1:8080/ws) or window.mattermWs
 // (set by login.js). Empty: demo.
@@ -735,6 +736,16 @@ void frame(void *data) {
 }
 } // namespace
 
+// The chat connection (login.js, window.mattermChat) reports: kind 0 opened, 1
+// a text frame (`data`), 2 closed. Handled at the next frame.
+extern "C" EMSCRIPTEN_KEEPALIVE void matterm_chat_event(int kind,
+                                                        const char *data) {
+    if (gChat && gApp) {
+        gChat->chatEvent(kind, data ? data : "");
+        gApp->activeUntil = SDL_GetTicks64() + 500;
+    }
+}
+
 // Called by login.js's paste listener with the clipboard text.
 extern "C" EMSCRIPTEN_KEEPALIVE void matterm_paste(const char *text) {
     if (gApp && text) {
@@ -950,10 +961,38 @@ int main() {
         pretend.seed = std::uint64_t(EM_ASM_DOUBLE({ return Date.now(); }));
         pretend.unixTime = std::int64_t(
             EM_ASM_DOUBLE({ return Math.floor(Date.now() / 1000); }));
+        // ?chat=wss://host/path turns the `chat` command on (it does not exist
+        // otherwise). It still asks before it connects and names the server.
+        // login.js opens the WebSocket (window.mattermChat).
+        {
+            const std::string chat = queryParam("chat");
+            const auto scheme = chat.rfind("wss://", 0) == 0  ? 6u
+                                : chat.rfind("ws://", 0) == 0 ? 5u
+                                                              : 0u;
+            bool plain =
+                scheme != 0 && chat.size() > scheme && chat.size() <= 200;
+            for (const char c : chat) {
+                plain = plain && (unsigned char)c > 0x20 && c != 0x7f;
+            }
+            if (plain) {
+                pretend.chat.server =
+                    chat.substr(scheme, chat.find('/', scheme) - scheme);
+                pretend.chat.open = [] {
+                    EM_ASM({ window.mattermChat.open(); });
+                };
+                pretend.chat.send = [](const std::string &line) {
+                    EM_ASM({ window.mattermChat.send(UTF8ToString($0)); },
+                           line.c_str());
+                };
+                pretend.chat.close = [] {
+                    EM_ASM({ window.mattermChat.close(); });
+                };
+            }
+        }
+        auto program = std::make_unique<fakeos::ScriptedProgram>(pretend);
+        gChat = program.get();
         app.demo = std::make_unique<ScriptedLink>(
-            config,
-            Script(),
-            std::make_unique<fakeos::ScriptedProgram>(pretend));
+            config, Script(), std::move(program));
         app.link = app.demo.get();
         TerminalLink::Events events;
         events.output = [](std::string_view bytes) {

@@ -14,6 +14,12 @@
 // relative cursor movement). No screen buffer, no I/O. See docs/CHAT.md.
 namespace chat {
 
+// The mark at the end of another person's text that is still being typed (their
+// own caret is not ours to show): a filled left-pointing triangle, or `<` on a
+// terminal without Unicode. It goes when the message is posted.
+constexpr char32_t kLiveMarker = 0x25C0;
+constexpr char32_t kLiveMarkerAscii = U'<';
+
 struct TermCaps {
     bool truecolor = false;
     bool colors256 = false;
@@ -53,7 +59,10 @@ public:
     bool home();
     bool end();
     bool killLine();
-    bool killWord();
+    bool killWord();        // Ctrl-W, Alt+Backspace: a word back.
+    bool killWordForward(); // Alt+D, Ctrl+Delete: a word forward.
+    bool wordLeft();
+    bool wordRight();
     void set(const std::string &utf8); // The caret goes to the end.
     std::string text() const;
     const std::u32string &codePoints() const noexcept {
@@ -110,6 +119,8 @@ public:
         std::string state; // "sent", "typing...", "draft sent", "not sent"
         bool own = false;
         bool live = false;        // A bubble still being typed.
+        bool marker = false;      // Show the live marker after the text.
+        bool markerBright = true; // The marker pulses between bright and dim.
         std::optional<Millis> at; // Shown as HH:MM when set.
         std::size_t cursor = 0;   // Own bubble: caret index (code points).
     };
@@ -133,6 +144,8 @@ private:
     ChatClient::State lastState_ = ChatClient::State::Off;
     bool bannerPrinted_ = false;
     Millis start_ = -1;
+    std::size_t liveOthers_ =
+        0; // Typers drawn by the last render (for the pulse).
     std::vector<std::string> notes_;
 };
 

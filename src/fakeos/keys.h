@@ -33,6 +33,7 @@ struct Key {
     int column = 0, row = 0, button = 0;
     bool press = true, motion = false;
     bool alt = false;
+    bool ctrl = false; // From a CSI modifier (Ctrl+Left, Ctrl+Delete, ...).
 
     bool is(Type t) const {
         return type == t;

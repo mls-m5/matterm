@@ -113,6 +113,7 @@ void System::freshWorld() {
         config_.revealCharsPerSecond > 0; // The host's choice to start with.
     fresh.rng = Rng(config_.seed);
     fresh.bootUnix = config_.unixTime;
+    fresh.chat = config_.chat;
     fresh.now = world_.now;
     seedWorld(fresh);
     world_ = std::move(fresh);
@@ -402,6 +403,56 @@ void System::complete() {
     }
 }
 
+// Words are runs of non-spaces, as for Ctrl-W.
+void System::deleteWordBack() {
+    std::size_t i = cursor_;
+    while (i > 0 && line_[i - 1] == " ") {
+        --i;
+    }
+    while (i > 0 && line_[i - 1] != " ") {
+        --i;
+    }
+    eraseRange(i, cursor_);
+}
+
+void System::deleteWordForward() {
+    std::size_t i = cursor_;
+    while (i < line_.size() && line_[i] == " ") {
+        ++i;
+    }
+    while (i < line_.size() && line_[i] != " ") {
+        ++i;
+    }
+    eraseRange(cursor_, i);
+}
+
+void System::moveWord(int direction) {
+    std::size_t i = cursor_;
+    if (direction < 0) {
+        while (i > 0 && line_[i - 1] == " ") {
+            --i;
+        }
+        while (i > 0 && line_[i - 1] != " ") {
+            --i;
+        }
+        if (i < cursor_) {
+            out_ += "\x1b[" + std::to_string(cursor_ - i) + "D";
+        }
+    }
+    else {
+        while (i < line_.size() && line_[i] == " ") {
+            ++i;
+        }
+        while (i < line_.size() && line_[i] != " ") {
+            ++i;
+        }
+        if (i > cursor_) {
+            out_ += "\x1b[" + std::to_string(i - cursor_) + "C";
+        }
+    }
+    cursor_ = i;
+}
+
 void System::handleShellKey(const Key &key) {
     using T = Key::Type;
     if (!key.is(T::Tab)) {
@@ -409,7 +460,16 @@ void System::handleShellKey(const Key &key) {
     }
     switch (key.type) {
     case T::Text:
-        if (key.text == "\n") {
+        if (key.alt && key.text == "d") { // Alt+D: a word forward.
+            deleteWordForward();
+        }
+        else if (key.alt && key.text == "b") {
+            moveWord(-1);
+        }
+        else if (key.alt && key.text == "f") {
+            moveWord(1);
+        }
+        else if (key.text == "\n") {
             submit();
         }
         else if (!key.text.empty() && (unsigned char)key.text[0] >= 0x20) {
@@ -420,7 +480,10 @@ void System::handleShellKey(const Key &key) {
         submit();
         break;
     case T::Backspace:
-        if (cursor_ > 0) {
+        if (key.alt || key.ctrl) { // Alt+Backspace: a word back.
+            deleteWordBack();
+        }
+        else if (cursor_ > 0) {
             if (cursor_ == line_.size()) {
                 line_.pop_back();
                 --cursor_;
@@ -432,16 +495,27 @@ void System::handleShellKey(const Key &key) {
         }
         break;
     case T::Delete:
-        eraseRange(cursor_, std::min(line_.size(), cursor_ + 1));
+        if (key.alt || key.ctrl) { // Ctrl+Delete: a word forward.
+            deleteWordForward();
+        }
+        else {
+            eraseRange(cursor_, std::min(line_.size(), cursor_ + 1));
+        }
         break;
     case T::Left:
-        if (cursor_ > 0) {
+        if (key.alt || key.ctrl) {
+            moveWord(-1);
+        }
+        else if (cursor_ > 0) {
             --cursor_;
             out_ += "\x1b[D";
         }
         break;
     case T::Right:
-        if (cursor_ < line_.size()) {
+        if (key.alt || key.ctrl) {
+            moveWord(1);
+        }
+        else if (cursor_ < line_.size()) {
             ++cursor_;
             out_ += "\x1b[C";
         }
@@ -494,12 +568,7 @@ void System::handleShellKey(const Key &key) {
             eraseRange(cursor_, line_.size());
         }
         else if (c == 'w') {
-            std::size_t i = cursor_;
-            while (i > 0 && line_[i - 1] == " ")
-                --i;
-            while (i > 0 && line_[i - 1] != " ")
-                --i;
-            eraseRange(i, cursor_);
+            deleteWordBack();
         }
         else if (c == 'a') {
             handleShellKey(Key{Key::Type::Home});
@@ -669,10 +738,24 @@ void System::flushReveal() {
 // One key answers: y crashes the machine, anything else backs out.
 void System::answerQuestion(const Key &key) {
     answering_ = false;
-    world_.crashQuestion.clear();
     const bool yes = key.isText("y") || key.isText("Y");
     out_ += (yes ? "y" : "n");
     out_ += "\r\n";
+    if (question_ == Question::Chat) {
+        world_.chatQuestion = false;
+        if (yes && world_.chat.available()) {
+            launch("chat", {});
+            if (program_) {
+                return;
+            }
+        }
+        else {
+            out_ += "Not connecting.\r\n";
+        }
+        showPrompt();
+        return;
+    }
+    world_.crashQuestion.clear();
     if (yes) {
         startCrash();
         return;
@@ -693,7 +776,13 @@ void System::startCrash() {
 }
 
 void System::afterCommand() {
+    if (world_.chatQuestion) {
+        question_ = Question::Chat;
+        answering_ = true;
+        return;
+    }
     if (!world_.crashQuestion.empty()) {
+        question_ = Question::Crash;
         answering_ = true; // No prompt: it waits for the answer.
         return;
     }
@@ -744,6 +833,10 @@ void System::launch(const std::string &name,
     ++programSerial_;
     programName_ = name;
     programBegun_ = false;
+    nextFrame_ = now_;
+    if (program_->inlineMode()) {
+        return; // It draws on the normal screen by itself.
+    }
     canvas_.resize(world_.columns, world_.rows);
     canvas_.setCapabilities(world_.caps);
     out_ += world_.caps.alternateScreen ? kEnterApp : kClearScreen;
@@ -751,14 +844,18 @@ void System::launch(const std::string &name,
     if (program_->wantsMouse()) {
         out_ += "\x1b[?1000h\x1b[?1006h";
     }
-    nextFrame_ = now_;
 }
 
 void System::endProgram() {
     const bool wasIntro = programName_ == "intro";
-    out_ += world_.caps.alternateScreen
-                ? kLeaveApp
-                : (std::string(kClearScreen) + "\x1b[?25h");
+    if (program_->inlineMode()) {
+        out_ += program_->leave(world_);
+    }
+    else {
+        out_ += world_.caps.alternateScreen
+                    ? kLeaveApp
+                    : (std::string(kClearScreen) + "\x1b[?25h");
+    }
     program_->end(world_);
     for (char c : program_->farewell()) {
         if (c == '\n') {
@@ -873,6 +970,9 @@ Reaction System::input(std::string_view bytes) {
             if (program_ && serial == programSerial_) {
                 program_->key(world_, key);
                 nextFrame_ = now_; // Show the effect of the key at once.
+                if (program_->inlineMode() && programBegun_) {
+                    out_ += program_->rawFrame(world_, now_);
+                }
                 if (program_->finished()) {
                     endProgram();
                 }
@@ -908,8 +1008,13 @@ Reaction System::tick(Time now) {
             nextFrame_ = now;
         }
         if (now >= nextFrame_) {
-            program_->frame(world_, now, canvas_);
-            out_ += canvas_.flush();
+            if (program_->inlineMode()) {
+                out_ += program_->rawFrame(world_, now);
+            }
+            else {
+                program_->frame(world_, now, canvas_);
+                out_ += canvas_.flush();
+            }
             nextFrame_ = now + program_->interval();
             if (program_->finished()) {
                 endProgram();
@@ -922,11 +1027,42 @@ Reaction System::tick(Time now) {
 void System::resize(int columns, int rows) {
     world_.columns = std::max(1, columns);
     world_.rows = std::max(1, rows);
-    if (program_) {
+    if (program_ && program_->inlineMode()) {
+        program_->resize(world_, world_.columns, world_.rows);
+        if (programBegun_) {
+            out_ += program_->rawFrame(world_, now_);
+        }
+    }
+    else if (program_) {
         canvas_.resize(world_.columns, world_.rows);
         program_->resize(world_, world_.columns, world_.rows);
         out_ += "\x1b[0m\x1b[2J";
     }
+}
+
+Reaction System::external(const std::string &kind, std::string_view data) {
+    if (program_ && !exitCode_ && programBegun_) {
+        program_->external(world_, kind, data, now_);
+        if (program_->inlineMode()) {
+            out_ += program_->rawFrame(world_, now_);
+        }
+        if (program_->finished()) {
+            endProgram();
+        }
+    }
+    return take();
+}
+
+Reaction System::chatOpened() {
+    return external("opened", {});
+}
+
+Reaction System::chatLine(std::string_view line) {
+    return external("line", line);
+}
+
+Reaction System::chatClosed() {
+    return external("closed", {});
 }
 
 std::optional<Time> System::nextDeadline() const {
