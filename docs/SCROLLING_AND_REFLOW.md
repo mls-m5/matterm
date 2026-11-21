@@ -135,3 +135,31 @@ Not bounded enough to implement now. Decisions and work that remain, in order:
 
 The scroll-target snap in `ScrollViewport::scrollBy` (a drag and its reverse end
 exactly at the tail) is unrelated to this and is covered in `scrollviewport_test`.
+
+## Owner's requirement (2026-11-21): narrowing must not lose information
+
+Today a width decrease clips: cells right of the new width are dropped, so the text
+is gone even if the window is widened again (matterm follows xterm here; VTE and
+several other emulators reflow soft-wrapped lines instead, which I have not
+re-checked for each of them). The owner wants a solution in the long run where
+information does not disappear when the width is reduced.
+
+This matters more with tabs and panes (`docs/TABS_PLAN.md`): dragging a divider
+changes a pane's width many times, so clipping would lose text often, not only
+when a window is resized once.
+
+Two approaches, not exclusive (decide before implementing; nothing is started):
+
+1. **Reflow** (the design above): soft-wrapped lines are joined and laid out again at
+   the new width. Nothing is lost for text that wrapped by itself; hard lines that
+   are longer than the new width wrap on screen and are restored when widened.
+2. **Keep what was clipped:** every row remembers the cells beyond the current
+   width (a hidden overflow, bounded by the old width and the history limit) and a
+   widening restores them. Simpler than reflow and lossless for round trips
+   (narrow, then wide again), but narrowed text is cut on screen, not wrapped.
+   It also needs a rule for what happens when the program writes into the row
+   while the overflow exists (drop the overflow of that row).
+
+The alternate screen stays out of both: full-screen programs redraw after SIGWINCH.
+Resize bursts need coalescing either way (a divider drag; see `TABS_PLAN.md`
+section 6), and the written-extent question (trailing spaces) above applies to both.
