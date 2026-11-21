@@ -24,7 +24,8 @@ Last updated 2026-11-21. `main` is pushed up to `128707c` (plus the chat design 
 
 - Chat for Mattrix OS (`docs/CHAT.md`, agent3): ChatRoom core, codec, ChatClient,
   `chatd`, web bridge, Podman, `mattrix-chat`. Design agreed; build order in section 9.
-- Browser tabs and terminal views: paused. The finished implementation (TerminalView,
+- Tabs, panes and chrome in cells: planned in `docs/TABS_PLAN.md` (decisions in
+  `docs/MULTI_TERMINAL.md` section 13); not started. Earlier: browser tabs and terminal views were paused. The finished implementation (TerminalView,
   TabModel, tab bar, two split panes) is on `archive/web-tabs`; `main` keeps only the
   design docs (`docs/tasks/web-sessions.md`, `docs/MULTI_TERMINAL.md` section 5).
 - Width reflow (`docs/SCROLLING_AND_REFLOW.md` lists what is open).

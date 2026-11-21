@@ -345,3 +345,6 @@ Open: the exact prefix letters; the divider look; moving a pane between tabs.
 
 Suggested phases: 1) chrome layer, cell tab strip; 2) pane tree, dividers, focus;
 3) prefix keys and activity marks; 4) scrollbar placement.
+
+See `docs/TABS_PLAN.md` for the ownership model (one `unique_ptr` owner per pane,
+one backend and atlas per window), the atlas notes and the implementation plan.
