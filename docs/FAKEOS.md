@@ -215,6 +215,16 @@ own files) and a 21-inch CRT at 2048x1536.
   detection works as for any terminal. Tested under a pseudo-terminal
   (`test/mattrixtty_test.cpp`) and with `test/fakeos_standalone_test.cpp`.
 
+- **Chat** (`src/fakeos/chatprogram.cpp`, docs/CHAT.md): the `chat` command exists
+  only when the host sets `Config::chat` (a `ChatLink`: server name plus open, send
+  and close callbacks; the core opens no sockets). It prints what it does, who sees
+  what, and asks `Connect? [y/N]`. On `y` it runs as an **inline program** (a
+  `Program` with `inlineMode()`: no alternate screen, no canvas; `rawFrame()` returns
+  the bytes and `leave()` the closing ones), so the terminal's own scrollback holds
+  the conversation. The host reports the connection through `System::chatOpened()`,
+  `chatLine()` and `chatClosed()` (the web build: `?chat=wss://...`, `web/login.js`).
+  Word keys work at the prompt too: Alt+Backspace, Alt+D, Ctrl+Delete, Ctrl/Alt+arrows.
+
 ### Adding things
 
 - **A command**: write the function in `commands.cpp` and add a row to the table.
