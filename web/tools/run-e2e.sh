@@ -38,5 +38,6 @@ sleep 1
 url2="http://localhost:$port2/"
 node "$here/e2e-tabs.js" "$url2" "$password" "$out"
 node "$here/e2e-tabs-layout.js" "$url2" "$password" "$out"
+node "$here/e2e-tabs-limit.js" "$url2" "$password" "$out"
 node "$here/e2e-demo.js" "${url}?demo" "$out/demo.png"
 echo "screenshots in $out"

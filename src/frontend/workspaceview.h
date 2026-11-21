@@ -100,6 +100,7 @@ struct MouseResult {
     std::optional<PaneMouse> pane;       // forward to this pane (selection, mouse reporting)
     enum class Cursor { Default, ResizeColumns, ResizeRows } cursor = Cursor::Default;
     bool empty = false;                  // the last tab was closed
+    bool refused = false;                // the "+" of the strip could not make a tab
 };
 
 struct WheelResult {
@@ -110,6 +111,7 @@ struct WheelResult {
 
 struct KeyResult {
     std::vector<CommandCall> commands;   // layout commands that were applied
+    std::vector<CommandCall> refused;    // new tab / split that could not be made (limit, too small)
     bool copy = false;                   // Ctrl+Shift+C: copy the focused pane's selection
     bool paste = false;                  // Ctrl+Shift+V
     bool forwardPrefix = false;          // send the prefix key to the focused program first
@@ -321,7 +323,11 @@ public:
                 finish(workspace_.closeTabAt(tab), r);
                 break;
             case StripHit::Kind::NewTab:
-                finish(workspace_.apply(Command::NewTab), r);
+            {
+                const Outcome made = workspace_.apply(Command::NewTab);
+                r.refused = made == Outcome::Ignored;
+                finish(made, r);
+            }
                 break;
             case StripHit::Kind::ScrollLeft:
                 stripFirst_ = std::max(0, std::max(stripFirst_, p.strip.firstVisible) - 1);
@@ -459,7 +465,13 @@ private:
 
     void run(const CommandCall &call, KeyResult &r) {
         const Outcome o = workspace_.apply(call.command, call.argument);
-        if (o == Outcome::Ignored) return;
+        if (o == Outcome::Ignored) {
+            if (call.command == Command::NewTab || call.command == Command::SplitSideBySide ||
+                call.command == Command::SplitStacked) {
+                r.refused.push_back(call);
+            }
+            return;
+        }
         r.commands.push_back(call);
         r.changed = true;
         if (o == Outcome::Empty) r.empty = true;

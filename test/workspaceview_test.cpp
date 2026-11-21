@@ -194,8 +194,13 @@ TEST_CASE("A held shortcut acts once and held plain keys never start the prefix"
         r.view.key({'e', true, true, false}, 0); // 2 panes
         r.view.key({'t', true, true, false}, 1); // new tab: 3 panes
         EXPECT_EQ(r.space.paneCount(), std::size_t(3));
-        EXPECT(!r.view.key({'t', true, true, false}, 2).changed);
-        EXPECT(!r.view.key({'e', true, true, false}, 3).changed);
+        const KeyResult newTab = r.view.key({'t', true, true, false}, 2);
+        EXPECT(!newTab.changed);
+        EXPECT_EQ(newTab.refused.size(), std::size_t(1)); // The owner can say why.
+        const KeyResult split = r.view.key({'e', true, true, false}, 3);
+        EXPECT(!split.changed);
+        EXPECT_EQ(split.refused.size(), std::size_t(1));
+        EXPECT(r.view.key({'e', true, true, false}, 4).commands.empty());
         EXPECT_EQ(r.space.paneCount(), std::size_t(3));
     }
 

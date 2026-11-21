@@ -55,6 +55,9 @@ bool gDebug = false; // ?debug
 struct WebPane {
     explicit WebPane(const TerminalView::Config &config)
         : terminal(config) {}
+    ~WebPane(); // A live session is told to end (see retireSession).
+    WebPane(const WebPane &) = delete;
+    WebPane &operator=(const WebPane &) = delete;
     std::unique_ptr<WebSocketChannel> channel;
     std::unique_ptr<ClientSession> session;
     std::unique_ptr<ScriptedLink> demo; // The pretend system, no server.
@@ -112,7 +115,17 @@ struct App {
     std::string pendingSession; // For the next pane the factory makes.
     std::string savedLayout;    // What sessionStorage holds.
     bool keyShift = false; // Shift held at the last key press (not live state).
-    bool leaving = false;  // Reloading to the login form.
+    // Sessions of closed panes, waiting for the server to confirm the Close.
+    struct Retired {
+        std::unique_ptr<WebSocketChannel> channel;
+        std::unique_ptr<ClientSession> session;
+        Uint64 deadline = 0;
+    };
+    std::vector<Retired> closing;
+    Uint64 reloadDeadline =
+        0; // Reload to the login form once closing is empty.
+    bool warnedVolatile = false; // The server keeps no terminals; said once.
+    bool leaving = false;        // Reloading to the login form.
     std::unique_ptr<CellBuffer> stripCells; // The tab strip row as cells.
 
     WebPane *focused() const {
@@ -130,6 +143,20 @@ struct App {
 
 App *gApp = nullptr;                      // For matterm_paste.
 fakeos::ScriptedProgram *gChat = nullptr; // For matterm_chat_event.
+
+// A closed pane must end its terminal on the server: dropping the connection
+// would leave a persistent session behind (and count against the limits). The
+// session sends Close and lives on, unseen, until the server confirms.
+WebPane::~WebPane() {
+    terminal.detach();
+    if (session && gApp &&
+        (session->state() == ClientSession::State::AwaitWelcome ||
+         session->state() == ClientSession::State::Running)) {
+        session->close();
+        gApp->closing.push_back(
+            {std::move(channel), std::move(session), SDL_GetTicks64() + 3000});
+    }
+}
 
 // The `ws` query parameter (?ws=ws://127.0.0.1:8080/ws) or window.mattermWs
 // (set by login.js). Empty: demo.
@@ -308,6 +335,12 @@ std::optional<UrlMatch> hoveredLink(const App &app,
 
 void forgetLayout();
 
+// Back to the login form, once the server has confirmed the Close of the
+// terminals that were just closed (a reload would drop them unannounced).
+void requestReload(App &app) {
+    app.reloadDeadline = SDL_GetTicks64() + 3000;
+}
+
 // The layout changed (a pane, tab or split came or went): redraw, and let go of
 // pointer state that belonged to what was shown.
 void layoutChanged(App &app, bool empty) {
@@ -322,7 +355,7 @@ void layoutChanged(App &app, bool empty) {
     if (empty) {
         // The last pane is gone: back to the login form.
         forgetLayout();
-        EM_ASM({ location.reload(); });
+        requestReload(app);
     }
 }
 
@@ -358,6 +391,15 @@ std::string prefixBytes(const App &app) {
     return InputEncoder::control(char(prefix.key), prefix.alt);
 }
 
+// A new tab or split could not be made: say so in the focused terminal.
+void refusedNotice(App &app) {
+    if (auto *pane = app.focused()) {
+        pane->view().note(
+            "no new terminal: at most 16 in this window, and the space must "
+            "fit them");
+    }
+}
+
 // Feeds a key to the layout. True when the layout took it (a command, the
 // prefix itself, or a literal prefix that was sent); false: the key goes on to
 // the program (after the prefix, if the layout says so).
@@ -378,6 +420,9 @@ bool layoutKey(App &app, const KeyChord &chord) {
         app.workspace->paneCount());
     if (result.changed || result.empty) {
         layoutChanged(app, result.empty);
+    }
+    if (!result.refused.empty()) {
+        refusedNotice(app);
     }
     if (result.forwardPrefix) {
         send(app, prefixBytes(app));
@@ -835,6 +880,9 @@ void handleMouse(App &app, const SDL_Event &event) {
     // until it is released.
     const auto result = app.layout->mouse(in, nowMs());
     setPointer(app, result.cursor);
+    if (result.refused) {
+        refusedNotice(app);
+    }
     if (result.changed) {
         layoutChanged(app, result.empty);
     }
@@ -958,7 +1006,7 @@ void handleEvent(App &app, const SDL_Event &event) {
         // the layout (prefix commands); the dead program gets no input.
         if (app.workspace->paneCount() <= 1) {
             forgetLayout();
-            EM_ASM({ location.reload(); });
+            requestReload(app);
         }
         else {
             const auto outcome =
@@ -1400,6 +1448,24 @@ void frame(void *data) {
         return; // Idle: nothing happened and the next check is not due yet.
     }
     app.lastFull = start;
+    // Closed panes: wait for the server's confirmation, then let go.
+    for (auto it = app.closing.begin(); it != app.closing.end();) {
+        it->session->tick();
+        const auto state = it->session->state();
+        if (state == ClientSession::State::Exited ||
+            state == ClientSession::State::Failed || it->session->closeCode() ||
+            start >= it->deadline) {
+            it = app.closing.erase(it);
+        }
+        else {
+            ++it;
+        }
+    }
+    if (app.reloadDeadline != 0 &&
+        (app.closing.empty() || start >= app.reloadDeadline)) {
+        app.reloadDeadline = 0;
+        EM_ASM({ location.reload(); });
+    }
     // Every pane runs, shown or not: links are served and output is parsed.
     std::vector<PaneId> hiddenChanged;
     app.workspace->forEachPane([&](PaneId id, WebPane &pane, bool visible) {
@@ -1408,6 +1474,15 @@ void frame(void *data) {
         }
         if (pane.demo) {
             pane.demo->tick();
+        }
+        if (pane.session && !app.warnedVolatile && !app.url.empty() &&
+            pane.session->state() == ClientSession::State::Running &&
+            (pane.session->negotiatedFeatures() & protocol::featureReplay) ==
+                0) {
+            app.warnedVolatile = true;
+            pane.view().note(
+                "terminals are not kept on this server: a reload starts "
+                "fresh");
         }
         if (app.ended(pane) && !pane.hinted) {
             pane.hinted = true;
@@ -1761,6 +1836,8 @@ int main() {
     app.glideConfig.durationSeconds = smoothMs / 1000.0;
     app.workspace =
         std::make_unique<Workspace<WebPane>>([] { return makePane(*gApp); });
+    app.workspace->setMaxPanes(
+        LayoutSnapshot::kMaxPanes); // 16: the login's leases.
     ViewConfig layoutConfig;
     layoutConfig.palette = app.chromePalette;
     layoutConfig.showStripWithOneTab = false; // Hidden until there is a choice.
