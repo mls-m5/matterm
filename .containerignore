@@ -1,0 +1,6 @@
+.git
+.tmp
+build
+build-*
+node_modules
+*.log

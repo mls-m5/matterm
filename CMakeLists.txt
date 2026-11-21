@@ -206,6 +206,11 @@ if(MATTERM_BUILD_CHATD AND UNIX AND NOT EMSCRIPTEN)
         target_link_libraries(chatd-core PUBLIC matterm::chat Threads::Threads)
         add_executable(chatd src/chatd/main.cpp)
         target_link_libraries(chatd PRIVATE chatd-core)
+        # A fully static binary for a container without anything else in it.
+        option(MATTERM_CHATD_STATIC "Link chatd statically (for the Podman image)" OFF)
+        if(MATTERM_CHATD_STATIC)
+            target_link_options(chatd PRIVATE -static)
+        endif()
         install(TARGETS chatd RUNTIME DESTINATION bin)
         # The chat in a terminal: the chat library, the terminal helpers and the
         # key decoder of fakeos. TCP and plain WebSocket (no TLS yet).
