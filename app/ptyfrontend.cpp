@@ -1,12 +1,15 @@
 #include "ptyfrontend.h"
 
+#include "cellbuffer.h"
 #include "cursorglide.h"
 #include "inputencoder.h"
 #include "ptysession.h"
 #include "sdlbackend.h"
 #include "sdlinput.h"
 #include "terminalmodel.h"
-#include "windowsnap.h"
+#include "ptylink.h"
+#include "terminalview.h"
+#include "workspaceview.h"
 
 #include <SDL.h>
 #include <SDL_ttf.h>
@@ -15,6 +18,7 @@
 #include <cerrno>
 #include <cmath>
 #include <fcntl.h>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -178,45 +182,90 @@ void smoke(SDL_Window &window, SdlBackend &backend, PtySession &session) {
     }
     std::cout << "PTY -> VT -> model -> SDL smoke test passed\n";
 }
-} // namespace
 
-int runPtyFrontend(const char *font,
-                   int fontSize,
-                   const std::vector<std::string> &arguments,
-                   const std::string &term,
-                   bool smokeTest,
-                   const char *recordPath,
-                   bool smoothCursor) {
-    OutputRecording recording(recordPath);
-    std::string title = "matterm";
-    const Palette defaultPalette;
-    Palette palette;
-    // fork/exec before SDL or graphics workers exist. Window dimensions follow
-    // immediately after the backend computes drawable-pixel cell metrics.
-    PtySession session(
-        arguments,
-        80,
-        24,
-        {{},
-         [&](std::string_view value) {
-             title = "matterm | " + std::string(value);
-         },
-         &palette,
-         [&](std::size_t index, Rgb8 color) { palette.colors[index] = color; },
-         [&](std::optional<std::size_t> index) {
-             if (index) {
-                 palette.colors[*index] = defaultPalette.colors[*index];
-             }
-             else {
-                 palette.colors = defaultPalette.colors;
-             }
-         }},
-        term,
-        PtyProcess::ColorCapability::TrueColor);
-    if (recordPath) {
-        session.setOutputObserver(
-            [&](std::string_view bytes) { recording.append(bytes); });
+// Sits between a PtyLink and its TerminalView to copy the raw output (--record-output).
+class TapLink final : public TerminalLink {
+public:
+    TapLink(PtyLink &inner, std::function<void(std::string_view)> tap)
+        : inner_(inner)
+        , tap_(std::move(tap)) {}
+    void setEvents(Events events) override {
+        if (events.output) {
+            events.output = [this, forward = std::move(events.output)](
+                                std::string_view bytes) {
+                tap_(bytes);
+                forward(bytes);
+            };
+        }
+        inner_.setEvents(std::move(events));
     }
+    bool sendInput(std::string_view bytes) override {
+        return inner_.sendInput(bytes);
+    }
+    void resize(int columns, int rows, int pw, int ph) override {
+        inner_.resize(columns, rows, pw, ph);
+    }
+    void close() override {
+        inner_.close();
+    }
+
+private:
+    PtyLink &inner_;
+    std::function<void(std::string_view)> tap_;
+};
+
+// One terminal of the window: a process and the view of its output. The link is
+// declared first because the view borrows it.
+struct NativePane {
+    PtyLink link;
+    std::unique_ptr<TapLink> tap;
+    TerminalView v;
+    NativePane(const std::vector<std::string> &arguments,
+               const std::string &term,
+               int columns,
+               int rows,
+               std::function<void(std::string_view)> record)
+        : link(arguments,
+               columns,
+               rows,
+               term,
+               PtyProcess::ColorCapability::TrueColor)
+        , v(TerminalViewConfig{std::size_t(columns), std::size_t(rows), 1000, {}}) {
+        if (record) {
+            tap = std::make_unique<TapLink>(link, std::move(record));
+            v.attach(*tap);
+        }
+        else {
+            v.attach(link);
+        }
+    }
+    TerminalView &view() {
+        return v;
+    }
+    const TerminalView &view() const {
+        return v;
+    }
+};
+
+using Space = Workspace<NativePane>;
+
+struct CursorDeleter {
+    void operator()(SDL_Cursor *c) const {
+        SDL_FreeCursor(c);
+    }
+};
+using CursorPtr = std::unique_ptr<SDL_Cursor, CursorDeleter>;
+
+int runSmokeTest(const char *font,
+                 int fontSize,
+                 const std::vector<std::string> &arguments,
+                 const std::string &term) {
+    PtySession session(arguments,
+                       80,
+                       24,
+                       {},
+                       term,
+                       PtyProcess::ColorCapability::TrueColor);
     SdlRuntime runtime;
     std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(
         SDL_CreateWindow("matterm",
@@ -225,59 +274,191 @@ int runPtyFrontend(const char *font,
                          960,
                          640,
                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
-                             (smokeTest ? SDL_WINDOW_HIDDEN : 0)),
+                             SDL_WINDOW_HIDDEN),
         SDL_DestroyWindow);
     if (!window) {
         throw std::runtime_error(SDL_GetError());
     }
-    SdlBackend backend(*window, font, fontSize, smokeTest);
+    SdlBackend backend(*window, font, fontSize, true);
     backend.setReserveScrollbarStrip(true);
-    auto resize = [&] {
-        const int columns = std::clamp(backend.columns(true), 1, 65535);
-        const int rows = std::clamp(backend.rows(), 1, 65535);
-        if (session.model().columns() != std::size_t(columns) ||
-            session.model().rows() != std::size_t(rows)) {
-            session.resize(columns, rows);
-        }
-    };
-    resize();
-    if (smokeTest) {
-        smoke(*window, backend, session);
-        return 0;
+    session.resize(std::clamp(backend.columns(true), 1, 65535),
+                   std::clamp(backend.rows(), 1, 65535));
+    smoke(*window, backend, session);
+    return 0;
+}
+
+int keyCodeOf(SDL_Keycode key) {
+    switch (key) {
+    case SDLK_UP:
+        return keys::Up;
+    case SDLK_DOWN:
+        return keys::Down;
+    case SDLK_LEFT:
+        return keys::Left;
+    case SDLK_RIGHT:
+        return keys::Right;
+    case SDLK_PAGEUP:
+        return keys::PageUp;
+    case SDLK_PAGEDOWN:
+        return keys::PageDown;
+    case SDLK_ESCAPE:
+        return keys::Escape;
+    case SDLK_RETURN:
+        return keys::Enter;
+    case SDLK_TAB:
+        return keys::Tab;
+    case SDLK_BACKSPACE:
+        return keys::Backspace;
+    default:
+        return key >= 32 && key < 127 ? int(key) : 0;
     }
+}
+} // namespace
+
+int runPtyFrontend(const char *font,
+                   int fontSize,
+                   const std::vector<std::string> &arguments,
+                   const std::string &term,
+                   bool smokeTest,
+                   const char *recordPath,
+                   bool smoothCursor,
+                   bool tabsSmoke) {
+    if (smokeTest) {
+        return runSmokeTest(font, fontSize, arguments, term);
+    }
+    OutputRecording recording(recordPath);
+    bool recordFirst = recordPath != nullptr;
+    int hintColumns = 80, hintRows = 24; // size of a new pane until the layout says
+    // The first pane is made before SDL and its threads exist (fork); later ones
+    // are made on demand, see docs/TABS_PLAN.md.
+    Space workspace([&]() -> std::unique_ptr<NativePane> {
+        std::function<void(std::string_view)> record;
+        if (recordFirst) {
+            recordFirst = false;
+            record = [&recording](std::string_view bytes) {
+                recording.append(bytes);
+            };
+        }
+        auto pane = std::make_unique<NativePane>(
+            arguments, term, hintColumns, hintRows, std::move(record));
+        pane->v.glide() = CursorGlide([&] {
+            CursorGlide::Config c;
+            c.enabled = smoothCursor;
+            return c;
+        }());
+        return pane;
+    });
+    workspace.apply(Command::NewTab);
+    SdlRuntime runtime;
+    std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(
+        SDL_CreateWindow("matterm",
+                         SDL_WINDOWPOS_CENTERED,
+                         SDL_WINDOWPOS_CENTERED,
+                         960,
+                         640,
+                         SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
+                             (tabsSmoke ? SDL_WINDOW_HIDDEN : 0)),
+        SDL_DestroyWindow);
+    if (!window) {
+        throw std::runtime_error(SDL_GetError());
+    }
+    SdlBackend backend(*window, font, fontSize, tabsSmoke);
+    backend.setReserveScrollbarStrip(true);
+
+    ViewConfig viewConfig;
+    viewConfig.scrollbarStrip = SdlBackend::scrollbarStrip();
+    // Ctrl+B is readline's backward-char; the native app has the desktop
+    // shortcuts instead (the browser uses the prefix keys).
+    viewConfig.prefixKeys = false;
+    WorkspaceView<NativePane> wv(workspace, viewConfig);
+    const CursorPtr arrowCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW));
+    const CursorPtr columnsCursor(
+        SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE));
+    const CursorPtr rowsCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS));
+    using Cursor = MouseResult::Cursor;
+    Cursor shownCursor = Cursor::Default;
+
+    // Window coordinates (events, mouse state) to drawable pixels.
+    const auto drawableSize = [&] {
+        int w = 0, h = 0;
+        if (SDL_GetRendererOutputSize(SDL_GetRenderer(window.get()), &w, &h) <
+            0) {
+            return std::pair<int, int>{0, 0};
+        }
+        return std::pair<int, int>{w, h};
+    };
+    const auto toDrawable = [&](int x, int y) {
+        int ww = 0, wh = 0;
+        SDL_GetWindowSize(window.get(), &ww, &wh);
+        const auto [dw, dh] = drawableSize();
+        if (ww <= 0 || wh <= 0) {
+            return std::pair<int, int>{x, y};
+        }
+        return std::pair<int, int>{int(double(x) * dw / ww),
+                                   int(double(y) * dh / wh)};
+    };
+    const auto updateWindow = [&] {
+        const auto [w, h] = drawableSize();
+        const WindowMetrics now{
+            w, h, backend.cellWidth(), backend.cellHeight()};
+        const auto &old = wv.window();
+        if (now.width != old.width || now.height != old.height ||
+            now.cellWidth != old.cellWidth ||
+            now.cellHeight != old.cellHeight) {
+            wv.setWindow(now);
+        }
+        const auto columns = std::max(1, w / std::max(1, now.cellWidth));
+        const auto rows = std::max(1, h / std::max(1, now.cellHeight) - 1);
+        hintColumns = std::clamp(columns, 1, 65535);
+        hintRows = std::clamp(rows, 1, 65535);
+    };
+    updateWindow();
+
     SDL_StartTextInput();
     bool running = true;
     bool rejectedInput = false;
     std::string clipboardError;
     std::string linkError;
+    std::optional<PtyProcess::ExitStatus> lastExit;
+    PaneId selectingPane = 0;
     bool dragging = false;
-    std::optional<Selection> selection;
-    auto &model = session.model();
-    const auto send = [&](const std::string &bytes) {
-        if (bytes.empty() || session.finished()) {
-            return;
-        }
-        rejectedInput = !session.send(bytes);
-        if (!rejectedInput) {
-            session.model().followTail();
-        }
-    };
-    // Application mouse reporting. Shift hands the mouse back to selection
-    // unless a reported press is still held.
     using MouseEvent = InputEncoder::MouseEvent;
     bool mouseCaptured = false;
+    PaneId capturedPane = 0;
     MouseEvent::Button heldButton = MouseEvent::Button::None;
     std::optional<std::pair<int, int>> lastMouseCell;
-    const auto sendMouse = [&](MouseEvent::Type type,
-                               MouseEvent::Button button,
-                               int x,
-                               int y,
-                               bool clamp,
-                               bool dedupe) {
-        const auto cell = mouseCell(*window, backend, model, x, y, clamp);
-        if (!cell) {
+    bool skipText = false;
+    Uint64 lastFrame = SDL_GetTicks64();
+
+    const auto send = [&](NativePane &pane, std::string_view bytes) {
+        if (bytes.empty() || pane.v.ended()) {
             return;
         }
+        rejectedInput = !pane.v.sendInput(bytes);
+        if (!rejectedInput) {
+            pane.v.model().followTail();
+        }
+    };
+    const auto sendFocused = [&](std::string_view bytes) {
+        if (auto *pane = workspace.focusedPane()) {
+            send(*pane, bytes);
+        }
+    };
+    const auto mouseTracking = [](NativePane &pane) {
+        return pane.v.modes().mouseTracking != TerminalModes::MouseTracking::Off;
+    };
+    const auto sendMouse = [&](NativePane &pane,
+                               const PaneMouse &pm,
+                               MouseEvent::Type type,
+                               MouseEvent::Button button,
+                               bool clamp,
+                               bool dedupe) {
+        const auto cell =
+            clamp ? std::optional(pm.clamped) : pm.cell;
+        if (!cell || pane.v.ended()) {
+            return;
+        }
+        const auto &model = pane.v.model();
         const auto first =
             model.firstRetainedRow() + model.viewport().firstRow();
         MouseEvent report;
@@ -291,144 +472,363 @@ int runPtyFrontend(const char *font,
             return;
         }
         lastMouseCell = std::make_pair(report.column, report.row);
-        const auto bytes = InputEncoder::mouse(report, session.modes());
-        if (!bytes.empty() && !session.finished()) {
-            rejectedInput = !session.send(bytes);
+        const auto bytes = InputEncoder::mouse(report, pane.v.modes());
+        if (!bytes.empty()) {
+            rejectedInput = !pane.v.sendInput(bytes);
         }
     };
-    const auto mouseTracking = [&] {
-        return session.modes().mouseTracking !=
-               TerminalModes::MouseTracking::Off;
+    const auto copyFrom = [&](NativePane &pane) {
+        auto &model = pane.v.model();
+        if (pane.v.selection && pane.v.selection->valid(model)) {
+            const auto text = pane.v.selection->text(model);
+            if (!text) {
+                clipboardError = "copy failed: selection exceeds 1 MiB";
+            }
+            else {
+                clipboardError = SDL_SetClipboardText(text->c_str()) == 0
+                                     ? ""
+                                     : "clipboard copy failed";
+            }
+        }
     };
-    CursorGlide::Config glideConfig;
-    glideConfig.enabled = smoothCursor;
-    CursorGlide cursorGlide(glideConfig);
-    bool skipText = false;
-    Uint64 lastFrame = SDL_GetTicks64();
-    Uint64 snapDue = 0; // when to snap the window to whole cells
+    const auto pasteInto = [&](NativePane &pane) {
+        std::unique_ptr<char, decltype(&SDL_free)> clipboard(
+            SDL_GetClipboardText(), SDL_free);
+        if (clipboard && SDL_strlen(clipboard.get()) <= 1024 * 1024) {
+            send(pane, InputEncoder::paste(clipboard.get(), pane.v.modes()));
+        }
+        else {
+            rejectedInput = true;
+        }
+    };
+    // Layout results: the program may owe a prefix key; the key may be ours.
+    const auto prefixBytes = [&] {
+        return InputEncoder::control(
+            char(viewConfig.prefix.prefix.key), false);
+    };
+    const auto afterLayout = [&](const KeyResult &r) {
+        if (r.empty) {
+            running = false;
+        }
+        if (r.copy) {
+            if (auto *pane = workspace.focusedPane()) {
+                copyFrom(*pane);
+            }
+        }
+        if (r.paste) {
+            if (auto *pane = workspace.focusedPane()) {
+                pasteInto(*pane);
+            }
+        }
+        if (r.forwardPrefix) {
+            sendFocused(prefixBytes());
+        }
+    };
+    const auto guarded = [&](auto &&action) {
+        try {
+            action();
+        }
+        catch (const std::exception &error) {
+            linkError = error.what();
+        }
+    };
+
+    // --pty-tabs-smoke-test: the same events a user would cause, pushed into the
+    // loop, and checks of the workspace after each. Docs/TABS_PLAN.md phase 2.
+    int scriptStep = 0;
+    Uint64 scriptDue = 0;
+    bool scriptDone = false;
+    PaneId hiddenPane = 0;
+    float hiddenShare = 1;
+    int widthBefore = 0;
+    PixelRect gutterAtStart;
+    const auto expectThat = [](bool ok, const char *what) {
+        if (!ok) {
+            throw std::runtime_error(std::string("PTY tabs smoke: ") + what);
+        }
+    };
+    const auto pushKey = [](SDL_Keycode sym, Uint16 mods) {
+        SDL_SetModState(SDL_Keymod(mods));
+        SDL_Event e{};
+        e.type = SDL_KEYDOWN;
+        e.key.keysym.sym = sym;
+        e.key.keysym.mod = mods;
+        SDL_PushEvent(&e);
+    };
+    const auto pushMouse = [](Uint32 type, int x, int y) {
+        SDL_Event e{};
+        e.type = type;
+        if (type == SDL_MOUSEMOTION) {
+            e.motion.x = x;
+            e.motion.y = y;
+        }
+        else {
+            e.button.x = x;
+            e.button.y = y;
+            e.button.button = SDL_BUTTON_LEFT;
+            e.button.clicks = 1;
+        }
+        SDL_PushEvent(&e);
+    };
+    const auto script = [&] {
+        if (!tabsSmoke || scriptDone || SDL_GetTicks64() < scriptDue) {
+            return;
+        }
+        SDL_SetModState(KMOD_NONE);
+        const auto later = [&](Uint64 ms) { scriptDue = SDL_GetTicks64() + ms; };
+        const Uint16 ctrlShift = KMOD_LCTRL | KMOD_LSHIFT;
+        switch (scriptStep++) {
+        case 0:
+            later(500); // the shell starts
+            break;
+        case 1:
+            expectThat(workspace.tabCount() == 1 &&
+                           workspace.paneCount() == 1,
+                       "one tab with one pane at the start");
+            pushKey(SDLK_e, ctrlShift);
+            later(300);
+            break;
+        case 2:
+            expectThat(workspace.activeTab()->tree.size() == 2,
+                       "Ctrl+Shift+E splits");
+            pushKey(SDLK_o, ctrlShift);
+            later(300);
+            break;
+        case 3:
+            expectThat(workspace.activeTab()->tree.size() == 3,
+                       "Ctrl+Shift+O splits again");
+            hiddenPane = workspace.activeTab()->tree.focus();
+            pushKey(SDLK_t, ctrlShift);
+            later(300);
+            break;
+        case 4: {
+            expectThat(workspace.tabCount() == 2 &&
+                           workspace.activeIndex() == 1,
+                       "Ctrl+Shift+T opens a tab");
+            auto *pane = workspace.pane(hiddenPane);
+            expectThat(pane != nullptr, "the hidden pane is kept");
+            hiddenShare = pane->v.model().frame(backend.cellHeight()).scrollbar.size;
+            later(1500);
+            break;
+        }
+        case 5: {
+            auto *pane = workspace.pane(hiddenPane);
+            expectThat(pane && !pane->link.finished(),
+                       "the hidden process still runs");
+            expectThat(pane->v.model().frame(backend.cellHeight()).scrollbar.size <
+                           hiddenShare,
+                       "the hidden pane keeps receiving output");
+            pushKey(SDLK_PAGEUP, KMOD_LCTRL);
+            later(300);
+            break;
+        }
+        case 6: {
+            expectThat(workspace.activeIndex() == 0, "Ctrl+PgUp goes back");
+            const auto plan = wv.plan();
+            expectThat(plan.panes.size() == 3 && plan.dividers.size() == 2,
+                       "three panes and two dividers");
+            gutterAtStart = plan.dividers[0].rect;
+            widthBefore = plan.panes[0].rect.w;
+            pushMouse(SDL_MOUSEBUTTONDOWN,
+                      gutterAtStart.x + gutterAtStart.w * 3 / 4,
+                      gutterAtStart.y + 30);
+            later(100);
+            break;
+        }
+        case 7:
+            pushMouse(SDL_MOUSEMOTION,
+                      gutterAtStart.x + gutterAtStart.w * 3 / 4 - 80,
+                      gutterAtStart.y + 30);
+            later(100);
+            break;
+        case 8:
+            pushMouse(SDL_MOUSEBUTTONUP,
+                      gutterAtStart.x + gutterAtStart.w * 3 / 4 - 80,
+                      gutterAtStart.y + 30);
+            later(300);
+            break;
+        case 9: {
+            const auto plan = wv.plan();
+            expectThat(std::abs((widthBefore - plan.panes[0].rect.w) - 80) <=
+                           2 * backend.cellWidth(),
+                       "dragging the divider moved it");
+            for (const auto &pp : plan.panes) {
+                auto *pane = workspace.pane(pp.id);
+                expectThat(pane && pp.columns >= 20 &&
+                               pane->v.model().columns() ==
+                                   std::size_t(pp.columns) &&
+                               pane->v.model().rows() == std::size_t(pp.rows),
+                           "every pane has the planned size");
+            }
+            pushKey(SDLK_w, ctrlShift);
+            later(300);
+            break;
+        }
+        default:
+            expectThat(workspace.tabCount() == 1 && workspace.paneCount() == 1,
+                       "Ctrl+Shift+W closes the tab and its panes");
+            scriptDone = true;
+            running = false;
+            break;
+        }
+    };
+
     while (running) {
         skipText = false;
-        resize();
+        updateWindow();
+        script();
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
+            const std::int64_t now = std::int64_t(SDL_GetTicks64());
+            const auto mod = modifiers(SDL_GetModState());
             if (event.type == SDL_QUIT) {
                 running = false;
             }
             else if (event.type == SDL_TEXTINPUT) {
-                const auto mod = modifiers(SDL_GetModState());
-                if (skipText) {
+                if (wv.prefixWaiting()) {
+                    // The key after the prefix, as the character it produces.
+                    const std::string_view text = event.text.text;
+                    const int ch = text.size() == 1 ? int(text[0]) : 0x3fffff;
+                    guarded([&] {
+                        const auto r =
+                            wv.key({ch, false, false, false}, now);
+                        afterLayout(r);
+                        if (r.forwardKey) {
+                            sendFocused(InputEncoder::text(
+                                event.text.text, mod.alt));
+                        }
+                    });
+                }
+                else if (skipText) {
                     skipText = false;
                 }
                 else if (!mod.control) {
-                    send(InputEncoder::text(event.text.text, mod.alt));
+                    sendFocused(InputEncoder::text(event.text.text, mod.alt));
                 }
             }
-            else if (event.type == SDL_MOUSEBUTTONDOWN && mouseTracking() &&
-                     !modifiers(SDL_GetModState()).shift &&
-                     mouseButton(event.button.button)) {
-                mouseCaptured = true;
-                heldButton = *mouseButton(event.button.button);
-                lastMouseCell.reset();
-                sendMouse(MouseEvent::Type::Press,
-                          heldButton,
-                          event.button.x,
-                          event.button.y,
-                          false,
-                          false);
-            }
-            else if (event.type == SDL_MOUSEBUTTONUP && mouseCaptured &&
-                     mouseButton(event.button.button)) {
-                const auto button = *mouseButton(event.button.button);
-                sendMouse(MouseEvent::Type::Release,
-                          button,
-                          event.button.x,
-                          event.button.y,
-                          true,
-                          false);
-                if (button == heldButton) {
-                    mouseCaptured = false;
-                    heldButton = MouseEvent::Button::None;
-                }
-            }
-            else if (event.type == SDL_MOUSEMOTION && !dragging &&
-                     mouseTracking() &&
-                     (mouseCaptured || (session.modes().mouseTracking ==
-                                            TerminalModes::MouseTracking::Any &&
-                                        !modifiers(SDL_GetModState()).shift))) {
-                sendMouse(MouseEvent::Type::Motion,
-                          heldButton,
-                          event.motion.x,
-                          event.motion.y,
-                          mouseCaptured,
-                          true);
-            }
-            else if (event.type == SDL_MOUSEBUTTONDOWN &&
-                     event.button.button == SDL_BUTTON_LEFT) {
-                clipboardError.clear();
-                const auto cell = mouseCell(*window,
-                                            backend,
-                                            model,
-                                            event.button.x,
-                                            event.button.y,
-                                            false);
-                const auto mod = modifiers(SDL_GetModState());
-                const auto link = cell && localLinkGesture(mod.control,
-                                                           mod.shift,
-                                                           mouseTracking(),
-                                                           mouseCaptured)
-                                      ? urlAt(model, *cell)
-                                      : std::nullopt;
-                if (link) {
-                    dragging = false;
-                    linkError =
-                        SDL_OpenURL(link->text.c_str()) == 0
-                            ? ""
-                            : std::string("open URL failed: ") + SDL_GetError();
+            else if (event.type == SDL_MOUSEBUTTONDOWN ||
+                     event.type == SDL_MOUSEBUTTONUP ||
+                     event.type == SDL_MOUSEMOTION) {
+                const bool motion = event.type == SDL_MOUSEMOTION;
+                const bool down = event.type == SDL_MOUSEBUTTONDOWN;
+                const int rawX = motion ? event.motion.x : event.button.x;
+                const int rawY = motion ? event.motion.y : event.button.y;
+                const auto pos = toDrawable(rawX, rawY);
+                const int x = pos.first, y = pos.second;
+                MouseInput in;
+                in.x = x;
+                in.y = y;
+                in.shift = mod.shift;
+                in.ctrl = mod.control;
+                in.alt = mod.alt;
+                if (motion) {
+                    in.type = MouseInput::Type::Move;
                 }
                 else {
-                    dragging = cell.has_value();
-                    if (cell) {
-                        selectAt(selection,
-                                 model,
-                                 *cell,
-                                 mod.shift,
-                                 event.button.clicks);
+                    in.type = down ? MouseInput::Type::Down
+                                   : MouseInput::Type::Up;
+                    in.clicks = event.button.clicks;
+                    in.button = event.button.button == SDL_BUTTON_LEFT
+                                    ? MouseInput::Button::Left
+                                : event.button.button == SDL_BUTTON_MIDDLE
+                                    ? MouseInput::Button::Middle
+                                : event.button.button == SDL_BUTTON_RIGHT
+                                    ? MouseInput::Button::Right
+                                    : MouseInput::Button::None;
+                }
+                MouseResult r;
+                guarded([&] { r = wv.mouse(in, now); });
+                if (r.empty) {
+                    running = false;
+                }
+                if (r.cursor != shownCursor) {
+                    shownCursor = r.cursor;
+                    SDL_SetCursor(shownCursor == Cursor::ResizeColumns
+                                      ? columnsCursor.get()
+                                  : shownCursor == Cursor::ResizeRows
+                                      ? rowsCursor.get()
+                                      : arrowCursor.get());
+                }
+                if (!r.pane) {
+                    continue;
+                }
+                const PaneMouse &pm = *r.pane;
+                NativePane *target = workspace.pane(pm.pane);
+                if (!target) {
+                    continue;
+                }
+                NativePane &np = *target;
+                auto &model = np.v.model();
+                const auto button = motion || !mouseButton(event.button.button)
+                                        ? std::nullopt
+                                        : mouseButton(event.button.button);
+                if (down && mouseTracking(np) && !mod.shift && button) {
+                    mouseCaptured = true;
+                    capturedPane = pm.pane;
+                    heldButton = *button;
+                    lastMouseCell.reset();
+                    sendMouse(np, pm, MouseEvent::Type::Press, heldButton,
+                              false, false);
+                }
+                else if (event.type == SDL_MOUSEBUTTONUP && mouseCaptured &&
+                         pm.pane == capturedPane && button) {
+                    sendMouse(np, pm, MouseEvent::Type::Release, *button, true,
+                              false);
+                    if (*button == heldButton) {
+                        mouseCaptured = false;
+                        heldButton = MouseEvent::Button::None;
+                    }
+                }
+                else if (motion && !dragging && mouseTracking(np) &&
+                         (mouseCaptured ||
+                          (np.v.modes().mouseTracking ==
+                               TerminalModes::MouseTracking::Any &&
+                           !mod.shift))) {
+                    sendMouse(np, pm, MouseEvent::Type::Motion, heldButton,
+                              mouseCaptured, true);
+                }
+                else if (down && in.button == MouseInput::Button::Left) {
+                    clipboardError.clear();
+                    const auto link =
+                        pm.cell && localLinkGesture(mod.control,
+                                                    mod.shift,
+                                                    mouseTracking(np),
+                                                    mouseCaptured)
+                            ? urlAt(model, *pm.cell)
+                            : std::nullopt;
+                    if (link) {
+                        dragging = false;
+                        linkError = SDL_OpenURL(link->text.c_str()) == 0
+                                        ? ""
+                                        : std::string("open URL failed: ") +
+                                              SDL_GetError();
                     }
                     else {
-                        selection.reset();
+                        dragging = pm.cell.has_value();
+                        selectingPane = pm.pane;
+                        if (pm.cell) {
+                            selectAt(np.v.selection,
+                                     model,
+                                     *pm.cell,
+                                     mod.shift,
+                                     event.button.clicks);
+                        }
+                        else {
+                            np.v.selection.reset();
+                        }
                     }
                 }
-            }
-            else if ((event.type == SDL_MOUSEMOTION && dragging) ||
-                     (event.type == SDL_MOUSEBUTTONUP &&
-                      event.button.button == SDL_BUTTON_LEFT)) {
-                if (dragging && selection && selection->valid(model)) {
-                    const bool release = event.type == SDL_MOUSEBUTTONUP;
-                    const auto cell =
-                        mouseCell(*window,
-                                  backend,
-                                  model,
-                                  release ? event.button.x : event.motion.x,
-                                  release ? event.button.y : event.motion.y,
-                                  true);
-                    if (cell) {
-                        selection->extend(model, *cell);
+                else if ((motion && dragging) ||
+                         (event.type == SDL_MOUSEBUTTONUP &&
+                          in.button == MouseInput::Button::Left)) {
+                    if (dragging && pm.pane == selectingPane &&
+                        np.v.selection && np.v.selection->valid(model)) {
+                        np.v.selection->extend(model, pm.clamped);
+                    }
+                    if (!motion) {
+                        dragging = false;
                     }
                 }
-                if (event.type == SDL_MOUSEBUTTONUP) {
-                    dragging = false;
-                }
-            }
-            else if (event.type == SDL_WINDOWEVENT &&
-                     (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
-                      event.window.event == SDL_WINDOWEVENT_RESIZED)) {
-                // Leave no partial cell at the right or bottom edge. Maximized,
-                // full-screen and tiled windows are sized by the window manager
-                // and keep the leftover as terminal background.
-                // Snapping while the window manager is still dragging the
-                // edge makes the window jump back and forth (GNOME Shell), so
-                // wait until the size has been quiet for a moment.
-                snapDue = SDL_GetTicks64() + 150;
             }
             else if (event.type == SDL_WINDOWEVENT &&
                      (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST ||
@@ -440,10 +840,8 @@ int runPtyFrontend(const char *font,
                     mouseCaptured = false;
                     heldButton = MouseEvent::Button::None;
                 }
-                const auto report =
-                    InputEncoder::focus(gained, session.modes());
-                if (!report.empty() && !session.finished()) {
-                    rejectedInput = !session.send(report);
+                if (auto *pane = workspace.focusedPane()) {
+                    send(*pane, InputEncoder::focus(gained, pane->v.modes()));
                 }
             }
             else if (event.type == SDL_MOUSEWHEEL) {
@@ -452,9 +850,22 @@ int runPtyFrontend(const char *font,
                 if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) {
                     amount = -amount;
                 }
-                if (mouseTracking() && !modifiers(SDL_GetModState()).shift) {
-                    int x = 0, y = 0;
-                    SDL_GetMouseState(&x, &y);
+                int mx = 0, my = 0;
+                SDL_GetMouseState(&mx, &my);
+                const auto pos = toDrawable(mx, my);
+                const int x = pos.first, y = pos.second;
+                WheelResult wr;
+                guarded([&] { wr = wv.wheel(x, y, amount); });
+                if (wr.consumed || !wr.pane) {
+                    continue;
+                }
+                NativePane *target = workspace.pane(*wr.pane);
+                const auto pm = wv.pointerPane(x, y);
+                if (!target || !pm) {
+                    continue;
+                }
+                NativePane &np = *target;
+                if (mouseTracking(np) && !mod.shift) {
                     const auto button =
                         event.wheel.x != 0 && event.wheel.y == 0
                             ? (amount > 0 ? MouseEvent::Button::WheelRight
@@ -470,174 +881,259 @@ int runPtyFrontend(const char *font,
                     const int steps =
                         std::clamp(int(std::ceil(std::abs(amount))), 1, 10);
                     for (int i = 0; i < steps; ++i) {
-                        sendMouse(
-                            MouseEvent::Type::Press, button, x, y, true, false);
+                        sendMouse(np, *pm, MouseEvent::Type::Press, button,
+                                  true, false);
                     }
                 }
-                else if (session.model().alternateScreen()) {
+                else if (np.v.model().alternateScreen()) {
                     const auto key = amount > 0 ? InputEncoder::Key::Up
                                                 : InputEncoder::Key::Down;
                     for (int i = 0;
                          i <
                          int(std::ceil(std::min(10.0, std::abs(amount)) * 3));
                          ++i) {
-                        send(InputEncoder::key(key, {}, session.modes()));
+                        send(np, InputEncoder::key(key, {}, np.v.modes()));
                     }
                 }
                 else {
-                    session.model().scrollBy(amount * 3);
+                    np.v.model().scrollBy(amount * 3);
                 }
             }
             else if (event.type == SDL_KEYDOWN) {
-                const auto mod = modifiers(SDL_Keymod(event.key.keysym.mod));
                 const auto key = event.key.keysym.sym;
+                const bool waiting = wv.prefixWaiting();
+                const int code = keyCodeOf(key);
+                const bool printable = key >= 32 && key < 127;
                 if (mod.control && mod.shift && key == SDLK_q) {
                     running = false;
+                    continue;
                 }
-                else if (mod.control && mod.shift && key == SDLK_v) {
+                if (waiting && printable && !mod.control && !mod.alt) {
+                    continue; // the character arrives as text input
+                }
+                // Layout keys: desktop shortcuts and the prefix machine.
+                if (code != 0 && (mod.control || mod.alt || waiting)) {
+                    KeyResult r;
+                    if (!event.key.repeat || waiting) {
+                        guarded([&] {
+                            r = wv.key({code, mod.control, mod.shift, mod.alt},
+                                       now);
+                        });
+                    }
+                    else {
+                        r.forwardKey = true;
+                    }
+                    afterLayout(r);
+                    if (r.changed || r.copy || r.paste) {
+                        skipText = true;
+                        continue;
+                    }
+                    if (!r.forwardKey && !r.forwardPrefix) {
+                        continue;
+                    }
+                }
+                NativePane *focused = workspace.focusedPane();
+                if (!focused) {
+                    continue;
+                }
+                NativePane &np = *focused;
+                auto &model = np.v.model();
+                if (mod.control && mod.shift && key == SDLK_v) {
                     if (!event.key.repeat) {
-                        std::unique_ptr<char, decltype(&SDL_free)> clipboard(
-                            SDL_GetClipboardText(), SDL_free);
-                        if (clipboard &&
-                            SDL_strlen(clipboard.get()) <= 1024 * 1024) {
-                            send(InputEncoder::paste(clipboard.get(),
-                                                     session.modes()));
-                        }
-                        else {
-                            rejectedInput = true;
-                        }
+                        pasteInto(np);
                     }
                 }
                 else if (mod.control && mod.shift && key == SDLK_c) {
-                    if (!event.key.repeat && selection &&
-                        selection->valid(model)) {
-                        const auto text = selection->text(model);
-                        if (!text) {
-                            clipboardError =
-                                "copy failed: selection exceeds 1 MiB";
-                        }
-                        else {
-                            clipboardError =
-                                SDL_SetClipboardText(text->c_str()) == 0
-                                    ? ""
-                                    : "clipboard copy failed";
-                        }
+                    if (!event.key.repeat) {
+                        copyFrom(np);
                     }
                 }
                 else if (mod.control && mod.shift && key == SDLK_a) {
                     if (!event.key.repeat) {
-                        selection = Selection::all(model);
+                        np.v.selection = Selection::all(model);
                         dragging = false;
                         clipboardError.clear();
                     }
                 }
                 else if (mod.shift &&
                          (key == SDLK_PAGEUP || key == SDLK_PAGEDOWN)) {
-                    session.model().scrollBy((key == SDLK_PAGEUP ? 1.0 : -1.0) *
-                                             session.model().rows());
+                    model.scrollBy((key == SDLK_PAGEUP ? 1.0 : -1.0) *
+                                   model.rows());
                 }
                 else if (mod.control && mod.shift && key == SDLK_HOME) {
-                    session.model().scrollToOldest();
+                    model.scrollToOldest();
                 }
                 else if (mod.control && mod.shift && key == SDLK_END) {
-                    session.model().followTail();
+                    model.followTail();
                 }
-                else if (session.modes().applicationKeypad && keypadKey(key)) {
+                else if (np.v.modes().applicationKeypad && keypadKey(key)) {
                     skipText = true;
-                    send(InputEncoder::keypad(
-                        *keypadKey(key), mod, session.modes()));
+                    send(np, InputEncoder::keypad(*keypadKey(key), mod, np.v.modes()));
                 }
                 else if (const auto encoded = special(key)) {
-                    send(InputEncoder::key(*encoded, mod, session.modes()));
+                    send(np, InputEncoder::key(*encoded, mod, np.v.modes()));
                 }
                 else if (mod.control && key >= 0 && key <= 127) {
-                    send(InputEncoder::control(char(key), mod.alt));
-                }
-            }
-        }
-        if (snapDue != 0 && SDL_GetTicks64() >= snapDue) {
-            snapDue = 0;
-            const auto flags = SDL_GetWindowFlags(window.get());
-            if (!(flags &
-                  (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP |
-                   SDL_WINDOW_MAXIMIZED | SDL_WINDOW_MINIMIZED))) {
-                frontend::WindowSize current, drawable;
-                SDL_GetWindowSize(
-                    window.get(), &current.width, &current.height);
-                SDL_GetRendererOutputSize(SDL_GetRenderer(window.get()),
-                                          &drawable.width,
-                                          &drawable.height);
-                const auto snapped =
-                    frontend::snappedWindowSize(current,
-                                                drawable,
-                                                backend.cellWidth(),
-                                                backend.cellHeight(),
-                                                SdlBackend::scrollbarStrip());
-                if (!(snapped == current)) {
-                    SDL_SetWindowSize(
-                        window.get(), snapped.width, snapped.height);
+                    send(np, InputEncoder::control(char(key), mod.alt));
                 }
             }
         }
         if (!running) {
             break;
         }
-        session.pump();
-        // Wait for both child exit and PTY EOF, so pump can drain final output.
-        if (session.finished()) {
+        const std::int64_t nowMs = std::int64_t(SDL_GetTicks64());
+        afterLayout(wv.tick(nowMs));
+        // Focus in/out reports when the focus moved to another pane.
+        const auto moved = wv.takeFocusChange();
+        const bool windowFocused =
+            (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_INPUT_FOCUS) != 0;
+        if (windowFocused) {
+            if (moved.lost != 0) {
+                if (auto *p = workspace.pane(moved.lost)) {
+                    send(*p, InputEncoder::focus(false, p->v.modes()));
+                }
+            }
+            if (moved.gained != 0 && moved.lost != 0) {
+                if (auto *p = workspace.pane(moved.gained)) {
+                    send(*p, InputEncoder::focus(true, p->v.modes()));
+                }
+            }
+        }
+        guarded([&] { wv.sync(nowMs); });
+        // Every process keeps being served, shown or not; ended ones close their pane.
+        std::vector<PaneId> ended;
+        workspace.forEachPane([&](PaneId id, NativePane &pane, bool) {
+            pane.link.pump();
+            if (pane.link.finished()) {
+                ended.push_back(id);
+            }
+        });
+        for (const PaneId id : ended) {
+            if (auto *pane = workspace.pane(id)) {
+                lastExit = pane->link.exitStatus();
+            }
+            if (workspace.closePaneAnywhere(id) == Outcome::Empty) {
+                running = false;
+            }
+        }
+        if (!running) {
             break;
         }
         const auto now = SDL_GetTicks64();
-        session.model().advanceViewport(double(now - lastFrame) / 1000);
+        const double seconds = double(now - lastFrame) / 1000;
         lastFrame = now;
-        auto frame = model.frame(backend.cellHeight());
-        frame.palette = &palette;
-        if (selection) {
-            if (selection->valid(model)) {
-                selection->apply(model, frame);
+
+        // Draw: strip, panes, gutters.
+        const FramePlan plan = wv.plan();
+        const Palette stripPalette;
+        backend.beginFrame(stripPalette.background);
+        if (plan.stripRect.h > 0) {
+            CellBuffer buffer(plan.strip.cells.size(), 1);
+            for (std::size_t i = 0; i < plan.strip.cells.size(); ++i) {
+                buffer.at(i, 0) = plan.strip.cells[i];
             }
-            else {
-                selection.reset();
-                dragging = false;
+            RenderFrame frame;
+            frame.cells = buffer.view();
+            frame.cursor.visible = false;
+            frame.palette = &stripPalette;
+            backend.render(frame,
+                           PaneArea{{plan.stripRect.x,
+                                     plan.stripRect.y,
+                                     plan.stripRect.w,
+                                     plan.stripRect.h},
+                                    {}});
+        }
+        int pointerX = 0, pointerY = 0;
+        {
+            int mx = 0, my = 0;
+            SDL_GetMouseState(&mx, &my);
+            std::tie(pointerX, pointerY) = toDrawable(mx, my);
+        }
+        const auto mouseMod = modifiers(SDL_GetModState());
+        std::optional<UrlMatch> shownLink;
+        for (const auto &pp : plan.panes) {
+            NativePane *pane = workspace.pane(pp.id);
+            if (!pane) {
+                continue;
             }
+            auto &model = pane->v.model();
+            model.advanceViewport(seconds);
+            auto frame = model.frame(backend.cellHeight());
+            frame.palette = &pane->v.palette();
+            if (pane->v.selection) {
+                if (pane->v.selection->valid(model)) {
+                    pane->v.selection->apply(model, frame);
+                }
+                else {
+                    pane->v.selection.reset();
+                    if (selectingPane == pp.id) {
+                        dragging = false;
+                    }
+                }
+            }
+            if (windowFocused && Layout::contains(pp.rect, pointerX, pointerY) &&
+                localLinkGesture(mouseMod.control,
+                                 mouseMod.shift,
+                                 mouseTracking(*pane),
+                                 mouseCaptured)) {
+                if (const auto pm = wv.pointerPane(pointerX, pointerY);
+                    pm && pm->cell) {
+                    if (const auto link = urlAt(model, *pm->cell)) {
+                        link->underline(model, frame);
+                        shownLink = link;
+                    }
+                }
+            }
+            frame.textBlinkVisible = (now / 500) % 2 == 0;
+            auto &glide = pane->v.glide();
+            glide.update(frame.cursor.column,
+                         frame.cursor.row,
+                         frame.cursor.visible,
+                         double(now) / 1000);
+            glide.apply(frame.cursor);
+            frame.cursor.focused = windowFocused && pp.focused;
+            frame.cursor.visible = frame.cursor.visible &&
+                                   (!frame.cursor.focused ||
+                                    !frame.cursor.blink ||
+                                    (now / 500) % 2 == 0);
+            backend.render(frame,
+                           PaneArea{{pp.rect.x, pp.rect.y, pp.rect.w, pp.rect.h},
+                                    {pp.scrollbar.x,
+                                     pp.scrollbar.y,
+                                     pp.scrollbar.w,
+                                     pp.scrollbar.h}});
         }
-        const auto link =
-            hoveredUrl(*window, backend, model, mouseTracking(), mouseCaptured);
-        if (link) {
-            link->underline(model, frame);
+        for (const auto &d : plan.dividers) {
+            backend.drawRect({d.rect.x, d.rect.y, d.rect.w, d.rect.h},
+                             Rgb8{46, 51, 60});
         }
-        frame.textBlinkVisible = (now / 500) % 2 == 0;
-        // Before blink masking: the glide follows the true cell, not the blink.
-        cursorGlide.update(frame.cursor.column,
-                           frame.cursor.row,
-                           frame.cursor.visible,
-                           double(now) / 1000);
-        cursorGlide.apply(frame.cursor);
-        frame.cursor.focused =
-            (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_INPUT_FOCUS) != 0;
-        // An inactive window shows a steady hollow cursor.
-        frame.cursor.visible = frame.cursor.visible &&
-                               (!frame.cursor.focused || !frame.cursor.blink ||
-                                (now / 500) % 2 == 0);
-        std::string currentTitle = title;
+        std::string title = "matterm";
+        if (const auto *focused = workspace.focusedPane();
+            focused && !focused->v.title().empty()) {
+            title += " | " + focused->v.title();
+        }
         if (rejectedInput) {
-            currentTitle += " | input queue full/closed";
+            title += " | input queue full/closed";
         }
         if (!clipboardError.empty()) {
-            currentTitle += " | " + clipboardError;
+            title += " | " + clipboardError;
         }
         if (!linkError.empty()) {
-            currentTitle += " | " + linkError;
+            title += " | " + linkError;
         }
-        if (link) {
-            currentTitle += " | " + link->text;
+        if (shownLink) {
+            title += " | " + shownLink->text;
         }
-        SDL_SetWindowTitle(window.get(), currentTitle.c_str());
-        backend.render(frame);
+        SDL_SetWindowTitle(window.get(), title.c_str());
         backend.present();
     }
     SDL_StopTextInput();
-    return session.exitStatus() && session.exitStatus()->signal == 0
-               ? std::max(0, session.exitStatus()->code)
-               : 0;
+    if (tabsSmoke) {
+        if (!scriptDone) {
+            throw std::runtime_error("PTY tabs smoke: the window closed early");
+        }
+        std::cout << "PTY tabs smoke test passed\n";
+        return 0;
+    }
+    return lastExit && lastExit->signal == 0 ? std::max(0, lastExit->code) : 0;
 }

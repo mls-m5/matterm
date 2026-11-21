@@ -45,11 +45,17 @@ void printUsage(std::ostream &out, const char *program) {
            "shell.\n"
            "  --smoke-test         Run the hidden VT rendering self-test.\n"
            "  --pty-smoke-test     Run the hidden PTY self-test; requires -- "
-           "COMMAND.\n\n"
+           "COMMAND.\n"
+           "  --pty-tabs-smoke-test Run the hidden tabs and panes self-test; "
+           "requires -- COMMAND.\n\n"
            "History navigation is already smooth; there is no --smooth-scroll "
            "flag.\n"
            "Native: wheel / Shift+PageUp/PageDown scroll history; Ctrl+Shift+Q "
            "quits.\n"
+           "Tabs and panes: Ctrl+Shift+T/W new/close tab, Ctrl+PgUp/PgDn or "
+           "Alt+1..9 switch, Ctrl+Shift+E/O split, Alt+Shift+arrows focus, "
+           "Alt+Shift+W close pane, Alt+Shift+E even out; drag a divider "
+           "(Shift snaps to cells).\n"
            "Live program output still scrolls by whole rows, not an "
            "animation.\n\n"
         << "Example: " << program << " --smooth-cursor -- /bin/bash -i\n";
@@ -291,6 +297,7 @@ int main(int argc, char **argv) {
     const char *recordPath = nullptr;
     bool smokeTest = false;
     bool ptySmokeTest = false;
+    bool ptyTabsSmokeTest = false;
     bool smoothCursor = false;
     bool showcase = false;
     std::string term = "xterm-256color";
@@ -337,6 +344,9 @@ int main(int argc, char **argv) {
         else if (arg == "--pty-smoke-test") {
             ptySmokeTest = true;
         }
+        else if (arg == "--pty-tabs-smoke-test") {
+            ptyTabsSmokeTest = true;
+        }
         else if (arg == "--term" && i + 1 < argc) {
             term = argv[++i];
         }
@@ -367,10 +377,12 @@ int main(int argc, char **argv) {
     }
 #endif
     if (!valid || (inputPath && smokeTest) ||
-        (recordPath && (inputPath || smokeTest || showcase || ptySmokeTest)) ||
-        ((!command.empty() || ptySmokeTest) &&
+        (recordPath && (inputPath || smokeTest || showcase || ptySmokeTest ||
+                        ptyTabsSmokeTest)) ||
+        ((!command.empty() || ptySmokeTest || ptyTabsSmokeTest) &&
          (inputPath || smokeTest || showcase)) ||
-        (ptySmokeTest && command.empty())) {
+        (ptySmokeTest && ptyTabsSmokeTest) ||
+        ((ptySmokeTest || ptyTabsSmokeTest) && command.empty())) {
         printUsage(std::cerr, argv[0]);
         return 1;
     }
@@ -388,7 +400,8 @@ int main(int argc, char **argv) {
                                   term,
                                   ptySmokeTest,
                                   recordPath,
-                                  smoothCursor);
+                                  smoothCursor,
+                                  ptyTabsSmokeTest);
         }
         catch (const std::exception &error) {
             std::cerr << error.what() << '\n';

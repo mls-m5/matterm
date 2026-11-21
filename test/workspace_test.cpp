@@ -143,6 +143,35 @@ TEST_CASE("Closing panes and tabs picks sensible neighbours and reports when emp
     EXPECT_EQ(Fake::alive, 0);
 }
 
+TEST_CASE("A pane in a hidden tab or the parked list can be closed where it is") {
+    Maker m;
+    Space w(m.factory());
+    w.setLayoutSpec(bigSpec());
+    w.apply(Command::NewTab);
+    w.apply(Command::SplitSideBySide);
+    const PaneId a = w.tab(0)->tree.ids()[0];
+    const PaneId b = w.tab(0)->tree.ids()[1];
+    w.apply(Command::NewTab); // tab 1 active, tab 0 hidden
+    EXPECT(w.noteActivity(a));
+    EXPECT(w.closePaneAnywhere(a) == Outcome::Done);
+    EXPECT(!w.paneActivity(a));
+    EXPECT_EQ(w.tab(0)->tree.size(), std::size_t(1));
+    EXPECT_EQ(w.activeIndex(), std::size_t(1));
+    EXPECT(w.closePaneAnywhere(b) == Outcome::Done); // last pane: the tab goes
+    EXPECT_EQ(w.tabCount(), std::size_t(1));
+    EXPECT_EQ(w.activeIndex(), std::size_t(0));
+    EXPECT_EQ(Fake::alive, 1);
+    const PaneId c = w.focusedPaneId();
+    w.apply(Command::NewTab);
+    const PaneId d = w.focusedPaneId();
+    w.park(c);
+    EXPECT(w.closePaneAnywhere(c) == Outcome::Done);
+    EXPECT_EQ(w.parkedCount(), std::size_t(0));
+    EXPECT(w.closePaneAnywhere(c) == Outcome::Ignored);
+    EXPECT(w.closePaneAnywhere(d) == Outcome::Empty);
+    EXPECT_EQ(Fake::alive, 0);
+}
+
 TEST_CASE("Closing a tab before the active one keeps the active tab") {
     Maker m;
     Space w(m.factory());

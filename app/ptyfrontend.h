@@ -10,4 +10,5 @@ int runPtyFrontend(const char *font,
                    const std::string &term,
                    bool smokeTest,
                    const char *recordPath,
-                   bool smoothCursor = false);
+                   bool smoothCursor = false,
+                   bool tabsSmoke = false);

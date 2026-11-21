@@ -409,6 +409,21 @@ public:
         return c;
     }
 
+    // A key press is pending after the prefix key (the next printable key is a command).
+    bool prefixWaiting() const { return prefix_.waiting(); }
+
+    // The pane under a point and where in it, without changing anything (hover, wheel).
+    std::optional<PaneMouse> pointerPane(int x, int y) const {
+        refreshSpec();
+        const FramePlan p = plan();
+        const PanePlan *pp = findPane(p, workspace_.layoutActive().paneAt(x, y));
+        if (pp == nullptr) return std::nullopt;
+        MouseInput in;
+        in.x = x;
+        in.y = y;
+        return paneMouse(*pp, in, false);
+    }
+
     // True while a divider or scrollbar drag owns the mouse.
     bool dragging() const { return drag_ == Drag::Divider || drag_ == Drag::Scrollbar; }
 

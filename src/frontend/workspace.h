@@ -208,6 +208,17 @@ public:
         if (t.tree.empty()) return removeTab(active_);
         return Outcome::Done;
     }
+    // Close a pane wherever it is: any tab (the tab closes with its last pane) or the
+    // parked list. For panes whose process ended in a hidden tab.
+    Outcome closePaneAnywhere(PaneId id) {
+        const int i = tabOfPane(id);
+        if (i < 0) return closeParked(id);
+        const std::size_t index = static_cast<std::size_t>(i);
+        std::unique_ptr<Pane> gone = tabs_[index].tree.close(id); // destroyed at the end of the scope
+        tabs_[index].activity.erase(id);
+        if (tabs_[index].tree.empty()) return removeTab(index);
+        return Outcome::Done;
+    }
     Outcome closeTabAt(std::size_t index) {
         if (index >= tabs_.size()) return Outcome::Ignored;
         return removeTab(index);
