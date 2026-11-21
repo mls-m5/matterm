@@ -484,4 +484,81 @@ TEST_CASE(
     EXPECT_EQ(fixture.pixel(1, 2 * h - 2 - h / 2), Uint32(0x1e1e1e));
 }
 
+TEST_CASE("A frame of several panes: clear once, leftovers like the neighbour "
+          "cell, dividers, scrollbars in the gutter") {
+    Fixture fixture;
+    const int w = fixture.backend->cellWidth();
+    const int h = fixture.backend->cellHeight();
+    const Uint32 gap = 0x010203;
+    fixture.backend->beginFrame({1, 2, 3});
+    EXPECT_EQ(fixture.pixel(0, 0), gap);
+    EXPECT_EQ(fixture.pixel(319, 159), gap);
+    // Pane A: 2x1 cells in a rectangle with 5 pixels to the right and 7 below.
+    CellBuffer a(2, 1);
+    a.at(0, 0) = FChar{U' ', {}, {200, 30, 40}};
+    a.at(1, 0) = FChar{U' ', {}, {20, 180, 50}};
+    fixture.backend->render(RenderFrame{a.view(), {}},
+                            PaneArea{{0, 0, 2 * w + 5, h + 7}, {}});
+    EXPECT_EQ(fixture.pixel(1, 1), Uint32(0xc81e28));
+    EXPECT_EQ(fixture.pixel(w + 1, 1), Uint32(0x14b432));
+    EXPECT_EQ(fixture.pixel(2 * w + 2, 1), Uint32(0x14b432)); // Right.
+    EXPECT_EQ(fixture.pixel(1, h + 3), Uint32(0xc81e28));     // Below.
+    EXPECT_EQ(fixture.pixel(w + 1, h + 3), Uint32(0x14b432));
+    EXPECT_EQ(fixture.pixel(2 * w + 2, h + 3), Uint32(0x14b432)); // Corner.
+    EXPECT_EQ(fixture.pixel(2 * w + 6, 1), gap); // Not beyond the pane.
+    EXPECT_EQ(fixture.pixel(1, h + 8), gap);
+    // Pane B elsewhere does not disturb A (no second clear).
+    CellBuffer b(2, 1);
+    b.clear(FChar{U' ', {}, {10, 20, 210}});
+    fixture.backend->render(RenderFrame{b.view(), {}},
+                            PaneArea{{200, 0, 2 * w, h}, {}});
+    EXPECT_EQ(fixture.pixel(201, 1), Uint32(0x0a14d2));
+    EXPECT_EQ(fixture.pixel(1, 1), Uint32(0xc81e28));
+    // A divider is a filled strip over the gap.
+    fixture.backend->drawRect({100, 0, 10, 160}, {9, 9, 9});
+    EXPECT_EQ(fixture.pixel(105, 5), Uint32(0x090909));
+    EXPECT_EQ(fixture.pixel(99, 5), gap);
+    EXPECT_EQ(fixture.pixel(110, 5), gap);
+    // A pane's scrollbar sits in the gutter and takes no columns from the text.
+    CellBuffer c(2, 1);
+    c.clear(FChar{U' ', {}, {90, 80, 70}});
+    RenderFrame withBar{c.view(), {}};
+    withBar.scrollbar = {true, 0.0f, 1.0f};
+    fixture.backend->render(withBar,
+                            PaneArea{{0, 100, 2 * w, h}, {2 * w, 100, 4, h}});
+    EXPECT_EQ(fixture.pixel(2 * w - 1, 101), Uint32(0x5a5046)); // Text intact.
+    EXPECT_EQ(fixture.pixel(2 * w, 101), Uint32(0x191d24));     // Track.
+    EXPECT_EQ(fixture.pixel(2 * w + 1, 105), Uint32(0x6e7a8e)); // Thumb.
+    EXPECT_EQ(fixture.pixel(2 * w + 4, 101), gap);
+    // Without a gutter strip the legacy strip inside the pane is used.
+    fixture.backend->render(withBar, PaneArea{{150, 100, 2 * w, h}, {}});
+    EXPECT_EQ(fixture.pixel(150 + 2 * w - 6, 105), Uint32(0x6e7a8e));
+}
+
+TEST_CASE("The atlas generation grows at each present, and a bad pane area "
+          "throws") {
+    Fixture fixture;
+    const auto first = fixture.backend->atlasGeneration();
+    fixture.backend->present();
+    fixture.backend->present();
+    EXPECT_EQ(fixture.backend->atlasGeneration(), first + 2);
+    fixture.backend->setPixelSize(20);
+    EXPECT_EQ(fixture.backend->atlasGeneration(), first + 2); // Kept counting.
+    CellBuffer cells(1, 1);
+    for (const auto &area : {PaneArea{{0, 0, 0, 10}, {}},
+                             PaneArea{{-1, 0, 10, 10}, {}},
+                             PaneArea{{0, 0, 10, 10}, {-2, 0, 4, 10}}}) {
+        bool threw = false;
+        try {
+            fixture.backend->render(RenderFrame{cells.view(), {}}, area);
+        }
+        catch (const std::invalid_argument &) {
+            threw = true;
+        }
+        EXPECT(threw);
+    }
+    // Still usable, with the whole drawable.
+    fixture.backend->render(RenderFrame{cells.view(), {}});
+}
+
 TEST_SUIT_END

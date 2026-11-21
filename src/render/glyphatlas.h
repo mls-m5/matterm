@@ -3,6 +3,7 @@
 #include "core/cellattributes.h"
 #include "glyph.h"
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -41,6 +42,13 @@ public:
     // Borrowed texture; callers must not destroy it or modify its contents.
     // Use alpha blending and vertex colors when drawing atlas geometry.
     SDL_Texture *texture() const noexcept;
+
+    // A counter that grows once per presented frame (SdlBackend::present). No
+    // eviction yet: it exists so that later a slot is only reused when it was
+    // not used in the current generation (docs/TABS_PLAN.md section 4).
+    std::uint64_t generation() const noexcept;
+    void nextGeneration() noexcept;
+    void setGeneration(std::uint64_t generation) noexcept; // Keep counting.
 
     // Font-wide layout metrics. Glyph bearingY is relative to this baseline.
     int ascent() const noexcept;

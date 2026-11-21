@@ -34,7 +34,7 @@ Pure C++17, header-only like the rest of `src/frontend/`, native tests only.
   (property style with a seed), focus by direction on an L-shaped layout, ownership
   (a pane moved to the parked list is neither lost nor destroyed twice).
 
-## B. Rendering (agent3) -- `src/render/`
+## B. Rendering (agent3) -- `src/render/` -- DONE (see the API note below)
 
 - A frame is `beginFrame` (clear once), any number of `render(frame, viewport)`, then
   dividers, then `present()`. Today `render()` clears everything; keep the old single
@@ -50,7 +50,7 @@ Pure C++17, header-only like the rest of `src/frontend/`, native tests only.
   `TABS_PLAN.md` section 4 says what comes later).
 - Tests with the dummy driver where possible (`sdlbackend_test`).
 
-## C. Tab strip in cells (agent3 after B, or agent2 after A) -- `src/frontend/tabstrip.h`
+## C. Tab strip in cells (agent3 after B, or agent2 after A) -- `src/frontend/tabstrip.h` -- DONE
 
 - `buildTabStrip(const std::vector<TabInfo> &, int columns)` returns one row (later two)
   of cells (use the cell types of `src/core`) plus hit regions: tab i, close button of
@@ -61,6 +61,22 @@ Pure C++17, header-only like the rest of `src/frontend/`, native tests only.
   (`src/chat/chatview`), colors from the palette, the active tab and the activity mark
   clearly visible.
 - Tests: widths from 1 to 200 columns, wide characters, 0 and 1 and 50 tabs.
+
+### API as built
+
+- B: `SdlBackend::beginFrame(Rgb8)`, `render(frame, PaneArea{rect, scrollbar})`,
+  `drawRect(PixelBox, Rgb8)` for dividers/chrome, `atlasGeneration()` (grows at each
+  `present()`, kept across `setPixelSize`). `PixelBox`/`PaneArea` are in
+  `sdlbackend.h` (render does not include `tabtypes.h`; convert `PixelRect` at the
+  call site). The old `render(frame)` is unchanged. Inside `render(frame, area)` the
+  pane's leftover pixels (right of and below the last whole cell) are painted like
+  the edge cell; a non-empty `scrollbar` rectangle (the half of the gutter) gets the
+  track and thumb and takes no columns. `frontend::windowSignature(panes, dividers,
+  w, h)` (in `framesignature.h`) hashes every pane with its place, every divider
+  and the strip (pass the strip as a pane entry).
+- C: `buildTabStrip(tabs, columns, palette, firstVisible)` returns a `TabStrip`
+  (cells, disjoint `StripRegion`s, `hit(column)`, mode, firstVisible/visibleCount).
+  Numbers are 1-based. Hit kinds: Tab, Close, NewTab, ScrollLeft, ScrollRight.
 
 ## Later (integrator): native app, then the browser
 

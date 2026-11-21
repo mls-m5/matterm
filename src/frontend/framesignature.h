@@ -2,9 +2,12 @@
 
 #include "palette.h"
 #include "renderframe.h"
+#include "tabtypes.h"
 
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
+#include <vector>
 
 namespace frontend {
 // 64-bit FNV-1a over everything that influences the pixels of a frame: cells,
@@ -33,9 +36,10 @@ private:
     std::uint64_t hash_ = 1469598103934665603ull;
 };
 
-inline std::uint64_t frameSignature(const RenderFrame &frame,
-                                    const Palette &palette) {
-    FrameSignature s;
+// Adds everything that influences the pixels of one frame.
+inline void addFrame(FrameSignature &s,
+                     const RenderFrame &frame,
+                     const Palette &palette) {
     for (std::size_t y = 0; y < frame.cells.rows(); ++y) {
         const auto row = frame.cells.row(y);
         s.bytes(row.data(), frame.cells.columns() * sizeof(FChar));
@@ -64,6 +68,60 @@ inline std::uint64_t frameSignature(const RenderFrame &frame,
     s.bytes(palette.colors.data(), sizeof palette.colors);
     s.add(palette.foreground);
     s.add(palette.background);
+}
+
+inline void addRect(FrameSignature &s, const PixelRect &r) {
+    s.add(r.x);
+    s.add(r.y);
+    s.add(r.w);
+    s.add(r.h);
+}
+
+inline std::uint64_t frameSignature(const RenderFrame &frame,
+                                    const Palette &palette) {
+    FrameSignature s;
+    addFrame(s, frame, palette);
+    return s.value();
+}
+
+// One pane (or the tab strip) of a window frame, as drawn.
+struct PaneSignatureInput {
+    const RenderFrame *frame = nullptr;
+    const Palette *palette = nullptr;
+    PixelRect rect;      // where it is drawn
+    PixelRect scrollbar; // the gutter half of its scrollbar (empty: inside)
+};
+
+// The signature of a whole window: every pane with its place, every divider
+// and the tab strip (pass it as a pane entry). Equal signatures for consecutive
+// frames mean nothing changed, so an idle window costs nothing. Order matters.
+inline std::uint64_t windowSignature(
+    const std::vector<PaneSignatureInput> &panes,
+    const std::vector<DividerBox> &dividers,
+    int windowWidth = 0,
+    int windowHeight = 0) {
+    FrameSignature s;
+    s.add(windowWidth);
+    s.add(windowHeight);
+    s.add(panes.size());
+    for (const auto &p : panes) {
+        addRect(s, p.rect);
+        addRect(s, p.scrollbar);
+        if (p.frame && p.palette) {
+            s.add(true);
+            addFrame(s, *p.frame, *p.palette);
+        }
+        else {
+            s.add(false);
+        }
+    }
+    s.add(dividers.size());
+    for (const auto &d : dividers) {
+        addRect(s, d.rect);
+        s.add(d.direction);
+        s.add(d.before);
+        s.add(d.after);
+    }
     return s.value();
 }
 } // namespace frontend

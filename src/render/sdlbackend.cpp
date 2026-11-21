@@ -94,6 +94,10 @@ struct SdlBackend::Impl {
     Palette defaultPalette;
     bool reserveStrip = false;
     std::optional<SDL_Rect> viewport;
+    // Set while drawing a pane of a multi-pane frame: the scrollbar goes to
+    // this rectangle (window pixels) and the leftover pixels are painted.
+    bool paneMode = false;
+    std::optional<SDL_Rect> externalTrack;
 
     // The size drawing and the cell counts work on: the viewport or the whole
     // drawable.
@@ -139,8 +143,10 @@ void SdlBackend::render(const RenderFrame &frame) {
                                      !std::isfinite(frame.scrollbar.size)))) {
         throw std::invalid_argument("Invalid frame viewport");
     }
-    const int textWidth =
-        frame.scrollbar.visible ? std::max(0, width - scrollbarWidth) : width;
+    const bool external = s.externalTrack.has_value();
+    const int textWidth = frame.scrollbar.visible && !external
+                              ? std::max(0, width - scrollbarWidth)
+                              : width;
     const int textHeight = frame.textHeightPixels < 0
                                ? height
                                : std::min(height, frame.textHeightPixels);
@@ -155,6 +161,8 @@ void SdlBackend::render(const RenderFrame &frame) {
                   std::size_t(std::ceil((double(textHeight) -
                                          double(frame.verticalOffsetPixels)) /
                                         s.cellHeight)));
+    // The edge cells' backgrounds, to paint the leftover pixels like them.
+    std::vector<Rgb8> rowEdge(rows), columnEdge(columns);
     s.backgrounds.clear();
     s.glyphs.clear();
     s.decorations.clear();
@@ -205,7 +213,20 @@ void SdlBackend::render(const RenderFrame &frame) {
                                 colors.background.g,
                                 colors.background.b,
                                 255});
-            if (s.reserveStrip && !frame.scrollbar.visible &&
+            if (s.paneMode) {
+                const bool selected =
+                    frame.selectionBegin < frame.selectionEnd &&
+                    y * frame.cells.columns() + x >= frame.selectionBegin &&
+                    y * frame.cells.columns() + x < frame.selectionEnd;
+                const auto edge = selected ? Rgb8{49, 86, 145} : baseBackground;
+                if (x + 1 == columns) {
+                    rowEdge[y] = edge;
+                }
+                if (y + 1 == rows) {
+                    columnEdge[x] = edge;
+                }
+            }
+            if (s.reserveStrip && !external && !frame.scrollbar.visible &&
                 x + 1 == columns) {
                 // The reserved scrollbar strip (and any remainder) looks like
                 // the cell beside it while there is no scrollbar. A cursor
@@ -263,6 +284,40 @@ void SdlBackend::render(const RenderFrame &frame) {
                 float(glyph.source.y) / s.textureHeight,
                 float(glyph.source.x + glyph.source.w) / s.textureWidth,
                 float(glyph.source.y + glyph.source.h) / s.textureHeight);
+        }
+    }
+    if (s.paneMode && columns > 0 && rows > 0) {
+        // Pixels right of and below the last whole cell look like the cell
+        // beside them, as the reserved scrollbar strip does.
+        const float cellsRight = float(columns) * s.cellWidth;
+        const float cellsBottom =
+            float(rows) * s.cellHeight + frame.verticalOffsetPixels;
+        auto color = [](Rgb8 c) { return SDL_Color{c.r, c.g, c.b, 255}; };
+        if (float(textWidth) > cellsRight) {
+            for (std::size_t y = 0; y < rows; ++y) {
+                s.backgrounds.quad(cellsRight,
+                                   float(y) * s.cellHeight +
+                                       frame.verticalOffsetPixels,
+                                   float(textWidth) - cellsRight,
+                                   float(s.cellHeight),
+                                   color(rowEdge[y]));
+            }
+        }
+        if (float(textHeight) > cellsBottom) {
+            for (std::size_t x = 0; x < columns; ++x) {
+                s.backgrounds.quad(float(x) * s.cellWidth,
+                                   cellsBottom,
+                                   float(s.cellWidth),
+                                   float(textHeight) - cellsBottom,
+                                   color(columnEdge[x]));
+            }
+            if (float(textWidth) > cellsRight) {
+                s.backgrounds.quad(cellsRight,
+                                   cellsBottom,
+                                   float(textWidth) - cellsRight,
+                                   float(textHeight) - cellsBottom,
+                                   color(columnEdge[columns - 1]));
+            }
         }
     }
     check(SDL_SetRenderDrawColor(s.renderer.get(),
@@ -348,23 +403,79 @@ void SdlBackend::render(const RenderFrame &frame) {
     }
     check(SDL_RenderSetClipRect(s.renderer.get(), nullptr));
     if (frame.scrollbar.visible && width > 0 && height > 0) {
-        const int stripWidth = width - textWidth;
-        const SDL_Rect track{textWidth, 0, stripWidth, height};
+        SDL_Rect track{textWidth, 0, width - textWidth, height};
+        if (external) {
+            // Outside the pane's viewport, in the gutter (window coordinates).
+            check(SDL_RenderSetViewport(s.renderer.get(), nullptr));
+            track = *s.externalTrack;
+        }
+        const int stripWidth = track.w;
+        const int trackHeight = track.h;
         check(SDL_SetRenderDrawColor(s.renderer.get(), 25, 29, 36, 255));
         check(SDL_RenderFillRect(s.renderer.get(), &track));
         const float thumbHeight = std::clamp(
-            float(height) * std::clamp(frame.scrollbar.size, 0.0f, 1.0f),
-            float(std::min(16, height)),
-            float(height));
-        const float thumbY = std::clamp(frame.scrollbar.position, 0.0f, 1.0f) *
-                             (height - thumbHeight);
-        const SDL_FRect thumb{float(textWidth + 2),
-                              thumbY,
-                              float(std::max(0, stripWidth - 4)),
-                              thumbHeight};
+            float(trackHeight) * std::clamp(frame.scrollbar.size, 0.0f, 1.0f),
+            float(std::min(16, trackHeight)),
+            float(trackHeight));
+        const float thumbY =
+            float(track.y) + std::clamp(frame.scrollbar.position, 0.0f, 1.0f) *
+                                 (float(trackHeight) - thumbHeight);
+        const SDL_FRect thumb{
+            float(track.x + (external ? 1 : 2)),
+            thumbY,
+            float(std::max(0, stripWidth - (external ? 2 : 4))),
+            thumbHeight};
         check(SDL_SetRenderDrawColor(s.renderer.get(), 110, 122, 142, 255));
         check(SDL_RenderFillRectF(s.renderer.get(), &thumb));
     }
+}
+
+void SdlBackend::beginFrame(Rgb8 background) {
+    resetViewport();
+    clear(background);
+}
+
+void SdlBackend::render(const RenderFrame &frame, const PaneArea &area) {
+    auto &s = *impl_;
+    const auto &r = area.rect;
+    if (r.empty() || r.x < 0 || r.y < 0) {
+        throw std::invalid_argument("Invalid pane area");
+    }
+    const auto &sb = area.scrollbar;
+    if (!sb.empty() && (sb.x < 0 || sb.y < 0)) {
+        throw std::invalid_argument("Invalid pane scrollbar area");
+    }
+    struct Restore {
+        Impl &s;
+        std::optional<SDL_Rect> viewport;
+        ~Restore() {
+            s.viewport = viewport;
+            s.paneMode = false;
+            s.externalTrack.reset();
+        }
+    } restore{s, s.viewport};
+    s.viewport = SDL_Rect{r.x, r.y, r.w, r.h};
+    s.paneMode = true;
+    if (!sb.empty()) {
+        s.externalTrack = SDL_Rect{sb.x, sb.y, sb.w, sb.h};
+    }
+    render(frame);
+}
+
+void SdlBackend::drawRect(const PixelBox &box, Rgb8 color) {
+    auto &s = *impl_;
+    if (box.empty()) {
+        return;
+    }
+    check(SDL_RenderSetViewport(s.renderer.get(), nullptr));
+    check(SDL_SetRenderDrawColor(
+        s.renderer.get(), color.r, color.g, color.b, 255));
+    const SDL_Rect rect{box.x, box.y, box.w, box.h};
+    check(SDL_RenderFillRect(s.renderer.get(), &rect));
+}
+
+std::uint64_t SdlBackend::atlasGeneration() const noexcept {
+    return impl_->atlas->generation();
 }
 
 void SdlBackend::setViewport(int x, int y, int width, int height) {
@@ -386,6 +497,7 @@ void SdlBackend::clear(Rgb8 color) {
 
 void SdlBackend::present() {
     SDL_RenderPresent(impl_->renderer.get());
+    impl_->atlas->nextGeneration();
 }
 void SdlBackend::setPixelSize(int pixelSize) {
     auto &s = *impl_;
@@ -398,6 +510,7 @@ void SdlBackend::setPixelSize(int pixelSize) {
     int textureWidth = 0, textureHeight = 0;
     check(SDL_QueryTexture(
         atlas->texture(), nullptr, nullptr, &textureWidth, &textureHeight));
+    atlas->setGeneration(s.atlas->generation());
     s.atlas = std::move(atlas);
     s.cellWidth = width;
     s.cellHeight = height;

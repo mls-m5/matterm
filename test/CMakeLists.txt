@@ -71,6 +71,16 @@ if(BUILD_TESTING)
     target_link_libraries(textselection_test PRIVATE matterm::terminal)
     add_test(NAME text_selection COMMAND textselection_test)
 
+    add_executable(framesignature_test framesignature_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(framesignature_test PRIVATE ../src/frontend)
+    target_link_libraries(framesignature_test PRIVATE cellbuffer)
+    add_test(NAME frame_signature COMMAND framesignature_test)
+
+    add_executable(tabstrip_test tabstrip_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(tabstrip_test PRIVATE ../src/frontend)
+    target_link_libraries(tabstrip_test PRIVATE palette)
+    add_test(NAME tab_strip COMMAND tabstrip_test)
+
     add_executable(cursorglide_test cursorglide_test.cpp mls-unit-test/test_main.cpp)
     target_link_libraries(cursorglide_test PRIVATE cellbuffer)
     add_test(NAME cursor_glide COMMAND cursorglide_test)

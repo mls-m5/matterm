@@ -8,6 +8,24 @@
 
 struct SDL_Window;
 
+// A rectangle in drawable pixels (this header knows nothing of src/frontend).
+struct PixelBox {
+    int x = 0, y = 0, w = 0, h = 0;
+    bool empty() const noexcept {
+        return w <= 0 || h <= 0;
+    }
+};
+
+// Where one pane of a window is drawn. `rect` is the pane (whole cells plus the
+// leftover pixels, which are painted like the cell beside them). With a
+// non-empty `scrollbar` (the half of the gutter next to the pane) the pane's
+// scrollbar is drawn there and takes no columns from the program; with an empty
+// one the strip inside `rect` is used as for a single terminal.
+struct PaneArea {
+    PixelBox rect;
+    PixelBox scrollbar;
+};
+
 // Owns the SDL renderer and atlas. The borrowed window must outlive this
 // object. Construct, use, and destroy on the GUI thread, with SDL/SDL_ttf
 // initialized.
@@ -25,6 +43,19 @@ public:
 
     void render(const RenderFrame &frame) override;
     void present() override;
+
+    // A frame of several panes: beginFrame (clears the whole drawable once, no
+    // viewport), then render(frame, area) for each pane, drawRect for the
+    // dividers and any other chrome, then present(). render(frame) alone still
+    // clears and draws one terminal as before. Throws std::invalid_argument for
+    // an empty or negative area.
+    void beginFrame(Rgb8 background);
+    void render(const RenderFrame &frame, const PaneArea &area);
+    // A filled rectangle in drawable pixels (a divider gutter), ignoring any
+    // viewport.
+    void drawRect(const PixelBox &box, Rgb8 color);
+    // Grows by one at every present(); see GlyphAtlas::generation().
+    std::uint64_t atlasGeneration() const noexcept;
 
     // Switch to another size of the same font without recreating the renderer.
     // Throws and keeps the old font if the new atlas cannot be built.

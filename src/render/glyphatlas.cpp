@@ -94,6 +94,7 @@ struct GlyphAtlas::Impl {
     int x = 1;
     int y = 1;
     int shelfHeight = 0;
+    std::uint64_t generation = 0;
 };
 
 GlyphAtlas::GlyphAtlas(SDL_Renderer &renderer,
@@ -140,6 +141,17 @@ GlyphAtlas::GlyphAtlas(SDL_Renderer &renderer,
 }
 
 GlyphAtlas::~GlyphAtlas() = default;
+
+std::uint64_t GlyphAtlas::generation() const noexcept {
+    return impl_->generation;
+}
+void GlyphAtlas::nextGeneration() noexcept {
+    ++impl_->generation;
+}
+
+void GlyphAtlas::setGeneration(std::uint64_t generation) noexcept {
+    impl_->generation = generation;
+}
 
 Glyph GlyphAtlas::getOrInsert(char32_t codePoint, CellAttribute attributes) {
     if (codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
