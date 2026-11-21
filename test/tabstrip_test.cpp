@@ -30,6 +30,37 @@ std::string text(const TabStrip &strip) {
     return out;
 }
 
+std::string utf8(char32_t cp) {
+    std::string out;
+    if (cp < 0x80) {
+        out += char(cp);
+    }
+    else if (cp < 0x800) {
+        out += char(0xc0 | (cp >> 6));
+        out += char(0x80 | (cp & 0x3f));
+    }
+    else if (cp < 0x10000) {
+        out += char(0xe0 | (cp >> 12));
+        out += char(0x80 | ((cp >> 6) & 0x3f));
+        out += char(0x80 | (cp & 0x3f));
+    }
+    else {
+        out += char(0xf0 | (cp >> 18));
+        out += char(0x80 | ((cp >> 12) & 0x3f));
+        out += char(0x80 | ((cp >> 6) & 0x3f));
+        out += char(0x80 | (cp & 0x3f));
+    }
+    return out;
+}
+// Characters that draw nothing or change how neighbours are ordered or joined.
+bool invisible(char32_t cp) {
+    return cp < 0x20 || (cp >= 0x7f && cp < 0xa0) || cp == 0x00ad || cp == 0x061c ||
+           cp == 0x180e || (cp >= 0x200b && cp <= 0x200f) ||
+           (cp >= 0x2028 && cp <= 0x202e) || (cp >= 0x2060 && cp <= 0x206f) ||
+           (cp >= 0xfe00 && cp <= 0xfe0f) || cp == 0xfeff ||
+           (cp >= 0xfff9 && cp <= 0xfffb) || (cp >= 0xe0000 && cp <= 0xe007f);
+}
+
 // Whatever the input, these always hold.
 bool sound(const TabStrip &strip, int columns, std::size_t tabs) {
     if (strip.cells.size() != std::size_t(std::max(0, columns))) {
@@ -182,6 +213,43 @@ TEST_CASE("Titles are cut by display width, never in the middle of a "
     EXPECT(sound(buildTabStrip(tabs, 30), 30, 1));
     tabs[0].title = "";
     EXPECT(text(buildTabStrip(tabs, 30)).find("Tab 1") != std::string::npos);
+}
+
+
+TEST_CASE("A title set by a program cannot put invisible or reordering characters "
+          "into the strip") {
+    const char32_t hostile[] = {0x00ad, 0x061c, 0x180e, 0x200b, 0x200d, 0x200e, 0x200f,
+                                0x2028, 0x2029, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e,
+                                0x2060, 0x2066, 0x2067, 0x2068, 0x2069, 0x206a, 0xfe0f,
+                                0xfeff, 0xfff9, 0xfffa, 0xfffb, 0xe0001, 0xe0041, 0xe007f,
+                                0x1b,   0x07,   0x00,   0x7f,   0x85,   0x9b};
+    for (const char32_t cp : hostile) {
+        auto tabs = makeTabs(1, 0, "");
+        tabs[0].title = "ab" + utf8(cp) + "cd" + utf8(cp) + utf8(cp) + "ef";
+        const auto strip = buildTabStrip(tabs, 40);
+        EXPECT(sound(strip, 40, 1));
+        for (const auto &c : strip.cells) {
+            EXPECT(!invisible(c.codePoint));
+        }
+        // The visible letters stay together: the title reads "abcdef".
+        EXPECT(text(strip).find("abcdef") != std::string::npos);
+    }
+    // A very long hostile title (a program may send 2 KiB) is cut like any other.
+    auto tabs = makeTabs(3, 1, "");
+    std::string long2k;
+    while (long2k.size() < 2048) {
+        long2k += utf8(0x202e) + "x" + utf8(0x1f600);
+    }
+    for (auto &t : tabs) {
+        t.title = long2k;
+    }
+    for (int columns = 0; columns <= 120; ++columns) {
+        const auto strip = buildTabStrip(tabs, columns);
+        EXPECT(sound(strip, columns, 3));
+        for (const auto &c : strip.cells) {
+            EXPECT(!invisible(c.codePoint));
+        }
+    }
 }
 
 TEST_CASE("Overflow: shrink titles, then numbers, then a scrolled window") {

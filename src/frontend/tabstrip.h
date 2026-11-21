@@ -72,9 +72,14 @@ inline int displayWidth(char32_t cp) {
     if (cp < 0x20 || (cp >= 0x7f && cp < 0xa0)) {
         return 0;
     }
-    if ((cp >= 0x0300 && cp <= 0x036f) || (cp >= 0x200b && cp <= 0x200f) ||
-        (cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2060 && cp <= 0x206f) ||
-        (cp >= 0xfe00 && cp <= 0xfe0f) || cp == 0xfeff) {
+    // Zero width, or invisible and able to reorder or join its neighbours (bidi
+    // marks and overrides, line and paragraph separators, soft hyphen, tag characters):
+    // a program sets the title, so none of these may reach the strip.
+    if ((cp >= 0x0300 && cp <= 0x036f) || cp == 0x00ad || cp == 0x061c ||
+        cp == 0x180e || (cp >= 0x200b && cp <= 0x200f) ||
+        (cp >= 0x2028 && cp <= 0x202e) || (cp >= 0x2060 && cp <= 0x206f) ||
+        (cp >= 0xfe00 && cp <= 0xfe0f) || cp == 0xfeff ||
+        (cp >= 0xfff9 && cp <= 0xfffb) || (cp >= 0xe0000 && cp <= 0xe007f)) {
         return 0;
     }
     const bool wide =
