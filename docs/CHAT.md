@@ -549,6 +549,8 @@ check, on a machine that may run it).
 if `build-web/site` exists, a static web server for the demo, then prints the
 `mattrix-chat --tcp ...` commands and the browser URL. Stop it with Ctrl+C, or from
 another terminal with `tools/chat-local-stop.sh` (pid file under `$XDG_RUNTIME_DIR` or
-`/tmp`, no `pkill -f`). Ports: `CHAT_WS_PORT` (8097), `CHAT_TCP_PORT` (8098),
-`CHAT_WEB_PORT` (8080).
+`/tmp`, no `pkill -f`). Options: `--host ADDR` (default 127.0.0.1; a non-loopback address exposes the chat
+without TLS), `--web-port` (8080), `--ws-port` (8097), `--tcp-port` (8098, always
+loopback), `--build DIR`, `--site DIR`; the ports can also come from `CHAT_WEB_PORT`,
+`CHAT_WS_PORT`, `CHAT_TCP_PORT`.
 

@@ -1,15 +1,38 @@
 #!/bin/sh
 # Starts the Mattrix chat locally for testing and prints where to connect.
-#   tools/chat-local.sh [build-dir] [web-site-dir]
+#   tools/chat-local.sh [--host ADDR] [--web-port N] [--ws-port N] [--tcp-port N]
+#                       [--build DIR] [--site DIR]
 # Starts chatd (WebSocket + a loopback-only plain TCP test port) and, if a built web
 # client exists, a tiny static web server for it. Stops everything on Ctrl+C; from
 # another terminal (or if that did not work) use tools/chat-local-stop.sh.
-# Ports can be changed: CHAT_WS_PORT (8097), CHAT_TCP_PORT (8098), CHAT_WEB_PORT (8080).
+#   --host ADDR     address for the WebSocket and the web server (default 127.0.0.1).
+#                   Anything but a loopback address exposes the chat to your network
+#                   WITHOUT TLS; use it only on a network you trust. The plain TCP
+#                   test port is always loopback.
+#   --web-port N    web server port (default 8080; also CHAT_WEB_PORT)
+#   --ws-port N     chatd WebSocket port (default 8097; also CHAT_WS_PORT)
+#   --tcp-port N    chatd TCP test port (default 8098; also CHAT_TCP_PORT)
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
-build=${1:-$root/build}
-site=${2:-$root/build-web/site}
+build=$root/build; site=$root/build-web/site
+host=127.0.0.1
 ws=${CHAT_WS_PORT:-8097}; tcp=${CHAT_TCP_PORT:-8098}; web=${CHAT_WEB_PORT:-8080}
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --host) host=${2:?--host needs an address}; shift 2 ;;
+        --web-port) web=${2:?--web-port needs a number}; shift 2 ;;
+        --ws-port) ws=${2:?--ws-port needs a number}; shift 2 ;;
+        --tcp-port) tcp=${2:?--tcp-port needs a number}; shift 2 ;;
+        --build) build=${2:?--build needs a directory}; shift 2 ;;
+        --site) site=${2:?--site needs a directory}; shift 2 ;;
+        -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+        *) echo "unknown argument: $1 (try --help)" >&2; exit 2 ;;
+    esac
+done
+case "$host" in
+    127.*|localhost|::1) ;;
+    *) echo "WARNING: $host is not a loopback address: the chat (no TLS) will be reachable from your network." >&2 ;;
+esac
 state=${XDG_RUNTIME_DIR:-/tmp}/matterm-chat-local-$(id -u)
 chatd=$build/chatd; [ -x "$chatd" ] || { echo "no $chatd; build first: cmake -S . -B build && cmake --build build" >&2; exit 1; }
 if [ -e "$state/pids" ]; then
@@ -23,20 +46,23 @@ cleanup() {
     echo; echo "chat stopped."
 }
 trap cleanup INT TERM EXIT
-"$chatd" --origin "http://127.0.0.1:$web" --origin "http://localhost:$web" \
-    --listen "127.0.0.1:$ws" --test-tcp "127.0.0.1:$tcp" >"$state/chatd.log" 2>&1 &
+"$chatd" --origin "http://$host:$web" --origin "http://localhost:$web" --origin "http://127.0.0.1:$web" \
+    --listen "$host:$ws" --test-tcp "127.0.0.1:$tcp" >"$state/chatd.log" 2>&1 &
 echo $! >> "$state/pids"
 have_web=no
 if [ -f "$site/demo.html" ] && command -v python3 >/dev/null 2>&1; then
     mkdir -p "$state/site"; cp -r "$site"/. "$state/site"/; cp "$site/demo.html" "$state/site/index.html"
-    (cd "$state/site" && exec python3 -m http.server "$web" --bind 127.0.0.1 >"$state/web.log" 2>&1) &
+    (cd "$state/site" && exec python3 -m http.server "$web" --bind "$host" >"$state/web.log" 2>&1) &
     echo $! >> "$state/pids"; have_web=yes
 fi
 sleep 1
 if ! kill -0 "$(head -n 1 "$state/pids")" 2>/dev/null; then
     echo "chatd did not start:" >&2; cat "$state/chatd.log" >&2; exit 1
 fi
-echo "Mattrix chat is running (local test only, nothing leaves this machine)."
+case "$host" in
+    127.*|localhost|::1) echo "Mattrix chat is running (local test only, nothing leaves this machine)." ;;
+    *) echo "Mattrix chat is running on $host (reachable from your network, no TLS)." ;;
+esac
 echo
 echo "  In a terminal (two or more, with different names):"
 echo "    $build/mattrix-chat --tcp 127.0.0.1:$tcp --name ada"
@@ -44,7 +70,7 @@ echo "    $build/mattrix-chat --tcp 127.0.0.1:$tcp --name bo"
 if [ "$have_web" = yes ]; then
     echo
     echo "  In a browser (several tabs work):"
-    echo "    http://127.0.0.1:$web/?chat=ws://127.0.0.1:$ws"
+    echo "    http://$host:$web/?chat=ws://$host:$ws"
     echo "    type 'chat' in the pretend system and answer y"
 else
     echo
