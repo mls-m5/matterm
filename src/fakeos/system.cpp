@@ -403,6 +403,56 @@ void System::complete() {
     }
 }
 
+// Words are runs of non-spaces, as for Ctrl-W.
+void System::deleteWordBack() {
+    std::size_t i = cursor_;
+    while (i > 0 && line_[i - 1] == " ") {
+        --i;
+    }
+    while (i > 0 && line_[i - 1] != " ") {
+        --i;
+    }
+    eraseRange(i, cursor_);
+}
+
+void System::deleteWordForward() {
+    std::size_t i = cursor_;
+    while (i < line_.size() && line_[i] == " ") {
+        ++i;
+    }
+    while (i < line_.size() && line_[i] != " ") {
+        ++i;
+    }
+    eraseRange(cursor_, i);
+}
+
+void System::moveWord(int direction) {
+    std::size_t i = cursor_;
+    if (direction < 0) {
+        while (i > 0 && line_[i - 1] == " ") {
+            --i;
+        }
+        while (i > 0 && line_[i - 1] != " ") {
+            --i;
+        }
+        if (i < cursor_) {
+            out_ += "\x1b[" + std::to_string(cursor_ - i) + "D";
+        }
+    }
+    else {
+        while (i < line_.size() && line_[i] == " ") {
+            ++i;
+        }
+        while (i < line_.size() && line_[i] != " ") {
+            ++i;
+        }
+        if (i > cursor_) {
+            out_ += "\x1b[" + std::to_string(i - cursor_) + "C";
+        }
+    }
+    cursor_ = i;
+}
+
 void System::handleShellKey(const Key &key) {
     using T = Key::Type;
     if (!key.is(T::Tab)) {
@@ -410,7 +460,16 @@ void System::handleShellKey(const Key &key) {
     }
     switch (key.type) {
     case T::Text:
-        if (key.text == "\n") {
+        if (key.alt && key.text == "d") { // Alt+D: a word forward.
+            deleteWordForward();
+        }
+        else if (key.alt && key.text == "b") {
+            moveWord(-1);
+        }
+        else if (key.alt && key.text == "f") {
+            moveWord(1);
+        }
+        else if (key.text == "\n") {
             submit();
         }
         else if (!key.text.empty() && (unsigned char)key.text[0] >= 0x20) {
@@ -421,7 +480,10 @@ void System::handleShellKey(const Key &key) {
         submit();
         break;
     case T::Backspace:
-        if (cursor_ > 0) {
+        if (key.alt || key.ctrl) { // Alt+Backspace: a word back.
+            deleteWordBack();
+        }
+        else if (cursor_ > 0) {
             if (cursor_ == line_.size()) {
                 line_.pop_back();
                 --cursor_;
@@ -433,16 +495,27 @@ void System::handleShellKey(const Key &key) {
         }
         break;
     case T::Delete:
-        eraseRange(cursor_, std::min(line_.size(), cursor_ + 1));
+        if (key.alt || key.ctrl) { // Ctrl+Delete: a word forward.
+            deleteWordForward();
+        }
+        else {
+            eraseRange(cursor_, std::min(line_.size(), cursor_ + 1));
+        }
         break;
     case T::Left:
-        if (cursor_ > 0) {
+        if (key.alt || key.ctrl) {
+            moveWord(-1);
+        }
+        else if (cursor_ > 0) {
             --cursor_;
             out_ += "\x1b[D";
         }
         break;
     case T::Right:
-        if (cursor_ < line_.size()) {
+        if (key.alt || key.ctrl) {
+            moveWord(1);
+        }
+        else if (cursor_ < line_.size()) {
             ++cursor_;
             out_ += "\x1b[C";
         }
@@ -495,12 +568,7 @@ void System::handleShellKey(const Key &key) {
             eraseRange(cursor_, line_.size());
         }
         else if (c == 'w') {
-            std::size_t i = cursor_;
-            while (i > 0 && line_[i - 1] == " ")
-                --i;
-            while (i > 0 && line_[i - 1] != " ")
-                --i;
-            eraseRange(i, cursor_);
+            deleteWordBack();
         }
         else if (c == 'a') {
             handleShellKey(Key{Key::Type::Home});

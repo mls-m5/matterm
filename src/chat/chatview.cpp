@@ -229,6 +229,47 @@ bool ChatInput::killWord() {
     return true;
 }
 
+bool ChatInput::killWordForward() {
+    std::size_t end = cursor_;
+    while (end < text_.size() && text_[end] == U' ') {
+        ++end;
+    }
+    while (end < text_.size() && text_[end] != U' ') {
+        ++end;
+    }
+    if (end == cursor_) {
+        return false;
+    }
+    text_.erase(cursor_, end - cursor_);
+    return true;
+}
+
+bool ChatInput::wordLeft() {
+    std::size_t i = cursor_;
+    while (i > 0 && text_[i - 1] == U' ') {
+        --i;
+    }
+    while (i > 0 && text_[i - 1] != U' ') {
+        --i;
+    }
+    const bool moved = i != cursor_;
+    cursor_ = i;
+    return moved;
+}
+
+bool ChatInput::wordRight() {
+    std::size_t i = cursor_;
+    while (i < text_.size() && text_[i] == U' ') {
+        ++i;
+    }
+    while (i < text_.size() && text_[i] != U' ') {
+        ++i;
+    }
+    const bool moved = i != cursor_;
+    cursor_ = i;
+    return moved;
+}
+
 void ChatInput::set(const std::string &utf8) {
     text_ = decode(utf8);
     cursor_ = text_.size();
@@ -277,7 +318,12 @@ ChatView::Rendered ChatView::bubble(const BubbleSpec &spec) const {
     const std::size_t maxWidth =
         std::size_t(std::clamp(columns * 7 / 10, 12, columns - 1));
     const std::size_t innerMax = maxWidth - 2;
-    const std::u32string text = decode(spec.text);
+    std::u32string text = decode(spec.text);
+    std::size_t markerAt = std::u32string::npos;
+    if (spec.marker) {
+        markerAt = text.size();
+        text.push_back(caps.unicode ? kLiveMarker : kLiveMarkerAscii);
+    }
     const auto segments = wrapSegments(text, innerMax);
     std::size_t longest = 0;
     for (const auto &s : segments) {
@@ -335,8 +381,23 @@ ChatView::Rendered ChatView::bubble(const BubbleSpec &spec) const {
                 color(caps, true, bodyBg) + color(caps, false, {232, 232, 238});
         }
         const std::u32string part = text.substr(s.begin, s.end - s.begin);
-        row +=
-            " " + encodeUtf8(part) + std::string(inner - part.size() + 1, ' ');
+        std::string shown;
+        if (markerAt != std::u32string::npos && markerAt >= s.begin &&
+            markerAt < s.end) {
+            // The marker has its own color: dimmed and brightened by the pulse.
+            const Rgb accent =
+                spec.markerBright ? Rgb{255, 190, 60} : Rgb{150, 112, 48};
+            shown = encodeUtf8(part.substr(0, markerAt - s.begin));
+            shown +=
+                colors ? color(caps, false, accent)
+                       : std::string(spec.markerBright ? "\x1b[1m" : "\x1b[2m");
+            shown += encodeUtf8(part.substr(markerAt - s.begin));
+            shown += colors ? color(caps, false, {232, 232, 238}) : "\x1b[22m";
+        }
+        else {
+            shown = encodeUtf8(part);
+        }
+        row += " " + shown + std::string(inner - part.size() + 1, ' ');
         row += kReset;
         out.lines.push_back(row);
     }
@@ -427,10 +488,18 @@ void ChatView::note(const std::string &text) {
 }
 
 std::optional<Millis> ChatView::nextFrame(Millis now) const {
-    if (!config_.animations || start_ < 0 || bannerPrinted_) {
+    if (!config_.animations || start_ < 0) {
         return std::nullopt;
     }
-    return start_ + ((now - start_) / 500 + 1) * 500;
+    std::optional<Millis> next;
+    if (!bannerPrinted_) {
+        next = start_ + ((now - start_) / 500 + 1) * 500;
+    }
+    if (liveOthers_ > 0) { // The marker pulses.
+        const Millis pulse = start_ + ((now - start_) / 600 + 1) * 600;
+        next = next ? std::min(*next, pulse) : pulse;
+    }
+    return next;
 }
 
 std::string ChatView::render(ChatClient &client,
@@ -490,6 +559,9 @@ std::string ChatView::render(ChatClient &client,
         spec.text = typers[i].text;
         spec.state = config_.caps.unicode ? "typing\xE2\x80\xA6" : "typing...";
         spec.live = true;
+        spec.marker = true;
+        spec.markerBright =
+            !config_.animations || ((now - start_) / 600) % 2 == 0;
         typerBubbles.push_back(bubble(spec).lines);
     }
     BubbleSpec own;
@@ -510,6 +582,7 @@ std::string ChatView::render(ChatClient &client,
         break;
     }
     const Rendered ownBubble = bubble(own);
+    liveOthers_ = typerBubbles.size();
     const std::size_t room = std::size_t(std::max(config_.rows - 1, 3));
     std::size_t needed = lines.size() + ownBubble.lines.size();
     for (const auto &b : typerBubbles) {

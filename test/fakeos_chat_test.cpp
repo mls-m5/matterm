@@ -141,7 +141,7 @@ TEST_CASE(
     joinRoom(pc, host);
     pc.apply(pc.sys.chatLine("join\tbo"));
     pc.apply(pc.sys.chatLine("draft\tbo\tthinking"));
-    pc.advance(200);
+    pc.advance(1500);
     EXPECT(pc.shows("bo  typing"));
     EXPECT(pc.shows("thinking"));
     const auto before = pc.raw.size();
@@ -225,6 +225,38 @@ TEST_CASE("Events from the host's connection reach the program through a "
         program.tick(protocol::Time(std::chrono::milliseconds(40)));
     EXPECT(reaction.output.find("disconnected") != std::string::npos ||
            reaction.output.find("offline") != std::string::npos);
+}
+
+TEST_CASE(
+    "Word keys in the chat editor: Alt+Backspace, Alt+D, Ctrl+arrows, Ctrl-W") {
+    Host host;
+    Pc pc(withChat(host));
+    pc.run("chat");
+    pc.type("y");
+    pc.advance(50);
+    joinRoom(pc, host);
+    auto draftIs = [&](const std::string &text) {
+        pc.advance(400);
+        return !host.sent.empty() && host.sent.back() == "draft\t1\t" + text;
+    };
+    pc.type("alpha beta gamma");
+    EXPECT(draftIs("alpha beta gamma"));
+    pc.type("\x1b\x7f"); // Alt+Backspace: "gamma" goes.
+    EXPECT(draftIs("alpha beta "));
+    pc.type("\x17"); // Ctrl-W: "beta " goes.
+    EXPECT(draftIs("alpha "));
+    pc.type("one two");
+    pc.type("\x1b[1;5D"); // Ctrl+Left: before "two".
+    pc.type("\x1b"
+            "d"); // Alt+D: "two" goes forward.
+    EXPECT(draftIs("alpha one "));
+    pc.type("\x1b[1;5D\x1b[1;5D\x1b[3;5~"); // Back to "alpha", Ctrl+Delete.
+    EXPECT(draftIs(" one "));
+    pc.type("\x1b[1;5CX"); // Ctrl+Right: after "one", then a letter.
+    EXPECT(draftIs(" oneX "));
+    pc.type("\x03");
+    pc.advance(300);
+    EXPECT(!pc.sys.inProgram());
 }
 
 TEST_SUIT_END

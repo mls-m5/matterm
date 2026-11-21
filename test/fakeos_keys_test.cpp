@@ -19,6 +19,38 @@ TEST_CASE("Text, UTF-8 and control keys") {
     EXPECT(keys[6].is(Key::Type::Ctrl) && keys[6].text == "c");
 }
 
+TEST_CASE("Word keys: Alt+Backspace, Alt+D, Ctrl+Delete, Ctrl and Alt with the "
+          "arrows") {
+    KeyDecoder d;
+    Key k;
+    auto one = [&](const char *bytes) {
+        const auto keys = d.feed(bytes);
+        EXPECT_EQ(keys.size(), std::size_t(1));
+        k = keys.empty() ? Key{} : keys[0];
+    };
+    one("\x1b\x7f"); // Alt+Backspace
+    EXPECT(k.is(Key::Type::Backspace) && k.alt && !k.ctrl);
+    one("\x1b"
+        "d"); // Alt+D
+    EXPECT(k.isText("d") && k.alt);
+    one("\x1b[3;5~"); // Ctrl+Delete
+    EXPECT(k.is(Key::Type::Delete) && k.ctrl && !k.alt);
+    one("\x1b[3;3~"); // Alt+Delete
+    EXPECT(k.is(Key::Type::Delete) && k.alt && !k.ctrl);
+    one("\x1b[1;5D"); // Ctrl+Left
+    EXPECT(k.is(Key::Type::Left) && k.ctrl);
+    one("\x1b[1;3C"); // Alt+Right
+    EXPECT(k.is(Key::Type::Right) && k.alt);
+    one("\x1b[1;7D"); // Ctrl+Alt+Left
+    EXPECT(k.is(Key::Type::Left) && k.ctrl && k.alt);
+    one("\x1b[3~"); // Plain Delete: no modifiers.
+    EXPECT(k.is(Key::Type::Delete) && !k.ctrl && !k.alt);
+    one("\x1b[D");
+    EXPECT(k.is(Key::Type::Left) && !k.ctrl && !k.alt);
+    one("\x17"); // Ctrl+Backspace arrives as Ctrl-W.
+    EXPECT(k.is(Key::Type::Ctrl) && k.text == "w");
+}
+
 TEST_CASE("UTF-8 split across chunks") {
     KeyDecoder d;
     EXPECT(d.feed("\xe2\x82").empty());
