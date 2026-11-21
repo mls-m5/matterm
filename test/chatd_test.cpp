@@ -233,6 +233,70 @@ TEST_CASE("The per-source cap and the room being locked") {
     EXPECT(b.ends());
 }
 
+TEST_CASE("Fuzz: garbage, fragments and floods over TCP leave the server up "
+          "and clean") {
+    chatd::Options o = quick();
+    o.room.maxPerSource = 64;
+    o.room.violationsToKick =
+        100000; // Everyone is 127.0.0.1: no bans in this test.
+    Running r(o);
+    std::uint64_t state = 4242;
+    auto next = [&] {
+        state = state * 6364136223846793005ull + 1442695040888963407ull;
+        return std::uint32_t(state >> 33);
+    };
+    const char *pieces[] = {"hello\tmal",
+                            "draft\t1\thi",
+                            "lock\t1",
+                            "\n",
+                            "\r\n",
+                            "\t",
+                            "\x1b[2J",
+                            "\xff\xfe",
+                            "nick\tzed",
+                            "draft\t999999999\tx",
+                            std::string(300, 'a').c_str(),
+                            "msg\t1\tbo\tx",
+                            "\x00"};
+    for (int round = 0; round < 40; ++round) {
+        Line chaos(r.server->tcpPort());
+        std::string blob;
+        const int n = 1 + int(next() % 30);
+        for (int i = 0; i < n; ++i) {
+            blob += pieces[next() % (sizeof pieces / sizeof *pieces)];
+            if (next() % 4 == 0) {
+                blob += char(next() % 256);
+            }
+        }
+        // Raw bytes, as they come: no added newline.
+        try {
+            chaos.send(blob);
+        }
+        catch (...) {
+        }
+        // What comes back is only ever well-formed lines of ours.
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    // The server is still there and behaves.
+    Line honest(r.server->tcpPort());
+    honest.send("hello\thonest");
+    EXPECT(honest.expect("ready"));
+    honest.send("draft\t1\tstill works");
+    honest.send("lock\t1");
+    EXPECT(honest.expect("ack\t1\t"));
+    for (const auto &l : honest.seen) {
+        EXPECT(l.find('\x1b') == std::string::npos);
+    }
+    // The chaos connections are gone (or at least not counted forever).
+    for (int i = 0; i < 100; ++i) {
+        if (r.server->stats().connections == 1) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    EXPECT_EQ(r.server->stats().connections, std::size_t(1));
+}
+
 TEST_CASE("The options that would be unsafe are refused") {
     net::io_context io;
     chatd::Options open;
