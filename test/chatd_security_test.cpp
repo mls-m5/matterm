@@ -238,6 +238,8 @@ TEST_CASE("Fuzz: garbage over many connections leaves the server and its room "
           "sound") {
     chatd::Options o = quick();
     o.room.violationsToKick = 1000000; // Everything here is 127.0.0.1.
+    o.room.connectBurst = 1000000;     // Many connections from one address.
+    o.maxPendingPerPeer = 1000;
     o.room.draftFloodPerSecond = 1000000;
     Running r(o);
     Line bystander(r.server->tcpPort(), 5);

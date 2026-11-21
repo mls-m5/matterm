@@ -64,6 +64,10 @@ struct ChatServer::Impl : std::enable_shared_from_this<ChatServer::Impl> {
     void backlog(chat::ConnId id, std::size_t bytes);
     void acceptWs();
     void acceptTcp();
+    // Counts a not yet handshaken connection against its peer address (not for
+    // the trusted proxy, which is one peer for everybody). False: over the cap.
+    bool reservePeer(const tcp::socket &socket, std::string &key);
+    void releasePeer(Session &session);
 
     net::io_context &io;
     Options options;
@@ -74,6 +78,7 @@ struct ChatServer::Impl : std::enable_shared_from_this<ChatServer::Impl> {
     Clock::time_point started;
     std::map<chat::ConnId, std::shared_ptr<Session>> sessions;
     std::size_t pending = 0;
+    std::map<std::string, std::size_t> pendingByPeer;
     chat::ConnId nextId = 1;
     bool stopped = false;
 };
@@ -134,6 +139,7 @@ protected:
     bool closing_ = false;
     bool open_ = false; // The room knows this connection.
     bool gone_ = false;
+    std::string pendingPeer_; // Counted as pending against this address.
     friend struct ChatServer::Impl;
 };
 
@@ -443,6 +449,7 @@ void ChatServer::Impl::onOpen(const std::shared_ptr<Session> &session,
     if (pending > 0) {
         --pending;
     }
+    releasePeer(*session);
     session->open_ = true;
     apply(room.connected(session->id(), source, now()));
     reschedule();
@@ -475,11 +482,51 @@ void ChatServer::Impl::onClosed(chat::ConnId id) {
     if (!wasOpen && pending > 0) {
         --pending;
     }
+    releasePeer(*it->second);
     sessions.erase(it);
     if (wasOpen) {
         apply(room.closed(id, now()));
         reschedule();
     }
+}
+
+bool ChatServer::Impl::reservePeer(const tcp::socket &socket,
+                                   std::string &key) {
+    key.clear();
+    beast::error_code ec;
+    const auto endpoint = socket.remote_endpoint(ec);
+    if (ec) {
+        return false;
+    }
+    if (proxy.trusts(endpoint.address())) {
+        return true;
+    }
+    auto address = endpoint.address();
+    if (address.is_v6() && address.to_v6().is_v4_mapped()) {
+        address = net::ip::make_address_v4(net::ip::v4_mapped, address.to_v6());
+    }
+    const std::string peer = address.to_string();
+    auto &count = pendingByPeer[peer];
+    if (count >= options.maxPendingPerPeer) {
+        if (count == 0) {
+            pendingByPeer.erase(peer);
+        }
+        return false;
+    }
+    ++count;
+    key = peer;
+    return true;
+}
+
+void ChatServer::Impl::releasePeer(Session &session) {
+    if (session.pendingPeer_.empty()) {
+        return;
+    }
+    const auto it = pendingByPeer.find(session.pendingPeer_);
+    if (it != pendingByPeer.end() && --it->second == 0) {
+        pendingByPeer.erase(it);
+    }
+    session.pendingPeer_.clear();
 }
 
 void ChatServer::Impl::acceptWs() {
@@ -489,7 +536,9 @@ void ChatServer::Impl::acceptWs() {
                 return;
             }
             if (!ec) {
-                if (self->pending >= self->options.maxPending) {
+                std::string peer;
+                if (self->pending >= self->options.maxPending ||
+                    !self->reservePeer(socket, peer)) {
                     beast::error_code ignored;
                     socket.close(ignored);
                 }
@@ -499,11 +548,15 @@ void ChatServer::Impl::acceptWs() {
                     try {
                         auto session = std::make_shared<WsSession>(
                             *self, id, std::move(socket));
+                        session->pendingPeer_ = peer;
                         self->sessions[id] = session;
                         session->start();
                     }
                     catch (const std::exception &) {
                         --self->pending;
+                        if (!peer.empty() && --self->pendingByPeer[peer] == 0) {
+                            self->pendingByPeer.erase(peer);
+                        }
                     }
                 }
             }
@@ -518,7 +571,9 @@ void ChatServer::Impl::acceptTcp() {
                 return;
             }
             if (!ec) {
-                if (self->pending >= self->options.maxPending) {
+                std::string peer;
+                if (self->pending >= self->options.maxPending ||
+                    !self->reservePeer(socket, peer)) {
                     beast::error_code ignored;
                     socket.close(ignored);
                 }
@@ -528,11 +583,15 @@ void ChatServer::Impl::acceptTcp() {
                     try {
                         auto session = std::make_shared<TcpSession>(
                             *self, id, std::move(socket));
+                        session->pendingPeer_ = peer;
                         self->sessions[id] = session;
                         session->start();
                     }
                     catch (const std::exception &) {
                         --self->pending;
+                        if (!peer.empty() && --self->pendingByPeer[peer] == 0) {
+                            self->pendingByPeer.erase(peer);
+                        }
                     }
                 }
             }

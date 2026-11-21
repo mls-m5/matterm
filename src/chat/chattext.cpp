@@ -75,11 +75,12 @@ void append(std::string &out, char32_t c) {
     }
 }
 
-bool isReserved(const std::string &key) {
+bool isReserved(const std::string &name) {
     static const char *const names[] = {
         "server", "admin", "system", "root", "you", "me", "moderator"};
+    const std::string key = nameSkeleton(name);
     for (const char *n : names) {
-        if (key == n) {
+        if (key == nameSkeleton(n)) {
             return true;
         }
     }
@@ -203,7 +204,8 @@ NameError checkName(std::string_view name) {
             return NameError::Characters;
         }
     }
-    return isReserved(nameKey(name)) ? NameError::Reserved : NameError::None;
+    return isReserved(std::string(name)) ? NameError::Reserved
+                                         : NameError::None;
 }
 
 std::string nameKey(std::string_view name) {
@@ -214,6 +216,46 @@ std::string nameKey(std::string_view name) {
         }
     }
     return key;
+}
+
+std::string nameSkeleton(std::string_view name) {
+    const std::string lower = nameKey(name);
+    std::string out;
+    for (std::size_t i = 0; i < lower.size(); ++i) {
+        const char c = lower[i];
+        if (c == '_' || c == '-') {
+            continue;
+        }
+        if (c == 'r' && i + 1 < lower.size() && lower[i + 1] == 'n') {
+            out += 'm';
+            ++i;
+        }
+        else if (c == 'v' && i + 1 < lower.size() && lower[i + 1] == 'v') {
+            out += 'w';
+            ++i;
+        }
+        else {
+            switch (c) {
+            case '0':
+                out += 'o';
+                break;
+            case '1':
+            case 'i':
+                out += 'l';
+                break;
+            case '5':
+                out += 's';
+                break;
+            case '3':
+                out += 'e';
+                break;
+            default:
+                out += c;
+                break;
+            }
+        }
+    }
+    return out;
 }
 
 std::string sanitizeIncoming(std::string_view bytes, std::size_t maxChars) {

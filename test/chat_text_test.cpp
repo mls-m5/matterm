@@ -145,6 +145,17 @@ TEST_CASE("Names") {
     EXPECT(nameKey("AdA_9") == "ada_9");
 }
 
+TEST_CASE("Look-alike names have the same skeleton, others do not") {
+    EXPECT_EQ(nameSkeleton("Iike"), nameSkeleton("like"));
+    EXPECT_EQ(nameSkeleton("b0b"), nameSkeleton("bob"));
+    EXPECT_EQ(nameSkeleton("adrnin"), nameSkeleton("admin"));
+    EXPECT_EQ(nameSkeleton("a_b-c"), nameSkeleton("abc"));
+    EXPECT(nameSkeleton("mia") != nameSkeleton("max"));
+    EXPECT(checkName("adm1n") == NameError::Reserved);
+    EXPECT(checkName("S3rver") == NameError::Reserved);
+    EXPECT(checkName("mia") == NameError::None);
+}
+
 TEST_CASE("Incoming text is made safe and cannot form an escape sequence") {
     EXPECT(sanitizeIncoming("hello") == "hello");
     EXPECT(sanitizeIncoming("\x1b[31mred\x1b[0m") == "[31mred[0m");

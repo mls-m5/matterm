@@ -1,5 +1,9 @@
 # Chat: security and robustness review
 
+**Status: F1-F6 and the observations below are fixed or documented** (see
+CHAT.md section 7, "Limits added after the review"); the six issue suites now run
+as normal tests (`chat_fix_*`).
+
 An independent review of the chat (`src/chat/`, `src/chatd/`, `app/chat/`) against
 the design in [CHAT.md](CHAT.md). Method: read the code, write a threat model,
 write negative and fuzz tests first, measure what they show. No production code

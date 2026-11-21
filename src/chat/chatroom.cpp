@@ -61,9 +61,9 @@ std::size_t ChatRoom::joinedCount() const {
 }
 
 ConnId ChatRoom::findByName(const std::string &name) const {
-    const std::string key = nameKey(name);
+    const std::string key = nameSkeleton(name);
     for (const auto &[id, c] : conns_) {
-        if (c.joined && nameKey(c.name) == key) {
+        if (c.joined && nameSkeleton(c.name) == key) {
             return id;
         }
     }
@@ -132,7 +132,7 @@ void ChatRoom::violation(Actions &out, ConnId id, Millis now, const char *) {
         c.violationStart = now;
     }
     if (++c.violations >= config_.violationsToKick) {
-        bans_[c.source] = now + config_.kickBan;
+        setUntil(bans_, c.source, now + config_.kickBan);
         ServerLine e;
         e.kind = ServerLine::Kind::Error;
         e.code = ErrorCode::Banned;
@@ -142,16 +142,30 @@ void ChatRoom::violation(Actions &out, ConnId id, Millis now, const char *) {
     }
 }
 
-bool ChatRoom::takeToken(Conn &c, Millis now) {
-    const double refill = double(config_.messageRefill);
-    c.tokens = std::min<double>(config_.messageBurst,
-                                c.tokens + double(now - c.tokenAt) / refill);
-    c.tokenAt = now;
-    if (c.tokens < 1.0) {
+bool ChatRoom::takeToken(Bucket &b, double burst, Millis refill, Millis now) {
+    b.tokens = std::min(burst, b.tokens + double(now - b.at) / double(refill));
+    b.at = now;
+    if (b.tokens < 1.0) {
         return false;
     }
-    c.tokens -= 1.0;
+    b.tokens -= 1.0;
     return true;
+}
+
+// A bounded table: when it is full the entry that ends first makes room.
+void ChatRoom::setUntil(std::map<std::string, Millis> &table,
+                        const std::string &source,
+                        Millis until) {
+    if (table.size() >= config_.maxTableEntries && !table.count(source)) {
+        auto first = table.begin();
+        for (auto it = table.begin(); it != table.end(); ++it) {
+            if (it->second < first->second) {
+                first = it;
+            }
+        }
+        table.erase(first);
+    }
+    table[source] = until;
 }
 
 void ChatRoom::expireRing(Millis now) {
@@ -183,8 +197,15 @@ bool ChatRoom::lockBubble(
                        recentMessages_.end(),
                        [&](Millis t) { return now - t >= 60 * 1000; }),
         recentMessages_.end());
-    if (recentMessages_.size() >= config_.messagesPerMinute ||
-        !takeToken(c, now)) {
+    // The room's cap is nobody's mistake: no violation for hitting it.
+    if (recentMessages_.size() >= config_.messagesPerMinute) {
+        sendError(out, id, ErrorCode::Rate, "the room is busy, try again");
+        return false;
+    }
+    // The rate is per source, whatever the number of its connections.
+    auto bucket = messageBuckets_.try_emplace(c.source, Bucket{0.0, now}).first;
+    if (!takeToken(
+            bucket->second, config_.messageBurst, config_.messageRefill, now)) {
         sendError(out, id, ErrorCode::Rate, "slow down");
         if (explicitLock) {
             violation(out, id, now, "rate");
@@ -225,8 +246,8 @@ void ChatRoom::join(
     c.joined = true;
     c.name = name;
     c.joinedAt = now;
-    c.tokens = config_.messageBurst;
-    c.tokenAt = now;
+    messageBuckets_.try_emplace(c.source,
+                                Bucket{double(config_.messageBurst), now});
     ServerLine welcome;
     welcome.kind = ServerLine::Kind::Welcome;
     welcome.name = name;
@@ -294,6 +315,23 @@ Actions ChatRoom::connected(ConnId id, const std::string &source, Millis now) {
         refuse(ErrorCode::Full, "the room is closed for now");
         return out;
     }
+    {
+        if (connectBuckets_.size() >= config_.maxTableEntries &&
+            !connectBuckets_.count(source)) {
+            connectBuckets_.erase(connectBuckets_.begin());
+        }
+        auto bucket =
+            connectBuckets_
+                .try_emplace(source, Bucket{double(config_.connectBurst), now})
+                .first;
+        if (!takeToken(bucket->second,
+                       config_.connectBurst,
+                       config_.connectRefill,
+                       now)) {
+            refuse(ErrorCode::Rate, "slow down");
+            return out;
+        }
+    }
     std::size_t unhelloed = 0;
     for (const auto &entry : conns_) {
         unhelloed += !entry.second.joined;
@@ -311,7 +349,6 @@ Actions ChatRoom::connected(ConnId id, const std::string &source, Millis now) {
     Conn c;
     c.source = source;
     c.connectedAt = now;
-    c.tokenAt = now;
     c.violationStart = now;
     conns_.emplace(id, std::move(c));
     return out;
@@ -465,6 +502,22 @@ Actions ChatRoom::tick(Millis now) {
     expireRing(now);
     for (auto it = bans_.begin(); it != bans_.end();) {
         it = it->second <= now ? bans_.erase(it) : std::next(it);
+    }
+    // Buckets that are full again hold nothing worth keeping.
+    for (auto it = messageBuckets_.begin(); it != messageBuckets_.end();) {
+        const bool idle =
+            !perSource_.count(it->first) &&
+            it->second.tokens + double(now - it->second.at) /
+                                    double(config_.messageRefill) >=
+                config_.messageBurst;
+        it = idle ? messageBuckets_.erase(it) : std::next(it);
+    }
+    for (auto it = connectBuckets_.begin(); it != connectBuckets_.end();) {
+        const bool full =
+            it->second.tokens +
+                double(now - it->second.at) / double(config_.connectRefill) >=
+            config_.connectBurst;
+        it = full ? connectBuckets_.erase(it) : std::next(it);
     }
     for (auto it = mutes_.begin(); it != mutes_.end();) {
         it = it->second <= now ? mutes_.erase(it) : std::next(it);
@@ -680,7 +733,7 @@ Actions ChatRoom::admin(std::string_view command,
             reply = "usage: ban NAME|SOURCE [minutes]\n";
             return out;
         }
-        bans_[source] = now + duration;
+        setUntil(bans_, source, now + duration);
         const auto n =
             banDisconnect(source, "you are not allowed in right now");
         reply = "banned " + source + ", " + std::to_string(n) +
@@ -705,7 +758,7 @@ Actions ChatRoom::admin(std::string_view command,
                 reply = "usage: mute NAME [minutes]\n";
                 return out;
             }
-            mutes_[conns_.at(id).source] = now + duration;
+            setUntil(mutes_, conns_.at(id).source, now + duration);
             clearDraft(out, id, conns_.at(id));
             reply = "muted\n";
         }

@@ -365,10 +365,10 @@ if(TARGET chatd-core)
 
     add_executable(chatissues_test chatissues_test.cpp mls-unit-test/test_main.cpp)
     target_link_libraries(chatissues_test PRIVATE chatd-core)
+    # The gaps of docs/CHAT_REVIEW.md, fixed: these must keep passing.
     foreach(issue IN ITEMS JoinBurst PendingBudget LookAlikeNames RoomBudget BanTable ReconnectChurn)
-        add_test(NAME chat_issue_${issue} COMMAND chatissues_test ChatIssue${issue})
-        set_tests_properties(chat_issue_${issue} PROPERTIES WILL_FAIL TRUE TIMEOUT 60
-            LABELS "known-issue")
+        add_test(NAME chat_fix_${issue} COMMAND chatissues_test ChatIssue${issue})
+        set_tests_properties(chat_fix_${issue} PROPERTIES TIMEOUT 60)
     endforeach()
 endif()
 
