@@ -123,6 +123,15 @@ TEST_CASE("Ctrl Meta modifiers and special keys preserve intended bytes") {
     EXPECT_EQ(InputEncoder::text("å", true), std::string("\x1bå"));
     EXPECT_EQ(InputEncoder::key(Key::Enter, {}, {}), std::string("\r"));
     EXPECT_EQ(InputEncoder::key(Key::Backspace, {}, {}), std::string("\x7f"));
+    {
+        InputEncoder::Modifiers control;
+        control.control = true;
+        // Ctrl+Backspace deletes a word (^W), Alt+Backspace stays ESC DEL.
+        EXPECT_EQ(InputEncoder::key(Key::Backspace, control, {}), std::string("\x17"));
+        InputEncoder::Modifiers alt;
+        alt.alt = true;
+        EXPECT_EQ(InputEncoder::key(Key::Backspace, alt, {}), std::string("\x1b\x7f"));
+    }
     EXPECT_EQ(InputEncoder::key(Key::Tab, {true, false, false}, {}),
               std::string("\x1b[Z"));
     EXPECT_EQ(InputEncoder::key(Key::Left, {false, false, true}, {}),
