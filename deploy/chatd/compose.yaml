@@ -1,0 +1,37 @@
+# The chat server behind a reverse proxy. UNVERIFIED: not run here.
+#
+#   CHAT_ORIGIN=https://you.github.io CHAT_PROXY_IP=10.89.0.1 \
+#       podman-compose -f deploy/chatd/compose.yaml up -d --build
+#
+# CHAT_ORIGIN: the page that may use the chat (an exact Origin; repeat the
+#   "--origin" pair below for more sites).
+# CHAT_PROXY_IP: the address nginx/Caddy connects from, as the container sees it
+#   (the host side of the container network); X-Forwarded-For is trusted from it
+#   and from nobody else.
+services:
+  chatd:
+    image: mattrix-chatd
+    build:
+      context: ../..
+      dockerfile: deploy/chatd/Containerfile
+    container_name: chatd
+    command:
+      - "--listen"
+      - "0.0.0.0:8097"
+      - "--origin"
+      - "${CHAT_ORIGIN:?set CHAT_ORIGIN to the page that uses the chat}"
+      - "--trust-proxy"
+      - "${CHAT_PROXY_IP:-none}"
+      - "--console" # Operator commands: podman attach chatd
+    stdin_open: true
+    ports:
+      - "127.0.0.1:8097:8097" # Loopback only; the proxy does TLS in front.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    user: "65532:65532"
+    mem_limit: 128m
+    pids_limit: 64
+    cpus: 0.5
+    restart: unless-stopped
+    # No volumes, no tmpfs, no secrets: nothing is written anywhere.

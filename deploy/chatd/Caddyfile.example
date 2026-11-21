@@ -1,0 +1,9 @@
+# Caddy in front of chatd (it gets and renews the certificate by itself and
+# handles WebSocket upgrades; X-Forwarded-For is set by Caddy). An example, not
+# a tested file.
+chat.example.org {
+	reverse_proxy 127.0.0.1:8097
+	log {
+		output discard
+	}
+}

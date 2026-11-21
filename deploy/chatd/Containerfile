@@ -1,0 +1,34 @@
+# The chat server as a container with nothing in it but the program.
+#
+#   podman build -f deploy/chatd/Containerfile -t mattrix-chatd .
+#
+# Stage 1 builds a fully static chatd; stage 2 is an empty image with that one
+# file: no shell, no libraries, no other programs. UNVERIFIED: this file has not
+# been built here (Podman cannot run in the development sandbox); the static
+# binary itself was built and run there (docs/CHAT.md, section 7).
+FROM docker.io/library/debian:12-slim AS build
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends g++ cmake make libboost-dev \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY CMakeLists.txt ./
+COPY cmake ./cmake
+COPY src ./src
+COPY app ./app
+COPY test ./test
+COPY demo ./demo
+COPY bench ./bench
+COPY lib ./lib
+COPY web ./web
+COPY matperf ./matperf
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+        -DMATTERM_BUILD_RENDERER=OFF -DMATTERM_BUILD_DEMO=OFF \
+        -DMATTERM_BUILD_APP=OFF -DMATTERM_BUILD_MATTRIX=OFF \
+        -DMATTERM_CHATD_STATIC=ON \
+ && cmake --build build --target chatd -j"$(nproc)"
+
+FROM scratch
+COPY --from=build /src/build/chatd /chatd
+# Not root. No volume, no secrets: the room lives in memory.
+USER 65532:65532
+ENTRYPOINT ["/chatd"]

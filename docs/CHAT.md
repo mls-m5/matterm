@@ -277,6 +277,11 @@ The shared validator is the single point to fuzz hardest.
 
 ## 7. Server, operation and Podman
 
+* **Files:** `deploy/chatd/` (Containerfile, compose.yaml, nginx and Caddy
+  examples, README). A fully static `chatd` links and runs (checked here with
+  `-DMATTERM_CHATD_STATIC=ON`: 4 MB, "not a dynamic executable"); the image, the
+  compose file and the proxy files are **unverified** (Podman cannot start in the
+  development sandbox).
 * **Container (UNVERIFIED, to be tried):** `chatd` as a statically linked binary
   in an image with nothing else (no shell, no other programs), run rootless with
   `--read-only`, `--cap-drop=all`, `--security-opt no-new-privileges`, memory
@@ -338,8 +343,9 @@ proxy snippet, with measurements of draft traffic, 10. TLS in the native client.
 1. The TTL and exact numbers (all proposals); the 3-per-second draft rate.
 2. Resize handling in the inline renderer, and whether pulsing text (SGR blink or
    our own redraw) works the same in every host.
-3. Static linking of Boost.Beast and the admin console's transport (stdin or
-   Unix socket) in the container.
+3. The admin console's transport in the container (stdin through `podman attach`
+   is what the files use; a Unix socket would also work). Static linking of
+   Boost.Beast is verified.
 4. The three-line room rules (English) and who watches the room.
 5. Starting the separate program from inside Mattrix OS.
 6. Whether `lock` after 5 s should lengthen later ("people type slower than you
