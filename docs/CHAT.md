@@ -543,3 +543,12 @@ check, on a machine that may run it).
 4. Hosts: keep the proxy's access log short-lived; IPs of visitors are personal
    data. Say so in the notice shown by `chat`.
 
+## Quick local test (script)
+
+`tools/chat-local.sh` starts chatd (WebSocket plus the loopback-only TCP test port) and,
+if `build-web/site` exists, a static web server for the demo, then prints the
+`mattrix-chat --tcp ...` commands and the browser URL. Stop it with Ctrl+C, or from
+another terminal with `tools/chat-local-stop.sh` (pid file under `$XDG_RUNTIME_DIR` or
+`/tmp`, no `pkill -f`). Ports: `CHAT_WS_PORT` (8097), `CHAT_TCP_PORT` (8098),
+`CHAT_WEB_PORT` (8080).
+
