@@ -65,7 +65,9 @@ std::string motdText(const World &world) {
            (!world.soundAvailable ? " * Sound: not available here\n"
             : world.sound         ? " * Sound: On ('sound off' turns it off)\n"
                           : " * Sound: Off ('sound on' turns it on)\n") +
-           " * Try: fire, gradient, neofetch, about, sound on\n"
+           (world.chat.available()
+                ? " * Try: chat, fire, gradient, neofetch, about\n"
+                : " * Try: fire, gradient, neofetch, about, sound on\n") +
            "\n";
 }
 
