@@ -914,15 +914,10 @@ int runPtyFrontend(const char *font,
                 // Layout keys: desktop shortcuts and the prefix machine.
                 if (code != 0 && (mod.control || mod.alt || waiting)) {
                     KeyResult r;
-                    if (!event.key.repeat || waiting) {
-                        guarded([&] {
-                            r = wv.key({code, mod.control, mod.shift, mod.alt},
-                                       now);
-                        });
-                    }
-                    else {
-                        r.forwardKey = true;
-                    }
+                    guarded([&] {
+                        r = wv.key({code, mod.control, mod.shift, mod.alt}, now,
+                                   event.key.repeat != 0);
+                    });
                     afterLayout(r);
                     if (r.changed || r.copy || r.paste) {
                         skipText = true;

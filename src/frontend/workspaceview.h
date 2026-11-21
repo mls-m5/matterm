@@ -216,9 +216,16 @@ public:
     }
 
     // Keys. Desktop shortcuts first (unless a prefix is pending), then the prefix keys.
-    KeyResult key(const KeyChord &chord, std::int64_t nowMs) {
+    // `repeat` is an auto-repeat of a held key: a held shortcut does nothing more
+    // (it must not split twenty times or leak control characters), and other held
+    // keys pass through without starting the prefix.
+    KeyResult key(const KeyChord &chord, std::int64_t nowMs, bool repeat = false) {
         refreshSpec();
         KeyResult r;
+        if (repeat && !prefix_.waiting()) {
+            if (!(config_.desktopShortcuts && findDesktopShortcut(chord))) r.forwardKey = true;
+            return r;
+        }
         if (config_.desktopShortcuts && !prefix_.waiting()) {
             if (const auto s = findDesktopShortcut(chord)) {
                 if (s->action == DesktopAction::Copy) {

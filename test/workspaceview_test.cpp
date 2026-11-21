@@ -176,7 +176,30 @@ TEST_CASE("Keys: desktop shortcuts, prefix keys and pass-through") {
     EXPECT_EQ(space.tabCount(), std::size_t(0));
 }
 
-TEST_CASE("Closing the last pane of the last tab says so") {
+TEST_CASE("A held shortcut acts once and held plain keys never start the prefix") {
+        Rig r;
+        KeyResult k = r.view.key({'e', true, true, false}, 0, false);
+        EXPECT(k.changed);
+        k = r.view.key({'e', true, true, false}, 10, true);
+        EXPECT(!k.changed && !k.forwardKey && !k.forwardPrefix && k.commands.empty());
+        EXPECT_EQ(r.space.activeTab()->tree.size(), std::size_t(2));
+        k = r.view.key(kPrefix, 20, true); // held Ctrl+B is forwarded, not the prefix
+        EXPECT(k.forwardKey);
+        EXPECT(!r.view.prefixWaiting());
+    }
+
+    TEST_CASE("setMaxPanes stops new tabs and splits at the limit") {
+        Rig r;
+        r.space.setMaxPanes(3);
+        r.view.key({'e', true, true, false}, 0); // 2 panes
+        r.view.key({'t', true, true, false}, 1); // new tab: 3 panes
+        EXPECT_EQ(r.space.paneCount(), std::size_t(3));
+        EXPECT(!r.view.key({'t', true, true, false}, 2).changed);
+        EXPECT(!r.view.key({'e', true, true, false}, 3).changed);
+        EXPECT_EQ(r.space.paneCount(), std::size_t(3));
+    }
+
+    TEST_CASE("Closing the last pane of the last tab says so") {
     Rig r;
     const KeyResult k = r.view.key({'w', true, true, false}, 0);
     EXPECT(k.empty && k.changed);

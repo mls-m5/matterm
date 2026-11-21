@@ -98,6 +98,10 @@ public:
         }
         return -1;
     }
+    // Upper bound on panes in the whole window (new tab and split are ignored at it).
+    // A frontend whose panes each hold a server lease sets it to the lease limit.
+    void setMaxPanes(std::size_t n) { maxPanes_ = n; }
+    std::size_t maxPanes() const { return maxPanes_; }
     std::size_t paneCount() const {
         std::size_t n = parked_.size();
         for (const auto &t : tabs_) n += t.tree.size();
@@ -328,6 +332,7 @@ private:
     }
 
     Outcome newTab() {
+        if (paneCount() >= maxPanes_) return Outcome::Ignored;
         std::unique_ptr<Pane> p = factory_ ? factory_() : nullptr;
         if (!p) return Outcome::Ignored;
         insertTab(++lastPane_, std::move(p));
@@ -335,7 +340,7 @@ private:
     }
 
     Outcome split(SplitDirection direction) {
-        if (tabs_.empty()) return Outcome::Ignored;
+        if (tabs_.empty() || paneCount() >= maxPanes_) return Outcome::Ignored;
         Tab &t = tabs_[active_];
         // Ask before making a pane: making one starts a process.
         if (t.tree.canSplit(t.tree.focus(), direction, spec_) != SplitResult::Ok) return Outcome::Ignored;
@@ -376,6 +381,7 @@ private:
     ParkedList parked_;
     std::size_t active_ = 0;
     PaneId lastPane_ = 0;
+    std::size_t maxPanes_ = static_cast<std::size_t>(-1);
     TabId lastTab_ = 0;
 };
 
