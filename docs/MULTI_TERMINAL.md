@@ -239,3 +239,40 @@ policy needs a decision on which keys the terminal gives back (for example a
 prefix chord or a "release keyboard" toggle) and per-browser testing. Parked until
 there is a concrete proposal; no change to the current behavior (the page captures
 what it can, see `web/main.cpp`).
+
+## 12. Why not tmux, and ideas that follow from the comparison (notes, not a plan)
+
+Question that came up: sessions that can be resumed are what tmux does, so could we
+use tmux (or write a tmux-like multiplexer) and still keep the terminal's own
+scrollback instead of the alternate screen?
+
+- **tmux does not give native scrollback.** It runs in the alternate screen and keeps
+  its own history (copy mode); the host terminal's scrollback is empty. Turning the
+  alternate screen off (`smcup@:rmcup@` overrides) makes tmux redraw in place, so the
+  host scrollback fills with repeated, partly overwritten screens. tmux keeps the
+  screen state in a server-side parser and model, which is exactly what section 4
+  chose not to do.
+- **What we have instead.** The server owns the PTY and keeps a bounded ring of the raw
+  output with absolute offsets (phase 1, implemented). A client that attaches replays
+  the stream through its own parser, so the scrollback it shows is matterm's real
+  scrollback and selection, links and search work on it. Windows and panes are views in
+  the client (the paused tabs work), not server-side layout.
+- **What tmux does that we do not (yet).** Several clients sharing one view; state that
+  survives when the ring no longer reaches back to the start of the session; an
+  application-facing layout API. These are not goals today.
+
+Ideas to keep (not scheduled):
+
+1. **Checkpoints.** Periodically store a compact serialization of the screen state
+   (as escape sequences that recreate it) next to the ring, so a long-running session
+   can be replayed from the latest checkpoint instead of from the start. This bounds
+   replay time and memory without a server-side parser on the hot path (the
+   checkpoint can be produced by a separate parser instance off the output path).
+2. **Scrollback persistence.** Optionally spill the raw stream to disk (rotated, size
+   limited, wiped on session end) for history longer than the ring.
+3. **Recording/playback** with timecodes (section 6) shares the same stream format.
+4. **Shell integration marks** (OSC 133) to jump between prompts and fold command
+   output, which tmux cannot do for the host scrollback either.
+5. **A tmux-compatible escape hatch.** If tmux is run inside matterm it works as
+   usual; matterm should then not try to replay across a tmux restart. No special
+   support planned.
