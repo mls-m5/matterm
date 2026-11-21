@@ -292,3 +292,11 @@ command and its output (and the exit status). A terminal that understands them c
 jump between prompts, select or fold one command's output and flag failed commands.
 It needs a small snippet in the shell's startup file; without it nothing changes.
 
+To discuss later (operator): shell integration (OSC 133) is not understood well enough
+yet, and the operator dislikes solutions that need edits to `.bashrc`. Questions for
+that discussion: can matterm start the shell itself with the snippet injected (for
+example through a wrapper rcfile or `PROMPT_COMMAND` set in the child's environment,
+so no user file changes), what can be guessed without any markers (the prompt line
+and the cursor position), and is the feature worth having if it only works when the
+user opts in. Nothing is decided; no code.
+
