@@ -6,6 +6,7 @@
 #include "mls-unit-test/unittest.h"
 
 #include <chrono>
+#include <random>
 
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -231,6 +232,64 @@ TEST_CASE(
     EXPECT(b.handshake());
     b.send("hello\tbo");
     EXPECT(b.expect("ready"));
+}
+
+TEST_CASE("Fuzz: garbage over many connections leaves the server and its room "
+          "sound") {
+    chatd::Options o = quick();
+    o.room.violationsToKick = 1000000; // Everything here is 127.0.0.1.
+    o.room.draftFloodPerSecond = 1000000;
+    Running r(o);
+    Line bystander(r.server->tcpPort(), 5);
+    bystander.send("hello\tbystander");
+    EXPECT(bystander.expect("ready"));
+    std::mt19937 rng(424242);
+    const std::string pieces[] = {"hello\t",
+                                  "draft\t",
+                                  "lock\t",
+                                  "nick\t",
+                                  "1",
+                                  "99999999999999999999",
+                                  "\t",
+                                  "ada",
+                                  "x",
+                                  "\x1b[2J",
+                                  "\xc3\xa5",
+                                  "\xff",
+                                  "\xe2\x80\xae",
+                                  std::string(300, 'a'),
+                                  "-1",
+                                  "0",
+                                  "bo"};
+    for (int round = 0; round < 60; ++round) {
+        Line junk(r.server->tcpPort(), 1);
+        const auto lines = rng() % 12 + 1;
+        for (std::size_t i = 0; i < lines; ++i) {
+            std::string line;
+            const auto parts = rng() % 5 + 1;
+            for (std::size_t k = 0; k < parts; ++k) {
+                line += pieces[rng() % std::size(pieces)];
+            }
+            for (char &c : line) {
+                if (c == '\n') {
+                    c = ' '; // One line stays one line.
+                }
+            }
+            junk.send(line);
+        }
+        if (round % 3 == 0) {
+            junk.send(std::string(rng() % 3000, 'z')); // Possibly too long.
+        }
+    }
+    // The bystander has only ever been sent valid lines, and a newcomer still
+    // gets in.
+    for (const auto &line : bystander.seen) {
+        EXPECT(chat::parseServerLine(line).error == chat::ProtoError::None);
+    }
+    Line late(r.server->tcpPort(), 5);
+    late.send("hello\tlate");
+    EXPECT(late.expect("ready"));
+    EXPECT(r.console("stats").find("connections") != std::string::npos);
 }
 
 TEST_CASE(
