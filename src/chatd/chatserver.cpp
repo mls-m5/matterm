@@ -64,6 +64,16 @@ struct ChatServer::Impl : std::enable_shared_from_this<ChatServer::Impl> {
     void backlog(chat::ConnId id, std::size_t bytes);
     void acceptWs();
     void acceptTcp();
+    void warnProxy() {
+        if (!warnedProxy && options.warn) {
+            warnedProxy = true;
+            options.warn(
+                "a request carries X-Forwarded-For but --trust-proxy is not "
+                "set: every visitor now counts as the proxy's one address "
+                "(connection cap, bans and mutes hit everybody). Start chatd "
+                "with --trust-proxy PROXY_ADDRESS.");
+        }
+    }
     // Counts a not yet handshaken connection against its peer address (not for
     // the trusted proxy, which is one peer for everybody). False: over the cap.
     bool reservePeer(const tcp::socket &socket, std::string &key);
@@ -78,6 +88,7 @@ struct ChatServer::Impl : std::enable_shared_from_this<ChatServer::Impl> {
     Clock::time_point started;
     std::map<chat::ConnId, std::shared_ptr<Session>> sessions;
     std::size_t pending = 0;
+    bool warnedProxy = false;
     std::map<std::string, std::size_t> pendingByPeer;
     chat::ConnId nextId = 1;
     bool stopped = false;
@@ -235,6 +246,9 @@ private:
             return;
         }
         const auto forwarded = request.count("X-Forwarded-For");
+        if (forwarded > 0 && impl_.options.trustProxy == "none") {
+            impl_.warnProxy();
+        }
         const auto client = impl_.proxy.resolve(
             peer_,
             forwarded ? std::optional<std::string_view>(

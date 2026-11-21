@@ -4,6 +4,7 @@
 
 #include <boost/asio/io_context.hpp>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -37,6 +38,9 @@ struct Options {
     // ... and how many of them one peer address may hold (not applied to the
     // trusted proxy, which stands for everybody).
     std::size_t maxPendingPerPeer = 4;
+    // Told once about a setup problem (a proxy is forwarding but --trust-proxy
+    // is not set). Empty: silent.
+    std::function<void(const std::string &)> warn;
     chat::RoomConfig room;
 };
 

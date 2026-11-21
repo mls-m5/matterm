@@ -21,7 +21,7 @@ services:
       - "--origin"
       - "${CHAT_ORIGIN:?set CHAT_ORIGIN to the page that uses the chat}"
       - "--trust-proxy"
-      - "${CHAT_PROXY_IP:-none}"
+      - "${CHAT_PROXY_IP:?set CHAT_PROXY_IP to the address the proxy connects from, or every visitor shares one address}"
       - "--console" # Operator commands: podman attach chatd
     stdin_open: true
     ports:
