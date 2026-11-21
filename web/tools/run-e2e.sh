@@ -38,6 +38,15 @@ sleep 1
 url2="http://localhost:$port2/"
 node "$here/e2e-tabs.js" "$url2" "$password" "$out"
 node "$here/e2e-tabs-layout.js" "$url2" "$password" "$out"
-node "$here/e2e-tabs-limit.js" "$url2" "$password" "$out"
+# The sessions of the scripts above are still kept (up to the server's session
+# cap), so the limit check gets a fresh server of its own.
+kill "$pid2" 2>/dev/null || true
+port3=$((port + 2))
+"$server" --config "$work/persistent.json" --credentials "$work/cred" \
+    --port "$port3" --origin "http://localhost:$port3" --static-dir "$site" \
+    -- /bin/bash >"$work/server3.log" 2>&1 &
+pid2=$!
+sleep 1
+node "$here/e2e-tabs-limit.js" "http://localhost:$port3/" "$password" "$out"
 node "$here/e2e-demo.js" "${url}?demo" "$out/demo.png"
 echo "screenshots in $out"
