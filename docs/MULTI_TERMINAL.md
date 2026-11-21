@@ -1,6 +1,8 @@
 # Several terminals in one window, persistent sessions and recording
 
-Status: plan, nothing implemented. Decisions are marked **Decided** (agreed with
+Status: server sessions (phase 1) and the browser tabs with two panes (phase 2
+and part of 4) are implemented; recording, settings and the native client are
+not. Decisions are marked **Decided** (agreed with
 the owner), **Proposed** (recommended, confirm before building) or **Open**.
 This replaces the "Session Multiplexing" notes in ROADMAP.md as the place to
 refine the design; settings UI work comes after this (settings may be per window
@@ -37,21 +39,23 @@ tty  ->  bytes  ->  [ transport ]  ->  parser  ->  model  ->  renderer
 
 ## 3. Sessions are owned by the server, independent of connections
 
-Today one login allows one WebSocket upgrade, and the PTY lives and dies with that
-connection (`PtySessionHost`). The change:
+Status: implemented (`src/server/sessionregistry.*`, docs/PROTOCOL.md section 11,
+docs/SERVER.md "Sessions"). Before it, one login allowed one WebSocket upgrade and
+the PTY lived and died with that connection (`PtySessionHost`). The change:
 
-- **Proposed:** a `SessionRegistry` in the server owns terminal sessions
+- **Implemented:** a `SessionRegistry` in the server owns terminal sessions
   (`sessionId`, PTY, child process group, optional replay buffer, state:
   attached or detached, creation time, last activity). A connection attaches to a
   session and detaches when it closes; closing the connection does not kill the
   session unless persistence is off.
 - Session ids are random 128-bit values, only valid for the logged-in owner,
   never derived from anything guessable, never put in logs.
-- **Proposed:** one WebSocket per terminal, with the session chosen in the
-  upgrade (`/ws?session=<id>` or `new`). The existing protocol is reused; each
-  login may then hold several upgrades (a limit, for example 16, is a setting).
-  A later protocol v2 with channel ids on one connection stays possible and is
-  not needed for tabs.
+- **Implemented:** one WebSocket per terminal, always the bare `GET /ws`: the
+  terminal is chosen in the Hello message (an empty id is a new terminal,
+  otherwise the 32-hex id), never in the URL, so ids stay out of logs. The
+  existing protocol is reused; each login may hold several concurrent upgrades
+  (`max_upgrades_per_login`, 16). A later protocol v2 with channel ids on one
+  connection stays possible and is not needed for tabs.
 - Limits: maximum sessions, maximum detached sessions, `detached_timeout`
   (a detached session is killed after this long; `0` = never), and the existing
   per-connection limits. A shell that exits ends its session; the client is told.
@@ -62,7 +66,7 @@ connection (`PtySessionHost`). The change:
 
 ## 4. Replay buffer (resume without a server-side parser)
 
-- **Proposed:** each session keeps a bounded ring of the most recent raw output,
+- **Implemented:** each session keeps a bounded ring of the most recent raw output,
   stored as chunks `(timestamp, bytes)`. On reattach the server sends the ring to
   the client, whose parser rebuilds the screen, then continues live. The client
   tells the server its size; the server resizes the PTY (which makes programs
@@ -78,32 +82,66 @@ connection (`PtySessionHost`). The change:
   for private-mode set/reset sequences (`?1049`, `?2004`, `?1000..?1006`, `?25`)
   and prefixes the replay with the current mode state. This is a string search,
   not a parser.
-- Protocol: use the planned resume fields in docs/PROTOCOL.md (`sessionId`,
+- Protocol: the resume fields of docs/PROTOCOL.md section 11 (`sessionId`,
   `resumeOffset`, `Welcome.flags`), negotiated through `features` bits. The
   offset counts output bytes since session start so a client can resume from where
   it stopped when the data is still in the ring, and otherwise gets a full replay.
 
 ## 5. Client structure (browser, later native)
 
-- **Proposed:** the global `App` in `web/main.cpp` becomes a window containing a
-  list of `TerminalView`s, each with its own `TerminalModel`, `VtParser`,
-  `TerminalLink`/`ClientSession`, selection and cursor-glide state; only the
-  active view renders and receives input. Inactive views keep parsing so they do
-  not lose output, and show an activity/bell/exit marker on their tab.
-- Rendering stays one canvas; the active view draws into the pane rectangle. The
-  frame signature and idle throttling (web/main.cpp `frame()`) become per view,
-  and a view that is not visible costs no rendering.
-- Tab bar: HTML/CSS above the canvas (accessible, themable) rather than drawn in
-  the canvas; actions: new, close, next/previous, rename. **Decided:** key
-  bindings wait. Which keys the page captures and which the browser keeps (for
-  example Ctrl+L, Ctrl+R, Ctrl+W, Ctrl+T) is an unsolved general problem, see
-  section 11; tabs start with mouse/touch controls only.
-- Panes: a layout tree (split H/V with ratios) over views, focus movement and
-  per-pane resize. **Decided:** tabs first, panes only after tabs work.
-- Moving a terminal between windows: attach the same `sessionId` from another
-  window (follows from section 3, no extra mechanism).
+Status: implemented for the browser (phase 2, and two panes from phase 4). The
+browser parts (WASM and page) are type-checked and unit-tested but their e2e
+checks (`web/tools/e2e-tabs.js`, `e2e-sessions.js`) are run by the integrator.
+
+- **Portable, SDL-free core** (`src/frontend/`, header-only, native tests):
+  - `TerminalView` owns one terminal: `TerminalModel`, `VtParser`, palette,
+    title, selection and cursor glide, fed by one `TerminalLink`. It keeps
+    parsing while not shown, tells how its link ended (exited, taken over by
+    another window, session unavailable, connection lost) and never reconnects
+    by itself. A full replay (`Welcome.flags` reset) clears it completely.
+  - `TabModel` is the data side of a tab strip: ordered tabs, the tab in each
+    pane, activity marks, a compact flag and at most two panes with a clamped
+    divider that collapses to the focused pane in a narrow window. No rendering
+    and no terminals, so a native client can reuse it.
+- **Browser:** `web/main.cpp` holds a list of views (each with its own channel and
+  `ClientSession`) and renders the shown ones; every view keeps ticking,
+  acknowledging and following the size of its pane. One canvas; each pane is
+  drawn into a viewport (`SdlBackend::setViewport`). The frame signature covers
+  all panes, so an idle window costs nothing.
+- **Tab strip** (decided with the owner): HTML/CSS **above** the canvas
+  (`web/tabs.js`), accessible and themable, mouse/touch only (no key bindings,
+  see section 11). It can shrink to small numbered boxes (compact mode). Actions:
+  new terminal, select, close, split/unsplit, compact, reconnect, take back,
+  close all sessions, log out. Titles come from programs and are shown as plain,
+  short text only.
+- **Panes** (decided with the owner): two terminals side by side when the window
+  is wide enough (each at least 24 columns), with a draggable divider; at most
+  two for now. A click or the wheel in a pane moves the keyboard focus there.
+- **Explicit actions only.** Nothing reconnects, attaches or takes a terminal back
+  by itself. A view whose connection dropped offers Reconnect (attach again from
+  the offset it stopped at); a view that was taken over offers Take back; a new
+  browser window is *offered* the terminals the first one had and attaches them
+  only when the user says so. Enter in an ended terminal closes its tab (the
+  last one returns to the login form).
+- **Closing** sends the protocol `Close`; the tab stays until the server
+  confirmed (Exit, or a normal 1000 close), and a network failure keeps the tab
+  and the id. **Logout and close-all** count only when the authenticated POST
+  succeeded. The page remembers only validated opaque ids
+  (`web/sessionids.js`): the ones this window had (sessionStorage, attached again
+  after a reload) and every id the browser had (localStorage, offered only).
+- **Native, later** (design only): the same `TerminalView` and `TabModel`. Tabs or
+  small boxes at the top *or* at the left, together with a borderless window in
+  which they are part of a thicker, own title bar (window chrome drawn by the
+  application: drag area, caption buttons, the compact strip). The native app
+  already runs `PtyLink` in-process, so a view there is a `TerminalView` over
+  that link; moving a terminal between windows is "attach the same session"
+  where the server is involved and a hand-over of the view object otherwise.
+  Not started; the browser strip is the reference for behavior.
+- Known limits: no tab reordering by drag, no key bindings, touch cannot drag the
+  divider, only two panes, no per-pane font size.
 - The framed window layout (docs/tasks/window-frame.md) is the container for the
-  tab bar.
+  tab strip; the page keeps the window a whole number of cells high with the
+  strip inside it.
 
 ## 6. Recording and playback (later)
 
@@ -127,7 +165,7 @@ connection (`PtySessionHost`). The change:
   detached) or client side (no server change). **Open:** start with the server
   because it already has the timed chunks.
 
-## 7. Configuration (names are proposals)
+## 7. Configuration (implemented except recording; see docs/SERVER_CONFIG.md)
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -135,8 +173,10 @@ connection (`PtySessionHost`). The change:
 | `replay_buffer_bytes` | `0` | per-session ring size; `0` = no buffer, no persistence |
 | `replay_total_bytes` | 64 MiB | cap over all sessions |
 | `max_sessions` | 16 | simultaneous sessions |
+| `max_detached_sessions` | 16 | sessions with nobody attached |
+| `max_upgrades_per_login` | 16 | concurrent WebSocket upgrades of one login |
 | `detached_timeout_seconds` | 3600 | kill detached sessions after this; `0` = never |
-| `recording_dir` | empty | empty = no recording |
+| `recording_dir` | empty | empty = no recording (not implemented) |
 
 Every number is configuration, none is a protocol constant, as for the existing
 limits (docs/SERVER_CONFIG.md).
@@ -151,9 +191,10 @@ limits (docs/SERVER_CONFIG.md).
 - The replay buffer and recordings contain terminal output, which can include
   secrets. They live in memory (buffer) or in 0600 files (recording), are never
   logged, and are wiped on session end.
-- More connections per login change the rate-limit and `SessionStore` rules
-  (currently one upgrade per login); the security review's findings and the
-  pending `trusted_proxy` work apply here. Re-review after this feature.
+- More connections per login change the rate-limit and `SessionStore` rules (a
+  login may now hold several concurrent upgrades, `max_upgrades_per_login`); the
+  security review's findings and `trusted_proxy` apply here. Re-review after this
+  feature.
 
 ## 9. Phases
 
@@ -162,10 +203,12 @@ limits (docs/SERVER_CONFIG.md).
    timeouts, tests (dropped connection, take-over, timeout, buffer wrap, memory
    caps, shell exit while detached). Fuzz the new message fields.
 2. **Client: several views and tabs** in the browser: `TerminalView` refactor of
-   `App`, tab bar, background parsing, per-view throttling, e2e tests.
+   `App`, tab bar, background parsing, per-view throttling, e2e tests. *Done*
+   (see section 5; the browser e2e runs are the integrator's).
 3. **Recording and playback**: format, server-side recorder, `TimedLink` player
    and a small player UI.
-4. **Panes** (splits, focus, resize).
+4. **Panes** (splits, focus, resize). *Two side by side in the browser are done*;
+   more than two, vertical splits and a layout tree are not.
 5. **Settings UI** on top of the per-window/per-terminal structure.
 6. **Native app** support for the same model (separate windows first, as in the
    ROADMAP item about moving sessions between windows in one process).
@@ -174,13 +217,13 @@ Phases 1 and 2 are independent enough to run in parallel once the protocol
 fields are fixed; phase 2 touches `web/main.cpp` heavily, so it should not overlap
 with other work in that file.
 
-## 10. Open questions to settle before phase 1
+## 10. Questions that were open before phase 1
 
-1. Exact resume fields and the `features` bit in docs/PROTOCOL.md.
+1. Exact resume fields and the `features` bit: settled, docs/PROTOCOL.md section 11
+   (feature bit `0x00000001`, ids in Hello, absolute output offsets).
 2. Whether non-persistent mode (`replay_buffer_bytes = 0`) can still allow several
-   simultaneous terminals (yes in this plan: they just end with their
-   connection).
-3. asciicast v2 or a variant for recordings (see section 6).
+   simultaneous terminals: yes, they end with their connection.
+3. asciicast v2 or a variant for recordings (see section 6): still open.
 
 Settled: a second attach takes over (section 3); tab key bindings wait (section 11).
 
@@ -196,3 +239,64 @@ policy needs a decision on which keys the terminal gives back (for example a
 prefix chord or a "release keyboard" toggle) and per-browser testing. Parked until
 there is a concrete proposal; no change to the current behavior (the page captures
 what it can, see `web/main.cpp`).
+
+## 12. Why not tmux, and ideas that follow from the comparison (notes, not a plan)
+
+Question that came up: sessions that can be resumed are what tmux does, so could we
+use tmux (or write a tmux-like multiplexer) and still keep the terminal's own
+scrollback instead of the alternate screen?
+
+- **tmux does not give native scrollback.** It runs in the alternate screen and keeps
+  its own history (copy mode); the host terminal's scrollback is empty. Turning the
+  alternate screen off (`smcup@:rmcup@` overrides) makes tmux redraw in place, so the
+  host scrollback fills with repeated, partly overwritten screens. tmux keeps the
+  screen state in a server-side parser and model, which is exactly what section 4
+  chose not to do.
+- **What we have instead.** The server owns the PTY and keeps a bounded ring of the raw
+  output with absolute offsets (phase 1, implemented). A client that attaches replays
+  the stream through its own parser, so the scrollback it shows is matterm's real
+  scrollback and selection, links and search work on it. Windows and panes are views in
+  the client (the paused tabs work), not server-side layout.
+- **What tmux does that we do not (yet).** Several clients sharing one view; state that
+  survives when the ring no longer reaches back to the start of the session; an
+  application-facing layout API. These are not goals today.
+
+Ideas to keep (not scheduled):
+
+1. **Checkpoints.** Periodically store a compact serialization of the screen state
+   (as escape sequences that recreate it) next to the ring, so a long-running session
+   can be replayed from the latest checkpoint instead of from the start. This bounds
+   replay time and memory without a server-side parser on the hot path (the
+   checkpoint can be produced by a separate parser instance off the output path).
+2. **Scrollback persistence.** Optionally spill the raw stream to disk (rotated, size
+   limited, wiped on session end) for history longer than the ring.
+3. **Recording/playback** with timecodes (section 6) shares the same stream format.
+4. **Shell integration marks** (OSC 133) to jump between prompts and fold command
+   output, which tmux cannot do for the host scrollback either.
+5. **A tmux-compatible escape hatch.** If tmux is run inside matterm it works as
+   usual; matterm should then not try to replay across a tmux restart. No special
+   support planned.
+
+Combined idea (operator): **a checkpointed on-disk scrollback.** The raw stream is
+stored on disk in segments (rotated, size-limited, wiped when the session ends); each
+checkpoint (idea 1) is recorded in that log as a marker plus the serialized screen
+state. To go back in time, or to play a recording from a given moment, a client
+loads the nearest earlier checkpoint and replays from there instead of from the
+start. Recording with timecodes (idea 3) uses the same log. Open: segment and
+checkpoint format, size and retention limits, privacy (the log holds everything that
+was on screen, including anything typed at a password prompt that echoes), and
+whether replay starts from the server or from a downloaded copy.
+
+Note on idea 4 (OSC 133): the shell prints invisible markers around the prompt, the
+command and its output (and the exit status). A terminal that understands them can
+jump between prompts, select or fold one command's output and flag failed commands.
+It needs a small snippet in the shell's startup file; without it nothing changes.
+
+To discuss later (operator): shell integration (OSC 133) is not understood well enough
+yet, and the operator dislikes solutions that need edits to `.bashrc`. Questions for
+that discussion: can matterm start the shell itself with the snippet injected (for
+example through a wrapper rcfile or `PROMPT_COMMAND` set in the child's environment,
+so no user file changes), what can be guessed without any markers (the prompt line
+and the cursor position), and is the feature worth having if it only works when the
+user opts in. Nothing is decided; no code.
+
