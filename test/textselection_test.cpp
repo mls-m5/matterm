@@ -36,6 +36,61 @@ TEST_CASE("Shift click preserves the anchor and shift drag continues in either "
     EXPECT_EQ(text(*selected, model), "5");
 }
 
+TEST_CASE("Shift click continues from the last click, drag, word or line") {
+    TerminalModel model(20, 3, 10);
+    model.write(U"one two three\r\nfour five\r\nsix");
+    std::optional<Selection> s;
+    // After a plain click (not drawn, but it is the anchor).
+    selectAt(s, model, {0, 4}, false, 1);
+    selectAt(s, model, {1, 3}, true, 1);
+    EXPECT_EQ(text(*s, model), "two three\nfour");
+    // After a drag: the anchor is where the drag started.
+    selectAt(s, model, {0, 8}, false, 1);
+    s->extend(model, {0, 10});
+    selectAt(s, model, {0, 0}, true, 1);
+    EXPECT_EQ(text(*s, model), "one two t");
+    // After a double click the word stays selected, whichever side is clicked.
+    selectAt(s, model, {0, 5}, false, 2); // "two"
+    selectAt(s, model, {1, 1}, true, 2);
+    EXPECT_EQ(text(*s, model), "two three\nfo");
+    selectAt(s, model, {0, 5}, false, 2);
+    selectAt(s, model, {0, 0}, true, 2);
+    EXPECT_EQ(text(*s, model), "one two");
+    // After a triple click the line stays selected.
+    selectAt(s, model, {1, 2}, false, 3);
+    selectAt(s, model, {2, 1}, true, 3);
+    EXPECT_EQ(text(*s, model), "four five\nsi");
+    selectAt(s, model, {1, 2}, false, 3);
+    selectAt(s, model, {0, 4}, true, 3);
+    EXPECT(text(*s, model).rfind("two three\nfour five", 0) ==
+           0); // Whole lines.
+    // Further shift clicks keep that anchor (the end of line two) and flip
+    // around it.
+    selectAt(s, model, {2, 2}, true, 1);
+    EXPECT_EQ(text(*s, model), "\nsix");
+}
+
+TEST_CASE("The anchor survives output, scrolling and history, not a resize") {
+    TerminalModel model(10, 2, 20);
+    model.write(U"anchor");
+    std::optional<Selection> s;
+    selectAt(s, model, {0, 2}, false, 1);
+    for (int i = 0; i < 5; ++i) {
+        model.write(U"\r\nline");
+    }
+    EXPECT(s->valid(model)); // Output scrolled it into history.
+    model.scrollToOldest();
+    model.advanceViewport(1);
+    const auto cell = Cell{model.firstRetainedRow(), 5};
+    selectAt(s, model, cell, true, 1); // Scrolled back: anchor still there.
+    EXPECT_EQ(s->anchor.column, 2u);
+    EXPECT_EQ(text(*s, model), "chor");
+    model.resize(12, 2);
+    EXPECT(!s->valid(model)); // The rows were reflowed: the anchor is gone,
+    selectAt(s, model, {0, 3}, true, 1); // so a shift click starts afresh.
+    EXPECT_EQ(s->anchor.column, 3u);
+}
+
 TEST_CASE("Shift click without a selection starts a cell selection") {
     TerminalModel model(20, 2);
     model.write(U"hello world");
