@@ -368,7 +368,7 @@ proxy snippet, with measurements of draft traffic, 10. TLS in the native client.
 5. **Names**: the demo picks `guest-NNNN`; `/nick` is allowed (every 10 s). Keep, or
    let the first name be chosen before connecting?
 6. **When may the chat appear on the public Pages demo?** It stays hidden until a
-   page is opened with `?chat=wss://...`; a visible link or a default address is
+   page is opened with `?chat=wss://...`; a visible link or a default address is (the demo now defaults to wss://xn--laserskld-67a.se/matterm, `?chat=off` disables it)
    your call, as is whether `matterm-demo` and `mattrix` should get a chat link
    (they would need a TLS WebSocket client: OpenSSL is not installed in the
    development sandbox).
