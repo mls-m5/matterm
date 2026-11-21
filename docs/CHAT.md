@@ -340,16 +340,39 @@ proxy snippet, with measurements of draft traffic, 10. TLS in the native client.
 
 ## 10. Still open
 
-1. The TTL and exact numbers (all proposals); the 3-per-second draft rate.
-2. Resize handling in the inline renderer, and whether pulsing text (SGR blink or
-   our own redraw) works the same in every host.
-3. The admin console's transport in the container (stdin through `podman attach`
-   is what the files use; a Unix socket would also work). Static linking of
-   Boost.Beast is verified.
-4. The three-line room rules (English) and who watches the room.
-5. Starting the separate program from inside Mattrix OS.
-6. Whether `lock` after 5 s should lengthen later ("people type slower than you
-   think"): it is a constant in both client and server.
+### Questions for the owner (decisions only you can make)
+
+1. **Where does it run, and under which domain?** (`chatd` needs an address, a
+   TLS-terminating proxy, and the exact page origin(s) that may use it.)
+2. **The three room rules** (English), shown in the notice and in the server's
+   `say`; and **who watches the room** (the operator console is the only tool).
+3. **TTL of messages in the server's memory** (proposed 45 minutes) and how many
+   messages a newcomer sees (the ring: 200). Shorter is more private.
+4. **The limits**: 64 connections, 3 per address, one message per 2 s with a burst
+   of 3, 120 messages a minute for the whole room, a ban of 5 minutes after 5
+   mistakes in a minute. Everyone behind one NAT shares an address (and a ban).
+5. **Names**: the demo picks `guest-NNNN`; `/nick` is allowed (every 10 s). Keep, or
+   let the first name be chosen before connecting?
+6. **When may the chat appear on the public Pages demo?** It stays hidden until a
+   page is opened with `?chat=wss://...`; a visible link or a default address is
+   your call, as is whether `matterm-demo` and `mattrix` should get a chat link
+   (they would need a TLS WebSocket client: OpenSSL is not installed in the
+   development sandbox).
+7. **Five quiet seconds** before a draft is posted: keep, or lengthen? (A constant
+   in `ChatClient` and, as a backstop, `RoomConfig::lockBackstop`, 6.5 s.)
+8. **Starting `mattrix-chat` from inside Mattrix OS** (a host hook that launches the
+   separate program) or leaving the built-in `chat` command as the only way.
+9. **Wide characters and emoji** stay refused (ASCII and Latin letters only); say if
+   you want more.
+
+### Open technical points
+
+* Resize handling in the inline renderer: the old region is left behind and a
+  new one starts below (the known weak spot of inline interfaces); pulsing text
+  is our own redraw, so it behaves the same in every host.
+* The admin console's transport in the container: stdin through `podman attach`
+  is what the files use; a Unix socket would also work.
+* The web bridge and the Podman files have not been run (see section 11).
 
 ## 11. Not verified
 
