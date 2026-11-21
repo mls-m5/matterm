@@ -42,8 +42,14 @@ struct Selection {
                 model.selectionEpoch()};
     }
 
-    // Shift+click is always cell-granular and preserves the current anchor.
+    // Shift+click is always cell-granular and continues from the anchor. After
+    // a double or triple click the anchor is the far end of the clicked word or
+    // line (as seen from `cell`), so that unit stays selected, like in editors.
     void shiftTo(Cell cell) {
+        if (origin) {
+            anchor =
+                before(cell, origin->first) ? origin->second : origin->first;
+        }
         end = cell;
         unit = Unit::Character;
         origin.reset();

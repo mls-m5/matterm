@@ -17,8 +17,13 @@ unchanged.
   direction, preserving the complete word where the drag started.
 - Triple click selects a logical line, including its soft-wrapped rows.
   Dragging extends by complete logical lines in either direction.
-- Shift+click after a word/line selection preserves its current anchor but
-  returns to cell-granular extension. A plain click starts a new selection.
+- Shift+click after a word/line selection keeps that word or line selected and
+  extends cell by cell from its far end (the anchor is the end of the unit
+  opposite to the click); later Shift+clicks keep that anchor. A plain click
+  starts a new selection and is the anchor for the next Shift+click. The anchor
+  survives output, scrolling and history; a resize, alternate-screen switch,
+  reset or a scroll-region scroll invalidates it (rows are reflowed), and then
+  Shift+click starts afresh at the clicked cell.
 - Ctrl+Shift+C copies UTF-8. Soft-wrapped rows are joined without a newline;
   explicit line breaks are retained. Existing trailing-space copy policy is
   unchanged. Copy is bounded to **1 MiB**; oversized selections are not
