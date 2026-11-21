@@ -3,6 +3,7 @@
 // SDL event helpers shared by the native terminal and the browser build:
 // key and button mapping, text selection, and window-to-cell conversion.
 
+#include "cellhit.h"
 #include "inputencoder.h"
 #include "sdlbackend.h"
 #include "terminalmodel.h"
@@ -130,13 +131,18 @@ inline bool copySelection(const Selection &selection,
     return text && SDL_SetClipboardText(text->c_str()) == 0;
 }
 
+// The cell under the mouse (window coordinates). For a pane of a window with
+// several, `originX` is the pane's left edge and `paneWidth` its width, both in
+// device pixels; the defaults are the whole drawable.
 inline std::optional<TerminalModel::TextCell> mouseCell(
     SDL_Window &window,
     const SdlBackend &backend,
     const TerminalModel &model,
     int mouseX,
     int mouseY,
-    bool clampToText) {
+    bool clampToText,
+    int originX = 0,
+    int paneWidth = 0) {
     int windowWidth = 0, windowHeight = 0;
     int drawableWidth = 0, drawableHeight = 0;
     SDL_GetWindowSize(&window, &windowWidth, &windowHeight);
@@ -145,29 +151,16 @@ inline std::optional<TerminalModel::TextCell> mouseCell(
             SDL_GetRenderer(&window), &drawableWidth, &drawableHeight) < 0) {
         return std::nullopt;
     }
-    const auto &viewport = model.viewport();
-    const int cellWidth = backend.cellWidth();
-    const int cellHeight = backend.cellHeight();
-    const double x = double(mouseX) * drawableWidth / windowWidth;
+    const double x = double(mouseX) * drawableWidth / windowWidth - originX;
     const double y = double(mouseY) * drawableHeight / windowHeight;
-    const double textWidth =
-        std::min(double(drawableWidth), double(model.columns()) * cellWidth);
-    const double textHeight =
-        std::min(double(drawableHeight), double(model.rows()) * cellHeight);
-    if (textWidth < 1 || textHeight < 1 || !viewport.rowCount() ||
-        (!clampToText &&
-         (x < 0 || x >= textWidth || y < 0 || y >= textHeight))) {
-        return std::nullopt;
-    }
-    const auto column =
-        std::size_t(std::clamp(x, 0.0, textWidth - 1) / cellWidth);
-    const auto row = std::size_t((std::clamp(y, 0.0, textHeight - 1) -
-                                  double(viewport.pixelOffset(cellHeight))) /
-                                 cellHeight);
-    return TerminalModel::TextCell{model.firstRetainedRow() +
-                                       viewport.firstRow() +
-                                       std::min(row, viewport.rowCount() - 1),
-                                   column};
+    return cellAt(model,
+                  x,
+                  y,
+                  backend.cellWidth(),
+                  backend.cellHeight(),
+                  paneWidth > 0 ? paneWidth : drawableWidth,
+                  drawableHeight,
+                  clampToText);
 }
 // Poll after model/viewport updates so stationary-pointer previews cannot
 // retain stale text after output, scrolling or a screen switch.
@@ -175,7 +168,9 @@ inline std::optional<UrlMatch> hoveredUrl(SDL_Window &window,
                                           const SdlBackend &backend,
                                           const TerminalModel &model,
                                           bool applicationMouse,
-                                          bool captured) {
+                                          bool captured,
+                                          int originX = 0,
+                                          int paneWidth = 0) {
     const auto mod = modifiers(SDL_GetModState());
     constexpr auto focus = SDL_WINDOW_MOUSE_FOCUS | SDL_WINDOW_INPUT_FOCUS;
     if (!localLinkGesture(mod.control, mod.shift, applicationMouse, captured) ||
@@ -184,7 +179,8 @@ inline std::optional<UrlMatch> hoveredUrl(SDL_Window &window,
     }
     int x = 0, y = 0;
     SDL_GetMouseState(&x, &y);
-    const auto cell = mouseCell(window, backend, model, x, y, false);
+    const auto cell =
+        mouseCell(window, backend, model, x, y, false, originX, paneWidth);
     return cell ? urlAt(model, *cell) : std::nullopt;
 }
 } // namespace frontend

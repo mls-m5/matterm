@@ -229,6 +229,37 @@ TEST_CASE(
     EXPECT(f.output.empty());
 }
 
+TEST_CASE("A zero resume offset requires reconstruction rather than retaining "
+          "stale frontend state") {
+    ClientSession::Config config;
+    config.replay = true;
+    config.sessionId = "00112233445566778899aabbccddeeff";
+    config.resumeOffset = 0;
+    config.resetForReplay = [] {};
+    Fixture f(config);
+    f.channel.opened();
+    f.channel.deliver(
+        Welcome{1, config.sessionId, 0, welcomeResumed, featureReplay});
+    EXPECT(f.session.state() == ClientSession::State::Failed);
+}
+
+TEST_CASE(
+    "Replay-capable new terminals require opaque 128-bit lowercase hex ids") {
+    for (const auto &id : {std::string(),
+                           std::string("abc"),
+                           std::string(32, 'g'),
+                           std::string("00112233445566778899aabbccddeeff")}) {
+        ClientSession::Config config;
+        config.replay = true;
+        Fixture f(config);
+        f.channel.opened();
+        f.channel.deliver(Welcome{1, id, 0, 0, featureReplay});
+        EXPECT(f.session.state() == (id.size() == 32 && id.front() == '0'
+                                         ? ClientSession::State::Running
+                                         : ClientSession::State::Failed));
+    }
+}
+
 TEST_CASE("A hostile replay offset cannot wrap the output counter") {
     ClientSession::Config config;
     config.replay = true;
@@ -377,7 +408,9 @@ TEST_CASE("Server errors and lost connections are reported once") {
         EXPECT_EQ(f.closes.size(), std::size_t(1));
         EXPECT(f.closes[0].find("Timeout") != std::string::npos);
         EXPECT(f.closes[0].find("idle") != std::string::npos);
+        EXPECT(f.session.errorCode() == ErrorCode::Timeout);
         f.channel.lost(1008);
+        EXPECT(f.session.errorCode() == ErrorCode::Timeout);
         EXPECT_EQ(f.closes.size(), std::size_t(1));
     }
     {
@@ -387,6 +420,7 @@ TEST_CASE("Server errors and lost connections are reported once") {
         EXPECT(f.session.state() == ClientSession::State::Failed);
         EXPECT_EQ(f.closes.size(), std::size_t(1));
         EXPECT(f.closes[0].find("1006") != std::string::npos);
+        EXPECT_FALSE(f.session.errorCode().has_value());
     }
 }
 
@@ -460,6 +494,42 @@ TEST_CASE("Close sends Close and keeps listening for Exit") {
     f.channel.deliver(Exit{-1, 1});
     EXPECT_EQ(f.exits.size(), std::size_t(1));
     EXPECT_EQ(f.exits[0].second, 1);
+}
+
+TEST_CASE("The transport close code is reported, and only when it closed") {
+    {
+        // A normal close after our Close is distinguishable from a network
+        // failure without reading the human text.
+        Fixture f;
+        f.connect();
+        EXPECT(!f.session.closeCode().has_value());
+        f.session.close();
+        f.channel.lost(1000);
+        EXPECT(f.session.closeCode() == std::optional<int>(1000));
+        EXPECT(!f.session.errorCode().has_value());
+    }
+    {
+        Fixture f;
+        f.connect();
+        f.channel.lost(1006);
+        EXPECT(f.session.closeCode() == std::optional<int>(1006));
+    }
+    {
+        // A protocol error closes the channel itself: no code from the peer.
+        Fixture f;
+        f.connect();
+        f.channel.deliver(Error{ErrorCode::Replaced, "session taken over"});
+        EXPECT(!f.session.closeCode().has_value());
+        EXPECT(f.session.errorCode() ==
+               std::optional<ErrorCode>(ErrorCode::Replaced));
+    }
+    {
+        // A normal exit is not a close.
+        Fixture f;
+        f.connect();
+        f.channel.deliver(Exit{0, 0});
+        EXPECT(!f.session.closeCode().has_value());
+    }
 }
 
 TEST_CASE("Client and server sessions work together end to end") {

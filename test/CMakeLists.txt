@@ -55,6 +55,11 @@ if(BUILD_TESTING)
     target_link_libraries(urllink_test PRIVATE matterm::terminal)
     add_test(NAME url_link COMMAND urllink_test)
 
+    add_executable(cellhit_test cellhit_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(cellhit_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+    target_link_libraries(cellhit_test PRIVATE matterm::terminal matterm::vt)
+    add_test(NAME cell_hit COMMAND cellhit_test)
+
     add_executable(textselection_test textselection_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(textselection_test PRIVATE ../src/frontend)
     target_link_libraries(textselection_test PRIVATE matterm::terminal)
@@ -97,6 +102,11 @@ if(BUILD_TESTING)
     add_executable(clientsession_test clientsession_test.cpp mls-unit-test/test_main.cpp)
     target_link_libraries(clientsession_test PRIVATE matterm::transport)
     add_test(NAME client_session COMMAND clientsession_test)
+
+    add_executable(terminalview_test terminalview_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(terminalview_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+    target_link_libraries(terminalview_test PRIVATE matterm::transport matterm::vt matterm::terminal)
+    add_test(NAME terminal_view COMMAND terminalview_test)
 
     add_executable(scriptedlink_test scriptedlink_test.cpp mls-unit-test/test_main.cpp)
     target_link_libraries(scriptedlink_test PRIVATE matterm::transport matterm::vt)

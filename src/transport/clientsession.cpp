@@ -70,6 +70,7 @@ void ClientSession::onClosed(int code) {
     if (state_ == State::Failed || state_ == State::Exited) {
         return;
     }
+    closeCode_ = code;
     fail("connection lost (close code " + std::to_string(code) + ")", code);
 }
 
@@ -104,14 +105,23 @@ void ClientSession::handle(const Welcome &message) {
     const auto offered = config_.replay ? featureReplay : 0;
     const bool resumed = (message.flags & welcomeResumed) != 0;
     const bool reset = (message.flags & welcomeOutputLost) != 0;
-    if ((message.features & ~offered) || (message.flags & ~3u) ||
+    const bool validReplayId =
+        message.sessionId.size() == 32 &&
+        std::all_of(
+            message.sessionId.begin(), message.sessionId.end(), [](char c) {
+                return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+            });
+    if (((message.features & featureReplay) && !validReplayId) ||
+        (message.features & ~offered) || (message.flags & ~3u) ||
         (reset && !resumed) ||
         (resumed && !(message.features & featureReplay)) ||
         (resumed ? (config_.sessionId.empty() ||
                     message.sessionId != config_.sessionId)
                  : (!config_.sessionId.empty() || message.startOffset != 0 ||
                     message.flags != 0)) ||
-        (resumed && !reset && message.startOffset != config_.resumeOffset)) {
+        (resumed && !reset &&
+         (!config_.resumeOffset ||
+          message.startOffset != config_.resumeOffset))) {
         fail("protocol error: invalid replay negotiation", 1002);
         return;
     }
@@ -182,6 +192,7 @@ void ClientSession::handle(const Pong &message) {
 }
 
 void ClientSession::handle(const protocol::Error &message) {
+    errorCode_ = message.code;
     fail(std::string("server error ") + toString(message.code) + ": " +
              message.reason,
          1000);

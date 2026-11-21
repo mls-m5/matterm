@@ -1,6 +1,7 @@
 #pragma once
 
 #include "renderbackend.h"
+#include "rgb8.h"
 
 #include <memory>
 #include <string>
@@ -28,6 +29,17 @@ public:
     // Switch to another size of the same font without recreating the renderer.
     // Throws and keeps the old font if the new atlas cannot be built.
     void setPixelSize(int pixelSize);
+
+    // Draw into a rectangle of the drawable (device pixels) instead of all of
+    // it: one pane of a window with several. columns(), rows() and render()
+    // then work on the rectangle (render() fills only it, with the palette
+    // background; coordinates inside are relative to it). Throws
+    // std::invalid_argument for an empty rectangle or a negative origin and
+    // keeps the old setting. resetViewport() returns to the whole drawable.
+    void setViewport(int x, int y, int width, int height);
+    void resetViewport();
+    // Fills the whole drawable, ignoring any viewport: the gaps between panes.
+    void clear(Rgb8 color);
 
     // Drawable-pixel metrics; placement in RenderFrame is always in cells.
     int cellWidth() const noexcept;

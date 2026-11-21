@@ -6,9 +6,11 @@
 #include <SDL.h>
 #include <SDL_ttf.h>
 
+#include <array>
 #include <cstdlib>
 #include <memory>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 struct Libraries {
@@ -79,6 +81,71 @@ TEST_CASE("Backend renders independent rows and per-cell backgrounds") {
     EXPECT_EQ(fixture.pixel(w + 1, h + 1), Uint32(0x5a5046));
     EXPECT_EQ(fixture.pixel(w * 3, 1), Uint32(0x1e1e1e));
     backend.present();
+}
+
+TEST_CASE("A viewport confines sizes and drawing to one pane") {
+    Fixture fixture; // The window is 320x160.
+    const Uint32 gap = 0x0a141e;
+    fixture.backend->clear({10, 20, 30});
+    const int w = fixture.backend->cellWidth();
+    const int h = fixture.backend->cellHeight();
+    CellBuffer cells(4, 2);
+    cells.clear(FChar{U' ', {}, {200, 30, 40}});
+    fixture.backend->setViewport(100, 20, 96, 64);
+    EXPECT_EQ(fixture.backend->columns(), 96 / w);
+    EXPECT_EQ(fixture.backend->rows(), 64 / h);
+    RenderFrame frame{cells.view(), {}};
+    fixture.backend->render(frame);
+    // Coordinates are relative to the pane; nothing leaks outside it.
+    EXPECT_EQ(fixture.pixel(101, 21), Uint32(0xc81e28));
+    EXPECT_EQ(fixture.pixel(99, 21), gap);
+    EXPECT_EQ(fixture.pixel(101, 19), gap);
+    EXPECT_EQ(fixture.pixel(196, 21), gap);
+    EXPECT_EQ(fixture.pixel(101, 84), gap);
+    EXPECT_EQ(fixture.pixel(0, 0), gap);
+    // The rest of the pane gets the palette background, not the window's.
+    EXPECT_EQ(fixture.pixel(100 + 95, 20 + 63), Uint32(0x1e1e1e));
+    // A scrollbar sits at the pane's right edge.
+    frame.scrollbar = {true, 0.0f, 1.0f};
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(100 + 85, 30), Uint32(0x191d24));
+    EXPECT_EQ(fixture.pixel(100 + 90, 30), Uint32(0x6e7a8e));
+    EXPECT_EQ(fixture.pixel(100 + 96, 30), gap);
+    // Another pane next to it, without disturbing the first.
+    fixture.backend->setViewport(200, 20, 96, 64);
+    CellBuffer other(4, 2);
+    other.clear(FChar{U' ', {}, {20, 180, 50}});
+    fixture.backend->render({other.view(), {}});
+    EXPECT_EQ(fixture.pixel(201, 21), Uint32(0x14b432));
+    EXPECT_EQ(fixture.pixel(101, 21), Uint32(0xc81e28));
+    EXPECT_EQ(fixture.pixel(198, 21), gap);
+    // Back to the whole drawable.
+    fixture.backend->resetViewport();
+    EXPECT_EQ(fixture.backend->columns(), 320 / w);
+    EXPECT_EQ(fixture.backend->rows(), 160 / h);
+    fixture.backend->render({cells.view(), {}});
+    EXPECT_EQ(fixture.pixel(1, 1), Uint32(0xc81e28));
+    EXPECT_EQ(fixture.pixel(300, 150), Uint32(0x1e1e1e));
+}
+
+TEST_CASE("A viewport must be a non-empty rectangle") {
+    Fixture fixture;
+    for (const auto &rect : std::vector<std::array<int, 4>>{{0, 0, 0, 10},
+                                                            {0, 0, 10, 0},
+                                                            {0, 0, -5, 10},
+                                                            {-1, 0, 10, 10},
+                                                            {0, -1, 10, 10}}) {
+        bool threw = false;
+        try {
+            fixture.backend->setViewport(rect[0], rect[1], rect[2], rect[3]);
+        }
+        catch (const std::invalid_argument &) {
+            threw = true;
+        }
+        EXPECT(threw);
+    }
+    // A refused viewport leaves the sizes alone.
+    EXPECT_EQ(fixture.backend->columns(), 320 / fixture.backend->cellWidth());
 }
 
 TEST_CASE("Backend renders a history view across ring and block boundaries") {

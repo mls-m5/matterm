@@ -54,6 +54,16 @@ public:
     std::uint32_t negotiatedFeatures() const noexcept {
         return negotiatedFeatures_;
     }
+    // Empty for local validation, transport failures and normal Exit.
+    std::optional<protocol::ErrorCode> errorCode() const noexcept {
+        return errorCode_;
+    }
+    // The WebSocket close code the peer or the network ended the transport with
+    // (1000 normal, 1006 abnormal). Empty while open, after a normal Exit, and
+    // when this side closed the channel for a protocol error.
+    std::optional<int> closeCode() const noexcept {
+        return closeCode_;
+    }
 
 private:
     void onOpened();
@@ -74,6 +84,8 @@ private:
     State state_ = State::Connecting;
     std::string sessionId_;
     std::uint32_t negotiatedFeatures_ = 0;
+    std::optional<protocol::ErrorCode> errorCode_;
+    std::optional<int> closeCode_;
     std::uint64_t received_ = 0;
     std::uint64_t acked_ = 0;
     protocol::Time lastAck_{};

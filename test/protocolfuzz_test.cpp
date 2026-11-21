@@ -324,4 +324,79 @@ TEST_CASE("Hostile server streams fail closed without accumulating output") {
                      trace));
     }
 }
+TEST_CASE("Seeded replay negotiation rejects hostile flags and keeps absolute "
+          "counters bounded") {
+    std::mt19937 random(seed);
+    for (unsigned trial = 0; trial < 180; ++trial) {
+        Channel channel;
+        Time now{0};
+        ClientSession::Config config;
+        config.clock = [&] { return now; };
+        config.replay = true;
+        config.sessionId = "00112233445566778899aabbccddeeff";
+        config.resumeOffset = 1 + random() % 4096;
+        unsigned resets = 0;
+        config.resetForReplay = [&] { ++resets; };
+        ClientSession session(channel, config);
+        std::size_t delivered = 0;
+        session.setEvents(
+            {[&](std::string_view bytes) { delivered += bytes.size(); },
+             {},
+             {}});
+        channel.events.opened();
+        Welcome welcome{
+            1, config.sessionId, config.resumeOffset, 1, featureReplay};
+        if (trial % 2) {
+            welcome.flags = 3;
+            welcome.startOffset =
+                trial % 13 == 0 ? ~std::uint64_t(0) - 2 : 2048;
+        }
+        if (trial % 5 == 0)
+            welcome.flags = 0x80;
+        if (trial % 7 == 0)
+            welcome.features = 3;
+        if (trial % 11 == 0)
+            welcome.sessionId = "wrong";
+        std::string trace = wire(ServerMessage{welcome});
+        channel.events.message(trace);
+        const bool invalid = welcome.flags == 0x80 || welcome.features == 3 ||
+                             welcome.sessionId != config.sessionId;
+        EXPECT(check(invalid ? session.state() == ClientSession::State::Failed
+                             : session.state() == ClientSession::State::Running,
+                     trial,
+                     trace));
+        EXPECT(check(
+            resets == unsigned(!invalid && welcome.flags == 3), trial, trace));
+        for (unsigned step = 0; step < 12; ++step) {
+            const auto before = session.state();
+            const auto offset = session.receivedOffset();
+            const auto oldDelivered = delivered;
+            const std::string data(1 + random() % 8, 'x');
+            const bool gap = step == 8;
+            const auto sentOffset = gap ? (offset ? offset - 1 : 1) : offset;
+            const auto bytes = wire(ServerMessage{Output{sentOffset, data}});
+            trace += bytes;
+            channel.events.message(bytes);
+            now += Time(20);
+            session.tick();
+            const bool mustFail = before == ClientSession::State::Failed ||
+                                  gap ||
+                                  data.size() > ~std::uint64_t(0) - offset;
+            if (mustFail) {
+                EXPECT(check(session.state() == ClientSession::State::Failed &&
+                                 delivered == oldDelivered &&
+                                 session.receivedOffset() == offset,
+                             trial,
+                             trace));
+            }
+            else {
+                EXPECT(
+                    check(delivered == oldDelivered + data.size() &&
+                              session.receivedOffset() == offset + data.size(),
+                          trial,
+                          trace));
+            }
+        }
+    }
+}
 TEST_SUIT_END

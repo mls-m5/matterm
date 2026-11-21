@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -92,11 +93,20 @@ struct SdlBackend::Impl {
     Batch decorations;
     Palette defaultPalette;
     bool reserveStrip = false;
+    std::optional<SDL_Rect> viewport;
 
-    Impl(SDL_Window &window,
-         const std::string &path,
-         int size,
-         bool software)
+    // The size drawing and the cell counts work on: the viewport or the whole
+    // drawable.
+    void outputSize(int &width, int &height) const {
+        if (viewport) {
+            width = viewport->w;
+            height = viewport->h;
+            return;
+        }
+        check(SDL_GetRendererOutputSize(renderer.get(), &width, &height));
+    }
+
+    Impl(SDL_Window &window, const std::string &path, int size, bool software)
         : renderer(createRenderer(window, software), SDL_DestroyRenderer)
         , fontPath(path)
         , atlas(std::make_unique<GlyphAtlas>(*renderer, path, size))
@@ -120,7 +130,7 @@ void SdlBackend::render(const RenderFrame &frame) {
     auto &s = *impl_;
     const auto &palette = frame.palette ? *frame.palette : s.defaultPalette;
     int width, height;
-    check(SDL_GetRendererOutputSize(s.renderer.get(), &width, &height));
+    s.outputSize(width, height);
     if (!std::isfinite(frame.verticalOffsetPixels) ||
         frame.verticalOffsetPixels > 0 ||
         frame.verticalOffsetPixels <= -s.cellHeight ||
@@ -140,10 +150,11 @@ void SdlBackend::render(const RenderFrame &frame) {
     const auto rows =
         textHeight == 0
             ? std::size_t(0)
-            : std::min(frame.cells.rows(),
-                       std::size_t(std::ceil(
-                           (double(textHeight) - double(frame.verticalOffsetPixels)) /
-                           s.cellHeight)));
+            : std::min(
+                  frame.cells.rows(),
+                  std::size_t(std::ceil((double(textHeight) -
+                                         double(frame.verticalOffsetPixels)) /
+                                        s.cellHeight)));
     s.backgrounds.clear();
     s.glyphs.clear();
     s.decorations.clear();
@@ -154,7 +165,7 @@ void SdlBackend::render(const RenderFrame &frame) {
         const auto row = frame.cells.row(y);
         for (std::size_t x = 0; x < columns; ++x) {
             s.atlas->getOrInsert(row.data()[x].codePoint,
-                                row.data()[x].attributes);
+                                 row.data()[x].attributes);
         }
     }
     const bool gliding =
@@ -197,8 +208,8 @@ void SdlBackend::render(const RenderFrame &frame) {
             if (s.reserveStrip && !frame.scrollbar.visible &&
                 x + 1 == columns) {
                 // The reserved scrollbar strip (and any remainder) looks like
-                // the cell beside it while there is no scrollbar. A cursor block
-                // is not extended; a selection is.
+                // the cell beside it while there is no scrollbar. A cursor
+                // block is not extended; a selection is.
                 const bool selected =
                     frame.selectionBegin < frame.selectionEnd &&
                     y * frame.cells.columns() + x >= frame.selectionBegin &&
@@ -259,7 +270,24 @@ void SdlBackend::render(const RenderFrame &frame) {
                                  palette.background.g,
                                  palette.background.b,
                                  255));
-    check(SDL_RenderClear(s.renderer.get()));
+    // SDL_RenderClear ignores the viewport and would wipe the other panes.
+    struct ViewportReset {
+        SDL_Renderer *renderer;
+        bool active;
+        ~ViewportReset() {
+            if (active) {
+                SDL_RenderSetViewport(renderer, nullptr);
+            }
+        }
+    } viewportReset{s.renderer.get(), s.viewport.has_value()};
+    if (s.viewport) {
+        check(SDL_RenderSetViewport(s.renderer.get(), &*s.viewport));
+        const SDL_Rect all{0, 0, width, height};
+        check(SDL_RenderFillRect(s.renderer.get(), &all));
+    }
+    else {
+        check(SDL_RenderClear(s.renderer.get()));
+    }
     const SDL_Rect textClip{0, 0, textWidth, textHeight};
     check(SDL_RenderSetClipRect(s.renderer.get(), &textClip));
     // Restore clipping even if a draw fails. The backend owns the renderer.
@@ -339,6 +367,23 @@ void SdlBackend::render(const RenderFrame &frame) {
     }
 }
 
+void SdlBackend::setViewport(int x, int y, int width, int height) {
+    if (width <= 0 || height <= 0 || x < 0 || y < 0) {
+        throw std::invalid_argument("Invalid viewport");
+    }
+    impl_->viewport = SDL_Rect{x, y, width, height};
+}
+void SdlBackend::resetViewport() {
+    impl_->viewport.reset();
+}
+void SdlBackend::clear(Rgb8 color) {
+    auto &s = *impl_;
+    check(SDL_RenderSetViewport(s.renderer.get(), nullptr));
+    check(SDL_SetRenderDrawColor(
+        s.renderer.get(), color.r, color.g, color.b, 255));
+    check(SDL_RenderClear(s.renderer.get()));
+}
+
 void SdlBackend::present() {
     SDL_RenderPresent(impl_->renderer.get());
 }
@@ -346,7 +391,8 @@ void SdlBackend::setPixelSize(int pixelSize) {
     auto &s = *impl_;
     // Build the new atlas first: a failure leaves the old font in place. The
     // renderer (and with it the page's touch and input registration) is kept.
-    auto atlas = std::make_unique<GlyphAtlas>(*s.renderer, s.fontPath, pixelSize);
+    auto atlas =
+        std::make_unique<GlyphAtlas>(*s.renderer, s.fontPath, pixelSize);
     const int width = std::max(1, atlas->getOrInsert(U'M').advanceX);
     const int height = std::max(1, atlas->lineHeight());
     int textureWidth = 0, textureHeight = 0;
@@ -375,13 +421,13 @@ int SdlBackend::cellHeight() const noexcept {
 }
 int SdlBackend::columns(bool scrollbarVisible) const {
     int width, height;
-    check(SDL_GetRendererOutputSize(impl_->renderer.get(), &width, &height));
+    impl_->outputSize(width, height);
     return (scrollbarVisible ? std::max(0, width - scrollbarWidth) : width) /
            cellWidth();
 }
 int SdlBackend::rows() const {
     int width, height;
-    check(SDL_GetRendererOutputSize(impl_->renderer.get(), &width, &height));
+    impl_->outputSize(width, height);
     return height / cellHeight();
 }
 const char *SdlBackend::rendererName() const noexcept {
