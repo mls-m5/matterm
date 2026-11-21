@@ -25,7 +25,7 @@ struct Term {
             if (cp < 128) {
                 text.push_back(cp >= 32 ? char(cp) : ' ');
             }
-            else if (cp == 0x263A) {
+            else if (cp == 0x25CF) {
                 text.push_back('@'); // The own face.
             }
             else if (cp == 0xB7) {

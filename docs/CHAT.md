@@ -160,7 +160,7 @@ Bubbles have a **title row** (a color band), one cell of padding left and
 right, text, and a **blank row between bubbles**. A bubble is as wide as its
 content (title or longest line, plus 2), up to a maximum (about 70% of the width);
 longer text wraps. Finished and live bubbles differ by background shade. Own
-bubbles are marked by a small face in the title row (`☺`, or `:)` when the
+bubbles are marked by a small face in the title row (`●`, or `:)` when the
 terminal is not Unicode); all bubbles are left-aligned. In this sketch `▒` is the
 title row's background and `░` the body's (not drawn in the real thing):
 
@@ -183,12 +183,12 @@ title row's background and `░` the body's (not drawn in the real thing):
 ▒cy  typing…▒
 ░ok but wh▌░░
 
-▒☺ mia  draft sent▒▒▒▒▒
+▒● mia  draft sent▒▒▒▒▒
 ░what is the dot for▌░
 ```
 
 * Title rows: `name  14:06  sent` (locked), `name  typing…` (someone else's live
-  bubble), `☺ name  draft sent` / `sent` / `not sent` (own). Name in bold, time
+  bubble), `● name  draft sent` / `sent` / `not sent` (own). Name in bold, time
   and state dimmer.
 * **The live marker.** Another person's text that is still being typed ends in a
   filled left-pointing triangle, `◀` (U+25C0, constant `chat::kLiveMarker`; a plain
