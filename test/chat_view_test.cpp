@@ -316,6 +316,17 @@ TEST_CASE("A note is printed once above the region, and cannot carry escapes") {
     EXPECT(t.shows("here: ada, bo [2J"));
 }
 
+TEST_CASE("Errors from the room are explained a little more") {
+    Joined j;
+    ChatView view(config());
+    Term t;
+    j.client.receive("error\trate\tslow down", j.now);
+    j.client.receive("error\tname-taken\tthat name is in use", j.now);
+    t.write(view.render(j.client, j.input, j.now));
+    EXPECT(t.shows("slow down (one message every 2 seconds"));
+    EXPECT(t.shows("looks too much like another name"));
+}
+
 TEST_CASE("Other people's live text ends in a marker; yours and finished ones "
           "do not") {
     Joined j;
