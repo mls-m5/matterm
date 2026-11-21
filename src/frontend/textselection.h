@@ -95,6 +95,11 @@ struct Selection {
         if (!valid(model)) {
             return;
         }
+        // A plain click selects one cell. It still copies, but is not drawn.
+        if (unit == Unit::Character && anchor.row == end.row &&
+            anchor.column == end.column) {
+            return;
+        }
         auto first = anchor, last = end;
         if (before(last, first)) {
             std::swap(first, last);

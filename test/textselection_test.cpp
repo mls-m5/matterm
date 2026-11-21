@@ -219,4 +219,18 @@ TEST_CASE("Select all has an explicit bounded copy rather than truncating "
     EXPECT(!selected.text(model, 3));
 }
 
+TEST_CASE("A single-cell character selection is not highlighted") {
+    TerminalModel model(10, 3, 2);
+    model.write(U"hello");
+    const auto one = Selection::at(model, {0, 1}, 1);
+    auto frame = model.frame(10);
+    one.apply(model, frame);
+    EXPECT_EQ(frame.selectionBegin, 0u);
+    EXPECT_EQ(frame.selectionEnd, 0u);
+    EXPECT_EQ(text(one, model), "e");
+    const auto word = Selection::at(model, {0, 1}, 2);
+    word.apply(model, frame);
+    EXPECT_EQ(frame.selectionEnd, 5u);
+}
+
 TEST_SUIT_END
