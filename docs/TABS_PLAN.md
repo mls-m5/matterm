@@ -435,3 +435,20 @@ daemon of section 10), control them, and take them back later. Nothing here is b
 
 Open: the option names; whether sharing is per terminal or per tab; read-only first or
 exclusive take-over first; idle expiry of a shared terminal.
+
+### Decisions on sharing (owner, 2026-11-22, second round)
+
+- The GUI shows whether a terminal is shared: a button at the end of the tab strip, grey
+  ("Share") when nothing in the tab is shared and red when it is; the same toggle is in the
+  command palette ("Share this tab", "Stop sharing this tab", "Share this terminal").
+- A tab holds several panes. Proposal: the data model is per terminal (the daemon marks
+  each session), the strip button acts on the whole active tab (all its panes), a shared
+  pane has a small red mark in its corner, and the palette has the per-terminal entries for
+  the exceptions. The button shows red when any pane of the tab is shared, with the count.
+- The window that controls a terminal decides its size, also when several windows can
+  watch it later (they get the controlling window's size).
+- Option names (chosen by the integrator): `matterm-daemon` (the local daemon),
+  `matterm-server --expose-local-sessions` (offer shared daemon sessions to browsers),
+  `--listen ADDRESS` stays as it is (default loopback; a non-loopback address needs
+  `--allow-remote-listen`, with a start warning), `matterm --daemon / --no-daemon` for the
+  GUI, `--daemon-socket PATH` for a separate dev daemon.
