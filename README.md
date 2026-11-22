@@ -39,7 +39,7 @@ The browser build and the server are described in [web/README.md](web/README.md)
 private Unix socket, so they survive closing the window or a crash of the GUI.
 
 ```sh
-./build/matterm --daemon            # starts the daemon if it is not running (--no-daemon: default)
+./build/matterm --daemon            # starts the daemon if it is not running (default; --no-daemon runs the programs in the window)
 ./build/matterm --daemon --daemon-socket /tmp/dev.sock   # a separate daemon, for development
 ```
 

@@ -445,7 +445,8 @@ int runPtyFrontend(const char *font,
                    const char *recordPath,
                    bool smoothCursor,
                    bool tabsSmoke,
-                   const DaemonOptions &daemonOptions) {
+                   const DaemonOptions &daemonOptionsIn) {
+    DaemonOptions daemonOptions = daemonOptionsIn;
     gSnapScroll = daemonOptions.snapScroll;
     if (smokeTest) {
         return runSmokeTest(font, fontSize, arguments, term);
@@ -455,7 +456,11 @@ int runPtyFrontend(const char *font,
     if (daemonOptions.enabled) {
         const auto error = ensureDaemon(daemonOptions.socketPath);
         if (!error.empty()) {
-            throw std::runtime_error("--daemon: " + error);
+            if (daemonOptions.required) {
+                throw std::runtime_error("--daemon: " + error);
+            }
+            std::cerr << "matterm: no daemon (" << error << "); running the programs here\n";
+            daemonOptions.enabled = false;
         }
     }
     Uint64 lastSharedPoll = 0;

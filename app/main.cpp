@@ -37,8 +37,9 @@ void printUsage(std::ostream &out, const char *program) {
            "  --term TERM          Child TERM (default: xterm-256color).\n"
            "  --daemon             Keep the terminals in matterm-daemon (started if "
            "missing),\n"
-           "                       so they survive closing this window.\n"
-           "  --no-daemon          Run the programs in this process (default).\n"
+           "                       so they survive closing this window (default;\n"
+           "                       not with a command; falls back if it cannot start).\n"
+           "  --no-daemon          Run the programs in this process.\n"
            "  --daemon-socket PATH Socket of the daemon (default: "
            "$XDG_RUNTIME_DIR/matterm/daemon.sock).\n"
            "  --snap-scroll        Let scrolling come to rest on whole rows (default: "
@@ -308,7 +309,8 @@ int main(int argc, char **argv) {
     bool ptySmokeTest = false;
     bool ptyTabsSmokeTest = false;
     bool smoothCursor = false;
-    bool useDaemon = false;
+    bool useDaemon = true; // Default; --no-daemon turns it off.
+    bool daemonExplicit = false;
     bool snapScroll = false;
     std::string daemonSocket;
     bool showcase = false;
@@ -349,6 +351,7 @@ int main(int argc, char **argv) {
         }
         else if (arg == "--daemon") {
             useDaemon = true;
+            daemonExplicit = true;
         }
         else if (arg == "--snap-scroll") {
             snapScroll = true;
@@ -387,6 +390,11 @@ int main(int argc, char **argv) {
         else {
             valid = false;
         }
+    }
+    const bool daemonConflict = !command.empty() || inputPath || smokeTest || showcase ||
+                                ptySmokeTest || ptyTabsSmokeTest;
+    if (useDaemon && !daemonExplicit && daemonConflict) {
+        useDaemon = false; // A command, input file or test: run it here.
     }
     if (useDaemon && (!command.empty() || inputPath || smokeTest || showcase || ptySmokeTest ||
                       ptyTabsSmokeTest)) {
@@ -432,7 +440,7 @@ int main(int argc, char **argv) {
                                   recordPath,
                                   smoothCursor,
                                   ptyTabsSmokeTest,
-                                  DaemonOptions{useDaemon, daemonSocket, snapScroll});
+                                  DaemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll});
         }
         catch (const std::exception &error) {
             std::cerr << error.what() << '\n';
