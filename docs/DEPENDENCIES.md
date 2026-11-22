@@ -10,8 +10,11 @@ sudo apt install build-essential cmake git \
     libsdl2-dev libsdl2-ttf-dev libfontconfig-dev libfreetype-dev libharfbuzz-dev \
     libboost-dev libsodium-dev libc6-dev python3
 git submodule update --init            # lib/fast-json, test/mls-unit-test, matperf
-cmake -B build && cmake --build build -j8
+cmake -B build -DMATTERM_BUILD_SERVER=ON && cmake --build build -j8
 ```
+
+`MATTERM_BUILD_SERVER` is OFF by default. `matterm-server` and `matterm-daemon` are only built with it ON, and without the
+daemon the native app falls back to running programs in its own process (with a note). Keep it ON in a dev build.
 
 | Need | Package | Installed | Used for |
 |---|---|---|---|
@@ -32,7 +35,7 @@ The container build for the chat server uses `-DBUILD_TESTING=OFF` (no test subm
 
 - **Emscripten SDK** (not an apt package): `git clone https://github.com/emscripten-core/emsdk`, then
   `emsdk install <version>` and `emsdk activate <version>`. Installed here: emsdk in `~/emsdk`,
-  emscripten **7.0.0** (the Pages workflow pins its own `EMSDK_VERSION` in `.github/workflows/pages.yml`).
+  emscripten **7.0.0** (the Pages workflow installs `latest`, see `.github/workflows/pages.yml`).
 - Configure and build: `emcmake cmake -B build-web && cmake --build build-web -j8`
   (toolchain file `$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake`). Output: `build-web/site`.
 
@@ -56,7 +59,7 @@ Use `build/src/server/matterm-server`, not `build/server` (stale). `e2e-local.js
 | clang-tidy | `clang-tidy` | 14 | static checks (weekly CI workflow, `.github/workflows/clang-tidy.yml`; also needs `ninja-build`) |
 | clang-format | `clang-format` | 14 | formatting |
 | ssh client | `openssh-client` | | `matterm --daemon-host` (and a real `sshd` on the other computer to test it) |
-| `ninja-build` | `ninja-build` | | used by the clang-tidy workflow |
+| Ninja | `ninja-build` | | the clang-tidy workflow builds with `-G Ninja` |
 | gdb / perf | `gdb`, `linux-perf` | | profiling (`bench/cpu-measure.sh`, `docs/CPU.md`) |
 
 ## Running on another computer
