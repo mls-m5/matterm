@@ -183,6 +183,25 @@ public:
     }
     bool withScreenText(Event event) const { return event == Event::Shutdown && persistent_; }
 
+    // The name "Save session as" offers: the name this window's session already has once
+    // it is saved; otherwise the name of the tab (made into a file name: other characters
+    // become '-'), and "default" when the tab has none.
+    std::string suggestion(const std::string &tabTitle) const {
+        if (persistent_) return name_;
+        std::string s;
+        for (const char c : tabTitle) {
+            const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                            c == '.' || c == '_' || c == '-';
+            const char out = ok ? c : '-';
+            if (out == '-' && (s.empty() || s.back() == '-')) continue; // no runs, no leading '-'
+            s += out;
+        }
+        while (!s.empty() && (s.back() == '-' || s.back() == '.')) s.pop_back();
+        while (!s.empty() && s.front() == '.') s.erase(s.begin());
+        if (s.size() > SessionSnapshot::kMaxName) s.resize(SessionSnapshot::kMaxName);
+        return SessionSnapshot::validName(s) ? s : name_;
+    }
+
 private:
     std::string name_;
     bool persistent_ = false;

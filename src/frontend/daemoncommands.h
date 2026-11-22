@@ -29,6 +29,15 @@ inline constexpr const char *sharePane = "share.pane";
 inline constexpr const char *sharePaneStop = "share.pane.stop";
 inline constexpr const char *shareTab = "share.tab";
 inline constexpr const char *shareTabStop = "share.tab.stop";
+// Terminals that live in the daemon: attach one (a list, then "attach.go:<id>"), attach all
+// that no window shows, detach the focused one (it keeps running), move it to its own tab.
+inline constexpr const char *attach = "daemon.attach";
+inline constexpr const char *attachGo = "daemon.attach.go";
+inline constexpr const char *attachAll = "daemon.attach.all";
+inline constexpr const char *attachAllGo = "daemon.attach.all.go";
+inline constexpr const char *attachCancel = "daemon.attach.cancel";
+inline constexpr const char *detachPane = "daemon.detach";
+inline constexpr const char *movePane = "pane.move-to-tab";
 } // namespace daemonaction
 
 // What the first terminal says when the app wanted the daemon and could not have it, so it
@@ -116,6 +125,114 @@ inline std::vector<CommandEntry> shareCommandEntries(const ShareState &state) {
             "Make every terminal of this tab private again");
     }
     return out;
+}
+
+// What the palette offers for the terminals in the daemon, given the window's state.
+struct AttachState {
+    std::size_t panesInTab = 0;    // Panes in the active tab.
+    std::size_t leftover = 0;      // Terminals in the daemon that no window shows.
+    bool focusedInDaemon = false;  // The focused pane is a daemon terminal.
+};
+
+inline std::vector<CommandEntry> attachCommandEntries(const AttachState &state) {
+    std::vector<CommandEntry> out;
+    const auto add = [&](const char *id, const char *name, const char *description) {
+        out.push_back({id, name, description, std::nullopt, {}, {}});
+    };
+    add(daemonaction::attach, "Attach terminal...",
+        "Show a terminal that runs in the daemon in a new tab");
+    if (state.leftover > 0) {
+        add(daemonaction::attachAll, "Attach all leftover terminals",
+            "Open every terminal that no window shows, each in its own tab");
+    }
+    if (state.focusedInDaemon) {
+        add(daemonaction::detachPane, "Detach terminal (keep running)",
+            "Close this pane; its program keeps running in the daemon");
+        if (state.panesInTab > 1) {
+            add(daemonaction::movePane, "Move terminal to new tab",
+                "Take this pane out of its tab and show it in a tab of its own");
+        }
+    }
+    return out;
+}
+
+// One terminal of the daemon as the list shows it.
+struct AttachableSession {
+    std::string id;
+    std::string cwd;                  // Empty when unknown.
+    std::vector<std::string> command; // Empty: a shell waits at its prompt.
+    bool attached = false;            // Some window shows it now.
+    bool shared = false;
+    bool inThisWindow = false;        // This window shows it (not offered).
+};
+
+namespace attachdetail {
+inline std::string plain(const std::string &text, std::size_t limit) {
+    std::string out;
+    for (const char c : text) {
+        out += (static_cast<unsigned char>(c) < 32 || c == 127) ? ' ' : c;
+    }
+    if (out.size() > limit) {
+        out.resize(limit - 1);
+        out += "~";
+    }
+    return out;
+}
+} // namespace attachdetail
+
+// The last two folders of a path, "~/x/y" shortened to "x/y"; "/" stays.
+inline std::string shortFolder(const std::string &path) {
+    if (path.empty()) return "terminal";
+    std::vector<std::string> parts;
+    std::string part;
+    for (const char c : path + "/") {
+        if (c == '/') {
+            if (!part.empty()) parts.push_back(part);
+            part.clear();
+        }
+        else {
+            part += c;
+        }
+    }
+    if (parts.empty()) return "/";
+    const std::size_t from = parts.size() > 2 ? parts.size() - 2 : 0;
+    std::string out = from > 0 ? ".../" : "";
+    for (std::size_t i = from; i < parts.size(); ++i) out += (i > from ? "/" : "") + parts[i];
+    return attachdetail::plain(out, 40);
+}
+
+// The list items: the folder, and dim at the right what runs and who has it. Terminals this
+// window already shows are left out; ones another window shows say so.
+inline std::vector<ui::PickList::Item> attachItems(const std::vector<AttachableSession> &sessions) {
+    std::vector<ui::PickList::Item> items;
+    for (const auto &s : sessions) {
+        if (s.inThisWindow) continue;
+        std::string command;
+        for (const auto &word : s.command) command += (command.empty() ? "" : " ") + word;
+        std::string detail = command.empty() ? "shell" : attachdetail::plain(command, 24);
+        if (s.attached) detail += " (in another window)";
+        if (s.shared) detail += " (shared)";
+        items.push_back({shortFolder(s.cwd), detail, std::string(daemonaction::attachGo) + ":" + s.id});
+    }
+    return items;
+}
+
+inline std::unique_ptr<ui::ConfirmDialog> takeOverDialog(const std::string &id, const std::string &what) {
+    std::vector<ui::ConfirmDialog::Button> buttons = {
+        {"Take over", std::string(daemonaction::attachGo) + ":" + id + ":force"},
+        {"Cancel", daemonaction::attachCancel}};
+    return std::make_unique<ui::ConfirmDialog>(
+        "Another window shows " + attachdetail::plain(what, 30) + ". Take it over? That window loses it.",
+        std::move(buttons), 1, 1);
+}
+
+inline std::unique_ptr<ui::ConfirmDialog> attachAllDialog(std::size_t count) {
+    std::vector<ui::ConfirmDialog::Button> buttons = {
+        {"Attach", daemonaction::attachAllGo}, {"Cancel", daemonaction::attachCancel}};
+    return std::make_unique<ui::ConfirmDialog>(
+        "Open " + std::to_string(count) + (count == 1 ? " terminal" : " terminals") +
+            " that no window shows, each in a new tab?",
+        std::move(buttons), 1, 0);
 }
 
 inline std::string plural(std::size_t n, const char *one, const char *many) {

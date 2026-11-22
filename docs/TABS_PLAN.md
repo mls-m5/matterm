@@ -516,3 +516,16 @@ retained text; the program gets no keys while the mode is on, and keeps running.
   lighter. Prefix keys read "Ctrl+B c" (the second key as typed), not "Ctrl+B C".
 - **Daemon fallback (native):** when the daemon was wanted and cannot start, the first terminal
   prints a two-line note (`daemonFallbackNote`) before the shell, besides stderr.
+- **Attach and detach (native, with the daemon):** palette entries *Attach terminal...* (a list
+  of the daemon's terminals: folder, running command, "in another window", "shared"; ones this
+  window shows are left out; choosing one opens a new tab on it, and one another window shows
+  asks "Take over?" first, Cancel is the default), *Attach all leftover terminals* (only when
+  there are terminals no window shows; asks, never automatic), *Detach terminal (keep running)*
+  and *Move terminal to new tab* (the pane is closed with `endInDaemon = false`; a move attaches
+  the same terminal in a new tab first). Entries and texts are in `daemoncommands.h`
+  (`attachCommandEntries`, `attachItems`, `takeOverDialog`, `attachAllDialog`; tests in
+  `test/daemoncommands_test.cpp`); the app glue (`daemonSessions`, `attachSession`) is in
+  `app/ptyfrontend.cpp` and is not covered by a test (needs a window).
+- **Session names:** *Save session as...* suggests the saved name once the session has one, else
+  the active tab's name made into a file name (`SessionPolicy::suggestion`), else "default". A
+  saved session's name is shown in the window title ("| session work").

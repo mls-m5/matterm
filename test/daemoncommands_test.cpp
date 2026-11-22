@@ -26,6 +26,45 @@ TEST_CASE("The palette offers the daemon actions only when a daemon is used") {
     EXPECT_EQ(offered[2].name, "Daemon status");
 }
 
+TEST_CASE("Attach entries: detach and move only for a daemon pane, attach-all only with leftovers") {
+    const auto names = [](const AttachState &s) {
+        std::string all;
+        for (const auto &e : attachCommandEntries(s)) all += e.name + "|";
+        return all;
+    };
+    EXPECT_EQ(names({}), std::string("Attach terminal...|"));
+    EXPECT(names({1, 2, false}).find("Attach all leftover terminals") != std::string::npos);
+    const auto alone = names({1, 0, true});
+    EXPECT(alone.find("Detach terminal (keep running)") != std::string::npos);
+    EXPECT(alone.find("Move terminal to new tab") == std::string::npos); // nothing to move out of
+    EXPECT(names({2, 0, true}).find("Move terminal to new tab") != std::string::npos);
+}
+
+TEST_CASE("The attach list shows folder, command and who has the terminal; own terminals are left out") {
+    std::vector<AttachableSession> all(4);
+    all[0] = {"a", "/home/me/project/src", {}, false, false, false};
+    all[1] = {"b", "/srv", {"vim", "notes.txt"}, true, true, false};
+    all[2] = {"c", "/home/me", {}, true, false, true}; // this window
+    all[3] = {"d", "", {"x\x1b[31m"}, false, false, false};
+    const auto items = attachItems(all);
+    EXPECT_EQ(items.size(), std::size_t(3));
+    EXPECT_EQ(items[0].label, std::string(".../project/src"));
+    EXPECT_EQ(items[0].detail, std::string("shell"));
+    EXPECT_EQ(items[0].action, std::string("daemon.attach.go:a"));
+    EXPECT_EQ(items[1].label, std::string("/srv").substr(1));
+    EXPECT_EQ(items[1].detail, std::string("vim notes.txt (in another window) (shared)"));
+    EXPECT_EQ(items[2].label, std::string("terminal"));
+    EXPECT(items[2].detail.find('\x1b') == std::string::npos);
+    EXPECT_EQ(shortFolder("/"), std::string("/"));
+    EXPECT_EQ(shortFolder("/home/me/"), std::string("home/me"));
+}
+
+TEST_CASE("Taking a terminal over asks first and defaults to Cancel; attach-all names the count") {
+    const auto dialog = takeOverDialog("abc", "/srv");
+    EXPECT_EQ(dialog->selected(), std::size_t(1));
+    EXPECT_EQ(attachAllDialog(2)->selected(), std::size_t(0));
+}
+
 TEST_CASE("The stop question names how many programs end") {
     EXPECT(stopDaemonQuestion(0).find("No programs") != std::string::npos);
     EXPECT(stopDaemonQuestion(1).find("1 program ") != std::string::npos);

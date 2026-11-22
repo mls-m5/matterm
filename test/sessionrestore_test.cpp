@@ -187,6 +187,17 @@ TEST_CASE("Policy: no automatic restore; saves on naming a tab and on shutdown o
     EXPECT(q.persistent() && q.name() == "server");
 }
 
+TEST_CASE("Policy: Save as suggests the tab's name, or the saved name once there is one") {
+    SessionPolicy p;
+    EXPECT_EQ(p.suggestion("build server"), std::string("build-server"));
+    EXPECT_EQ(p.suggestion("  ..odd / name?  "), std::string("odd-name"));
+    EXPECT_EQ(p.suggestion(""), std::string("default"));
+    EXPECT_EQ(p.suggestion("???"), std::string("default"));
+    EXPECT_EQ(p.suggestion(std::string(200, 'a')).size(), std::size_t(SessionSnapshot::kMaxName));
+    p.adopt("work");
+    EXPECT_EQ(p.suggestion("build server"), std::string("work"));
+}
+
 TEST_CASE("A user title wins over the program's title in the strip; empty clears it") {
     Rig r;
     r.space.apply(Command::NewTab);

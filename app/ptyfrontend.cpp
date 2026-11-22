@@ -34,6 +34,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <system_error>
 #include <tuple>
@@ -473,6 +474,8 @@ int runPtyFrontend(const char *font,
     int hintColumns = 80, hintRows = 24; // size of a new pane until the layout says
     // Folder the next pane's shell should start in (a restored session), else empty.
     std::string nextCwd;
+    // A daemon terminal the next pane should show instead of making a new one (Attach terminal).
+    std::string nextAttachId;
     // Where a new daemon terminal starts: the saved folder, else the folder of the pane in focus
     // (as the daemon sees it), else this program's folder.
     // Replaced below once the probe exists; the first pane is made before that.
@@ -499,7 +502,7 @@ int runPtyFrontend(const char *font,
             command.insert(command.end(), arguments.begin(), arguments.end());
         }
         auto pane = daemonOptions.enabled
-                        ? std::make_unique<NativePane>(daemonPath, std::string(), daemonCwd(), hintColumns, hintRows)
+                        ? std::make_unique<NativePane>(daemonPath, nextAttachId, daemonCwd(), hintColumns, hintRows)
                         : std::make_unique<NativePane>(command, term, hintColumns, hintRows, std::move(record));
         pane->v.glide() = CursorGlide([&] {
             CursorGlide::Config c;
@@ -914,6 +917,54 @@ int runPtyFrontend(const char *font,
         }
         sessionPolicy.adopt(name);
     };
+    // The terminals the daemon holds, with what the list needs (a short answer or none: the
+    // daemon is local). `quiet`: no notice when it does not answer.
+    const auto daemonSessions = [&](bool quiet = true) {
+        std::vector<AttachableSession> out;
+        std::string error;
+        const auto reply = askDaemon(daemonPath, mtd::ListSessions{}, error, 500);
+        const auto *list = reply ? std::get_if<mtd::SessionList>(&*reply) : nullptr;
+        if (!list) {
+            if (!quiet) {
+                notify("daemon: " + (error.empty() ? std::string("unexpected answer") : error));
+            }
+            return out;
+        }
+        std::set<std::string> mine;
+        workspace.forEachPane([&](PaneId, NativePane &pane, bool) {
+            if (pane.daemon && !pane.daemon->sessionId().empty()) {
+                mine.insert(pane.daemon->sessionId());
+            }
+        });
+        for (const auto &entry : list->sessions) {
+            AttachableSession s;
+            s.id = entry.id;
+            s.attached = entry.attached;
+            s.shared = entry.shared;
+            s.inThisWindow = mine.count(entry.id) != 0;
+            if (!s.inThisWindow) {
+                std::string infoError;
+                const auto info = askDaemon(daemonPath, mtd::GetSessionInfo{entry.id}, infoError, 500);
+                if (const auto *got = info ? std::get_if<mtd::SessionInfo>(&*info) : nullptr) {
+                    s.cwd = got->cwd;
+                    s.command = got->command;
+                }
+            }
+            out.push_back(std::move(s));
+        }
+        return out;
+    };
+    // A new tab that shows an existing daemon terminal.
+    const auto attachSession = [&](const std::string &id) {
+        nextAttachId = id;
+        const Outcome outcome = workspace.apply(Command::NewTab);
+        nextAttachId.clear();
+        if (outcome == Outcome::Ignored) {
+            notify("no room for another tab");
+            return false;
+        }
+        return true;
+    };
     const auto openPalette = [&] {
         std::vector<CommandEntry> extra = {
             {"session.open", "Open session...", "Choose a saved session to open", std::nullopt, {}, {}},
@@ -924,6 +975,18 @@ int runPtyFrontend(const char *font,
             extra.push_back(std::move(entry));
         }
         if (daemonOptions.enabled) {
+            AttachState attach;
+            attach.panesInTab = activeTabPanes().size();
+            const NativePane *focused = workspace.focusedPane();
+            attach.focusedInDaemon = focused && focused->daemon && !focused->daemon->sessionId().empty();
+            for (const auto &s : daemonSessions()) {
+                if (!s.attached && !s.inThisWindow) {
+                    ++attach.leftover;
+                }
+            }
+            for (auto &entry : attachCommandEntries(attach)) {
+                extra.push_back(std::move(entry));
+            }
             ShareState state;
             state.panes = activeTabPanes().size();
             state.shared = std::size_t(wv.sharedInActiveTab());
@@ -965,7 +1028,7 @@ int runPtyFrontend(const char *font,
             restoreByName(argument);
         }
         else if (id == "session.save" && colon == std::string::npos) {
-            wv.pushLayer(std::make_unique<ui::TextPrompt>("Save session as", sessionPolicy.name(), "session.save:", false));
+            wv.pushLayer(std::make_unique<ui::TextPrompt>("Save session as", sessionPolicy.suggestion(workspace.userTitle(workspace.activeIndex())), "session.save:", false));
         }
         else if (id == "session.save") {
             if (!SessionSnapshot::validName(argument)) {
@@ -1014,6 +1077,72 @@ int runPtyFrontend(const char *font,
         }
         else if (id == daemonaction::shareTab || id == daemonaction::shareTabStop) {
             setShared(activeTabPanes(), id == daemonaction::shareTab);
+        }
+        else if (id == daemonaction::attach) {
+            wv.pushLayer(std::make_unique<ui::PickList>("Attach terminal", attachItems(daemonSessions(false)),
+                                                        "No other terminals in the daemon"));
+        }
+        else if (id == daemonaction::attachGo) {
+            const bool force = argument.size() > 6 && argument.compare(argument.size() - 6, 6, ":force") == 0;
+            const std::string sessionId = force ? argument.substr(0, argument.size() - 6) : argument;
+            const auto sessions = daemonSessions(false);
+            const auto found = std::find_if(sessions.begin(), sessions.end(),
+                                            [&](const AttachableSession &s) { return s.id == sessionId; });
+            if (found == sessions.end()) {
+                notify("that terminal is gone");
+            }
+            else if (found->inThisWindow) {
+                notify("this window already shows that terminal");
+            }
+            else if (found->attached && !force) {
+                wv.pushLayer(takeOverDialog(sessionId, shortFolder(found->cwd)));
+            }
+            else {
+                attachSession(sessionId);
+            }
+        }
+        else if (id == daemonaction::attachAll) {
+            std::size_t count = 0;
+            for (const auto &s : daemonSessions(false)) {
+                count += !s.attached && !s.inThisWindow;
+            }
+            if (count == 0) {
+                notify("no leftover terminals");
+            }
+            else {
+                wv.pushLayer(attachAllDialog(count));
+            }
+        }
+        else if (id == daemonaction::attachAllGo) {
+            for (const auto &s : daemonSessions(false)) {
+                if (!s.attached && !s.inThisWindow && !attachSession(s.id)) {
+                    break;
+                }
+            }
+        }
+        else if (id == daemonaction::attachCancel) {
+            // Nothing to do: the dialog closed.
+        }
+        else if (id == daemonaction::detachPane || id == daemonaction::movePane) {
+            const PaneId focusedId = workspace.focusedPaneId();
+            NativePane *focusedPane = workspace.focusedPane();
+            if (focusedPane && focusedPane->daemon && !focusedPane->daemon->sessionId().empty()) {
+                const std::string sessionId = focusedPane->daemon->sessionId();
+                if (id == daemonaction::movePane && !attachSession(sessionId)) {
+                    // No room: the pane stays where it is.
+                }
+                else {
+                    if (NativePane *old = workspace.pane(focusedId)) {
+                        old->endInDaemon = false; // Closing the pane must not end the program.
+                    }
+                    if (workspace.closePaneAnywhere(focusedId) == Outcome::Empty) {
+                        running = false;
+                    }
+                    if (id == daemonaction::detachPane) {
+                        notify("terminal left running in the daemon (Attach terminal... shows it again)");
+                    }
+                }
+            }
         }
         else if (id == daemonaction::quitKeep) {
             keepTerminals = true;
@@ -1822,6 +1951,9 @@ int runPtyFrontend(const char *font,
         if (const auto *focused = workspace.focusedPane();
             focused && !focused->v.title().empty()) {
             title += " | " + focused->v.title();
+        }
+        if (sessionPolicy.persistent()) {
+            title += " | session " + sessionPolicy.name();
         }
         if (rejectedInput) {
             title += " | input queue full/closed";
