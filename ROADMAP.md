@@ -231,3 +231,10 @@ These describe much more functionality than matterm currently implements.
   extended (`src/frontend/sshtunnel.h`); direct connection and TLS. Constraints already decided:
   sharing is remote code execution, so private by default, explicit action, ssh forward or LAN
   only; the repository is public, so no deployment instructions or secrets in it.
+- [ ] Borderless window: shadow and rounded corners are dropped for now (owner, 2026-11-22). On GNOME
+  Wayland with SDL 2.30 the owner's `.tmp/alphatest` (surface, software renderer, accelerated renderer
+  with GL alpha 8, and with `wl_surface.set_opaque_region(NULL)`) never showed transparency; SDL 3 was
+  ruled out as too much work (renderer, audio, SDL_ttf, the Emscripten build). Untried: a bare OpenGL
+  window with an alpha EGL config instead of `SDL_Renderer` (would mean rewriting the renderer, not
+  planned). The system frame (libdecor with a plugin) gives shadow and rounded corners. To check later
+  with the owner: a larger drag area on the strip for moving the window.
