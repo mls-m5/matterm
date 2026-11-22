@@ -9,7 +9,7 @@
 //
 //   {"version":1,"name":"work","saved":1763800000,"active":0,"tabs":[
 //     {"title":"build","focus":0,"layout":NODE}]}
-//   NODE := {"pane":{"cwd":"/home/a","command":["vim","x"],"text":"..."}}   cwd, command, text optional
+//   NODE := {"pane":{"cwd":"/home/a","command":["vim","x"],"text":"...","terminal":"<32 hex>"}}   all optional
 //         | {"split":"h"|"v","ratio":500,"a":NODE,"b":NODE}                h: side by side
 //
 // The tree shape and its limits are those of the browser's LayoutSnapshot.
@@ -32,6 +32,7 @@ struct SavedPane {
     std::string cwd;
     std::vector<std::string> command; // Offered again, never started.
     std::string text;                 // Visible screen at save time, lines joined by '\n'.
+    std::string terminal;             // The daemon terminal it showed (32 hex), empty: none. A detached layout.
 };
 
 struct SavedNode {
@@ -368,7 +369,7 @@ private:
         if (!o) return nullptr;
         if (const Value *p = find(*o, "pane")) {
             const auto *po = std::get_if<Object>(&p->v);
-            if (!po || o->size() != 1 || !onlyKeys(*po, {"cwd", "command", "text"})) return nullptr;
+            if (!po || o->size() != 1 || !onlyKeys(*po, {"cwd", "command", "text", "terminal"})) return nullptr;
             SavedPane pane;
             if (const Value *c = find(*po, "cwd")) {
                 const auto *s = asString(c);
@@ -389,6 +390,11 @@ private:
                 const auto *s = asString(c);
                 if (!s || cleanText(*s) != *s) return nullptr;
                 pane.text = *s;
+            }
+            if (const Value *c = find(*po, "terminal")) {
+                const auto *s = asString(c);
+                if (!s || !LayoutSnapshot::validId(*s)) return nullptr;
+                pane.terminal = *s;
             }
             return SavedNode::leafOf(std::move(pane));
         }
@@ -443,7 +449,8 @@ private:
         if (n.leaf) {
             if ((!n.pane.cwd.empty() && !plainPath(n.pane.cwd)) ||
                 (!n.pane.command.empty() && !plainCommand(n.pane.command)) ||
-                cleanText(n.pane.text) != n.pane.text) {
+                cleanText(n.pane.text) != n.pane.text ||
+                (!n.pane.terminal.empty() && !LayoutSnapshot::validId(n.pane.terminal))) {
                 return false;
             }
             text += n.pane.text.size();
@@ -491,6 +498,12 @@ private:
                 o += first ? "" : ",";
                 o += "\"text\":";
                 str(o, n.pane.text);
+                first = false;
+            }
+            if (!n.pane.terminal.empty()) {
+                o += first ? "" : ",";
+                o += "\"terminal\":";
+                str(o, n.pane.terminal);
             }
             o += "}}";
             return;

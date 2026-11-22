@@ -536,3 +536,32 @@ retained text; the program gets no keys while the mode is on, and keeps running.
   the default; it says so when it is the session this window saves into, which then is not
   written again until a tab is named). `src/frontend/sessioncommands.h`. The browser has no
   saved sessions, so nothing there.
+
+## 14. Terminal in this pane, kill, and detached layouts (agent3)
+
+Native with the daemon. Design in short:
+
+- **Attach terminal here...** (palette, focused pane is a daemon pane): the same list as *Attach
+  terminal...* (this window's own terminals left out), but the chosen terminal replaces the
+  terminal of the focused pane (`NativePane::swapTerminal`: the view is reset and attached to the
+  other session). A terminal another window shows asks "Take over?" first. Then one question about
+  the old terminal: *Replace and end it* / *Replace, keep it running* (it stays in the daemon,
+  detached, and is listed by Attach) / Cancel (the default). It names the running program when
+  the pane is busy.
+- **Kill terminal:** question (Cancel is the default; names the running program), then the pane
+  is closed with its terminal ended. The last pane of the last tab closes the window, like any
+  close.
+- **Detach tab (keep terminals):** the active tab leaves the window, its terminals keep running in
+  the daemon. The tab is saved as a *layout*: a one-tab `SessionSnapshot` in
+  `$XDG_CONFIG_HOME/matterm/layouts/<name>.json` (`SessionFiles::defaultLayoutDirectory()`), where
+  each pane also has `"terminal":"<32 hex id>"` (an optional schema field, validated like the
+  browser's session ids) beside its folder and command. The name is the tab's name as a file name
+  ("layout" without one; a free number is added when taken). No automatic restore, like sessions.
+- **Attach layout...:** a list of the saved layouts; choosing one opens it as a new tab with the
+  saved splits and ratios. For each pane the daemon is asked (`planLayoutAttach`): its terminal is
+  free: attached again; another window shows it: one question first ("Take them over?");
+  missing, gone or already shown here: a new terminal in the saved folder, with a note in the pane.
+  The layout file is removed once it is attached (it is not detached any more). Detaching again
+  makes a new one.
+- Code: `daemoncommands.h` (entries, dialogs, `planLayoutAttach`), `sessionsnapshot.h`
+  (`SavedPane::terminal`), glue in `app/ptyfrontend.cpp` (no test: needs a window).

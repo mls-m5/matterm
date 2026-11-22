@@ -25,6 +25,8 @@ public:
     explicit SessionFiles(std::string directory) : directory_(std::move(directory)) {}
     // $XDG_CONFIG_HOME/matterm/sessions or ~/.config/matterm/sessions; empty if neither is known.
     static std::string defaultDirectory();
+    // The same folder with "layouts" instead of "sessions": detached tabs (docs/TABS_PLAN.md s13).
+    static std::string defaultLayoutDirectory();
 
     const std::string &directory() const { return directory_; }
     // Newest first; files that cannot be read or are not valid are left out.

@@ -43,6 +43,64 @@ TEST_CASE("Attach entries: detach and move only for a daemon pane, attach-all on
     EXPECT(names({}).find("Rename terminal") == std::string::npos);
 }
 
+TEST_CASE("Entries for the pane, the tab and the layouts appear only when they can work") {
+    const auto names = [](const AttachState &s) {
+        std::string all;
+        for (const auto &e : attachCommandEntries(s)) all += e.name + "|";
+        return all;
+    };
+    const auto none = names({});
+    for (const char *n : {"Attach terminal here", "Kill terminal", "Detach tab", "Attach layout"}) {
+        EXPECT(none.find(n) == std::string::npos);
+    }
+    AttachState pane;
+    pane.focusedInDaemon = true;
+    EXPECT(names(pane).find("Attach terminal here...") != std::string::npos);
+    EXPECT(names(pane).find("Kill terminal") != std::string::npos);
+    AttachState tab;
+    tab.tabHasDaemonPane = true;
+    EXPECT(names(tab).find("Detach tab (keep terminals)") != std::string::npos);
+    AttachState layouts;
+    layouts.layouts = 2;
+    EXPECT(names(layouts).find("Attach layout...") != std::string::npos);
+}
+
+TEST_CASE("Replacing or killing a terminal asks first, with Cancel as the default") {
+    EXPECT_EQ(replaceTerminalDialog("abc", "vim a.txt")->selected(), std::size_t(2));
+    EXPECT_EQ(replaceTerminalDialog("abc", "")->selected(), std::size_t(2));
+    EXPECT_EQ(killTerminalDialog("make")->selected(), std::size_t(1));
+    EXPECT_EQ(takeOverLayoutDialog("work", 2)->selected(), std::size_t(1));
+}
+
+TEST_CASE("Attaching a layout: free terminals are reused, others' are taken over, gone ones are made new") {
+    const auto id = [](char c) { return std::string(32, c); };
+    SavedPane a, b, c, d;
+    a.terminal = id('a'); // free
+    b.terminal = id('b'); // another window has it
+    c.terminal = id('c'); // gone
+    d.terminal = id('a'); // named twice
+    SavedTab tab;
+    tab.root = SavedNode::split(SplitDirection::SideBySide, 500,
+                                SavedNode::split(SplitDirection::Stacked, 500, SavedNode::leafOf(a), SavedNode::leafOf(b)),
+                                SavedNode::split(SplitDirection::Stacked, 500, SavedNode::leafOf(c), SavedNode::leafOf(d)));
+    std::vector<AttachableSession> sessions(3);
+    sessions[0].id = id('a');
+    sessions[1].id = id('b');
+    sessions[1].attached = true;
+    sessions[2].id = id('z');
+    auto plan = planLayoutAttach(tab, sessions);
+    EXPECT_EQ(plan.panes, std::size_t(4));
+    EXPECT_EQ(plan.reused, std::size_t(1));
+    EXPECT_EQ(plan.takeOver, std::size_t(1));
+    EXPECT_EQ(plan.fresh, std::size_t(2));
+    EXPECT(plan.use[0] == id('a') && plan.use[1] == id('b') && plan.use[2].empty() && plan.use[3].empty());
+    // A terminal this window already shows is not taken twice.
+    sessions[0].inThisWindow = true;
+    plan = planLayoutAttach(tab, sessions);
+    EXPECT_EQ(plan.reused, std::size_t(0));
+    EXPECT_EQ(plan.fresh, std::size_t(3));
+}
+
 TEST_CASE("The attach list shows folder, command and who has the terminal; own terminals are left out") {
     std::vector<AttachableSession> all(4);
     all[0] = {"a", "/home/me/project/src", {}, false, false, false};

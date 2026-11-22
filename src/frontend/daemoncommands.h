@@ -6,8 +6,10 @@
 // text, the status text. No sockets here; the application does the work when
 // the action comes back.
 #include "commandregistry.h"
+#include "sessionsnapshot.h"
 #include "ui/dialogs.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -38,6 +40,18 @@ inline constexpr const char *attachAllGo = "daemon.attach.all.go";
 inline constexpr const char *attachCancel = "daemon.attach.cancel";
 inline constexpr const char *detachPane = "daemon.detach";
 inline constexpr const char *movePane = "pane.move-to-tab";
+// A terminal of the daemon in the pane that has the focus (replacing its terminal), ending the
+// program of a pane, and whole tabs: detach one (the terminals stay, the layout is saved) and
+// attach a saved layout again.
+inline constexpr const char *attachHere = "daemon.attachhere";
+inline constexpr const char *attachHereGo = "daemon.attachhere.go";     // "...:<id>[:force]"
+inline constexpr const char *attachHereDo = "daemon.attachhere.do";     // "...:<id>:end|keep"
+inline constexpr const char *killPane = "daemon.kill";
+inline constexpr const char *killConfirm = "daemon.kill.confirm";
+inline constexpr const char *detachTab = "tab.detach";
+inline constexpr const char *attachLayout = "layout.attach";            // The list, then "...:<name>".
+inline constexpr const char *attachLayoutGo = "layout.attach.go";       // "...:<name>[:force]"
+inline constexpr const char *deleteLayout = "layout.delete";
 inline constexpr const char *renamePane = "pane.rename"; // The prompt, then "pane.rename:<name>".
 } // namespace daemonaction
 
@@ -133,6 +147,8 @@ struct AttachState {
     std::size_t panesInTab = 0;    // Panes in the active tab.
     std::size_t leftover = 0;      // Terminals in the daemon that no window shows.
     bool focusedInDaemon = false;  // The focused pane is a daemon terminal.
+    bool tabHasDaemonPane = false; // The active tab shows at least one daemon terminal.
+    std::size_t layouts = 0;       // Detached layouts saved.
 };
 
 inline std::vector<CommandEntry> attachCommandEntries(const AttachState &state) {
@@ -142,6 +158,20 @@ inline std::vector<CommandEntry> attachCommandEntries(const AttachState &state) 
     };
     add(daemonaction::attach, "Attach terminal...",
         "Show a terminal that runs in the daemon in a new tab");
+    if (state.focusedInDaemon) {
+        add(daemonaction::attachHere, "Attach terminal here...",
+            "Show a terminal of the daemon in this pane instead of the one it has");
+        add(daemonaction::killPane, "Kill terminal",
+            "End the program in this pane and close the pane");
+    }
+    if (state.tabHasDaemonPane) {
+        add(daemonaction::detachTab, "Detach tab (keep terminals)",
+            "Take this tab out of the window; its terminals keep running and the layout is saved");
+    }
+    if (state.layouts > 0) {
+        add(daemonaction::attachLayout, "Attach layout...",
+            "Open a detached tab again, with its splits and its terminals");
+    }
     if (state.leftover > 0) {
         add(daemonaction::attachAll, "Attach all leftover terminals",
             "Open every terminal that no window shows, each in its own tab");
@@ -207,7 +237,8 @@ inline std::string shortFolder(const std::string &path) {
 
 // The list items: the folder, and dim at the right what runs and who has it. Terminals this
 // window already shows are left out; ones another window shows say so.
-inline std::vector<ui::PickList::Item> attachItems(const std::vector<AttachableSession> &sessions) {
+inline std::vector<ui::PickList::Item> attachItems(const std::vector<AttachableSession> &sessions,
+                                                   const char *action = daemonaction::attachGo) {
     std::vector<ui::PickList::Item> items;
     for (const auto &s : sessions) {
         if (s.inThisWindow) continue;
@@ -219,7 +250,7 @@ inline std::vector<ui::PickList::Item> attachItems(const std::vector<AttachableS
         // A named terminal is listed by its name, with the folder after it.
         const std::string label = s.name.empty() ? shortFolder(s.cwd)
                                                  : attachdetail::plain(s.name, 40) + " (" + shortFolder(s.cwd) + ")";
-        items.push_back({label, detail, std::string(daemonaction::attachGo) + ":" + s.id});
+        items.push_back({label, detail, std::string(action) + ":" + s.id});
     }
     return items;
 }
@@ -231,12 +262,89 @@ inline std::string takenOverNotice(bool shared, const std::string &name) {
     return text + (shared ? " was taken over from another window" : " was taken over by another window");
 }
 
-inline std::unique_ptr<ui::ConfirmDialog> takeOverDialog(const std::string &id, const std::string &what) {
+inline std::unique_ptr<ui::ConfirmDialog> takeOverDialog(const std::string &id, const std::string &what,
+                                                         const char *action = daemonaction::attachGo) {
     std::vector<ui::ConfirmDialog::Button> buttons = {
-        {"Take over", std::string(daemonaction::attachGo) + ":" + id + ":force"},
+        {"Take over", std::string(action) + ":" + id + ":force"},
         {"Cancel", daemonaction::attachCancel}};
     return std::make_unique<ui::ConfirmDialog>(
         "Another window shows " + attachdetail::plain(what, 30) + ". Take it over? That window loses it.",
+        std::move(buttons), 1, 1);
+}
+
+// Before the terminal of a pane is replaced by another: what runs there ("" = an idle shell).
+// Three answers; Cancel is the default and what Escape says.
+inline std::unique_ptr<ui::ConfirmDialog> replaceTerminalDialog(const std::string &id, const std::string &running) {
+    std::vector<ui::ConfirmDialog::Button> buttons = {
+        {"Replace and end it", std::string(daemonaction::attachHereDo) + ":" + id + ":end"},
+        {"Replace, keep it running", std::string(daemonaction::attachHereDo) + ":" + id + ":keep"},
+        {"Cancel", daemonaction::attachCancel}};
+    return std::make_unique<ui::ConfirmDialog>(
+        running.empty() ? std::string("Replace the terminal of this pane?")
+                        : "This pane runs " + attachdetail::plain(running, 40) + ". Replace its terminal?",
+        std::move(buttons), 2, 2);
+}
+
+inline std::unique_ptr<ui::ConfirmDialog> killTerminalDialog(const std::string &running) {
+    std::vector<ui::ConfirmDialog::Button> buttons = {{"Kill", daemonaction::killConfirm},
+                                                      {"Cancel", daemonaction::attachCancel}};
+    return std::make_unique<ui::ConfirmDialog>(
+        running.empty() ? std::string("End the shell of this pane and close the pane?")
+                        : "End " + attachdetail::plain(running, 40) + " and close the pane?",
+        std::move(buttons), 1, 1);
+}
+
+// What attaching a saved layout will find, from the layout's terminals and what the daemon holds.
+struct LayoutAttachPlan {
+    std::size_t panes = 0;       // Panes in the layout.
+    std::size_t reused = 0;      // Its terminal is there and free: attached again.
+    std::size_t takeOver = 0;    // Its terminal is shown by another window.
+    std::size_t fresh = 0;       // No terminal named, or it is gone (or already shown here): a new one.
+    std::vector<std::string> use; // Per pane in tree order: the terminal to attach, empty: a new one.
+};
+
+inline void collectTerminals(const SavedNode &n, std::vector<const SavedPane *> &out) {
+    if (n.leaf) {
+        out.push_back(&n.pane);
+        return;
+    }
+    collectTerminals(*n.first, out);
+    collectTerminals(*n.second, out);
+}
+
+inline LayoutAttachPlan planLayoutAttach(const SavedTab &tab, const std::vector<AttachableSession> &sessions) {
+    LayoutAttachPlan plan;
+    std::vector<const SavedPane *> panes;
+    collectTerminals(*tab.root, panes);
+    std::vector<std::string> taken;
+    for (const SavedPane *p : panes) {
+        ++plan.panes;
+        std::string use;
+        for (const auto &s : sessions) {
+            if (s.id != p->terminal || p->terminal.empty() || s.inThisWindow) continue;
+            if (std::find(taken.begin(), taken.end(), s.id) != taken.end()) continue; // Named twice: once.
+            use = s.id;
+            s.attached ? ++plan.takeOver : ++plan.reused;
+            break;
+        }
+        if (use.empty()) {
+            ++plan.fresh;
+        }
+        else {
+            taken.push_back(use);
+        }
+        plan.use.push_back(std::move(use));
+    }
+    return plan;
+}
+
+inline std::unique_ptr<ui::ConfirmDialog> takeOverLayoutDialog(const std::string &name, std::size_t count) {
+    std::vector<ui::ConfirmDialog::Button> buttons = {
+        {"Take over", std::string(daemonaction::attachLayoutGo) + ":" + name + ":force"},
+        {"Cancel", daemonaction::attachCancel}};
+    return std::make_unique<ui::ConfirmDialog>(
+        std::to_string(count) + (count == 1 ? " terminal of this layout is" : " terminals of this layout are") +
+            " shown by another window. Take " + (count == 1 ? "it" : "them") + " over?",
         std::move(buttons), 1, 1);
 }
 

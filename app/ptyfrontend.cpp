@@ -323,6 +323,22 @@ struct NativePane {
     bool inDaemon() const {
         return !link;
     }
+    // Shows another daemon terminal in this pane. The old one is ended when `endOld`, else it
+    // keeps running in the daemon, detached.
+    void swapTerminal(const std::string &sessionId, bool endOld) {
+        v.detach();
+        if (daemon && endOld && !v.ended()) {
+            daemon->close();
+        }
+        daemon.reset();
+        v.resetForReplay();
+        daemon = attachToDaemon(v, socket, sessionId, 0, daemonClock);
+        endInDaemon = true;
+        shared = false;
+        name.clear();
+        hinted = false;
+        takeoverReported = false;
+    }
     // Serves the process or the connection; says what Enter will do when the terminal is not live.
     void pump() {
         if (link) {
@@ -763,6 +779,7 @@ int runPtyFrontend(const char *font,
     // ---- palette, dialogs, saved sessions (docs/TABS_PLAN.md sections 8 and 9) ----
     LinuxProcSource procSource;
     const SessionFiles sessionFiles(SessionFiles::defaultDirectory());
+    const SessionFiles layoutFiles(SessionFiles::defaultLayoutDirectory()); // Detached tabs.
     SessionPolicy sessionPolicy;
     bool smokeBusy = false; // --pty-tabs-smoke-test: pretend every pane runs a program
     const auto paneState = [&](NativePane &pane) {
@@ -1034,6 +1051,13 @@ int runPtyFrontend(const char *font,
                     ++attach.leftover;
                 }
             }
+            attach.layouts = layoutFiles.list().size();
+            if (const auto *tab = workspace.activeTab()) {
+                for (const PaneId paneId : tab->tree.ids()) {
+                    const NativePane *p = workspace.pane(paneId);
+                    attach.tabHasDaemonPane = attach.tabHasDaemonPane || (p && p->daemon);
+                }
+            }
             for (auto &entry : attachCommandEntries(attach)) {
                 extra.push_back(std::move(entry));
             }
@@ -1191,6 +1215,168 @@ int runPtyFrontend(const char *font,
                 else {
                     const auto *refused = reply ? std::get_if<mtd::ControlError>(&*reply) : nullptr;
                     notify("daemon: " + (refused ? refused->reason : error.empty() ? std::string("could not name it (an older daemon?)") : error));
+                }
+            }
+        }
+        else if (id == daemonaction::attachHere) {
+            wv.pushLayer(std::make_unique<ui::PickList>("Attach terminal here",
+                                                        attachItems(daemonSessions(false), daemonaction::attachHereGo),
+                                                        "No other terminals in the daemon"));
+        }
+        else if (id == daemonaction::attachHereGo) {
+            const bool force = argument.size() > 6 && argument.compare(argument.size() - 6, 6, ":force") == 0;
+            const std::string sessionId = force ? argument.substr(0, argument.size() - 6) : argument;
+            const auto sessions = daemonSessions(false);
+            const auto found = std::find_if(sessions.begin(), sessions.end(),
+                                            [&](const AttachableSession &s) { return s.id == sessionId; });
+            NativePane *here = workspace.focusedPane();
+            if (found == sessions.end()) {
+                notify("that terminal is gone");
+            }
+            else if (found->inThisWindow || !here || !here->daemon) {
+                notify("this window already shows that terminal");
+            }
+            else if (found->attached && !force) {
+                wv.pushLayer(takeOverDialog(sessionId, shortFolder(found->cwd), daemonaction::attachHereGo));
+            }
+            else {
+                const auto state = paneState(*here);
+                wv.pushLayer(replaceTerminalDialog(sessionId, state.busy ? commandLine(state.command) : std::string()));
+            }
+        }
+        else if (id == daemonaction::attachHereDo) {
+            const auto colon2 = argument.rfind(':');
+            const std::string sessionId = colon2 == std::string::npos ? argument : argument.substr(0, colon2);
+            const bool endOld = colon2 == std::string::npos || argument.substr(colon2 + 1) == "end";
+            if (NativePane *here = workspace.focusedPane(); here && here->daemon) {
+                here->swapTerminal(sessionId, endOld);
+                notify(endOld ? "terminal replaced" : "terminal replaced; the old one keeps running in the daemon");
+            }
+        }
+        else if (id == daemonaction::killPane) {
+            if (NativePane *here = workspace.focusedPane(); here && here->daemon) {
+                const auto state = paneState(*here);
+                wv.pushLayer(killTerminalDialog(state.busy ? commandLine(state.command) : std::string()));
+            }
+        }
+        else if (id == daemonaction::killConfirm) {
+            if (const PaneId focusedId = workspace.focusedPaneId(); focusedId != 0) {
+                // Closing a daemon pane ends its terminal (endInDaemon is true unless it was detached).
+                if (NativePane *here = workspace.pane(focusedId)) {
+                    here->endInDaemon = true;
+                }
+                if (workspace.closePaneAnywhere(focusedId) == Outcome::Empty) {
+                    running = false;
+                }
+                notify("terminal ended");
+            }
+        }
+        else if (id == daemonaction::detachTab) {
+            const auto *tab = workspace.activeTab();
+            auto snapshot = captureSession(
+                workspace, "layout", std::int64_t(std::time(nullptr)), [&](PaneId, const NativePane &pane) {
+                    SavedPane saved;
+                    const auto state = paneState(const_cast<NativePane &>(pane));
+                    saved.cwd = state.cwd;
+                    saved.command = state.command;
+                    if (pane.daemon && !pane.daemon->sessionId().empty() &&
+                        LayoutSnapshot::validId(pane.daemon->sessionId())) {
+                        saved.terminal = pane.daemon->sessionId();
+                    }
+                    return saved;
+                });
+            if (!tab || !snapshot || snapshot->active >= snapshot->tabs.size()) {
+                notify("nothing to detach");
+            }
+            else {
+                // Only the active tab; named after its title, a free name when it is taken.
+                SavedTab only = std::move(snapshot->tabs[snapshot->active]);
+                snapshot->tabs.clear();
+                snapshot->tabs.push_back(std::move(only));
+                snapshot->active = 0;
+                const std::string title = workspace.userTitle(workspace.activeIndex());
+                std::string base = SessionPolicy("layout").suggestion(title); // The tab's name as a file name.
+                if (title.empty()) {
+                    base = "layout";
+                }
+                std::string name = base;
+                for (int n = 2; layoutFiles.load(name) && n < 100; ++n) {
+                    name = base.substr(0, SessionSnapshot::kMaxName - 4) + "-" + std::to_string(n);
+                }
+                snapshot->name = name;
+                std::string error;
+                if (!layoutFiles.save(*snapshot, &error)) {
+                    notify("layout not saved: " + error);
+                }
+                else {
+                    // The terminals stay in the daemon; the tab goes.
+                    for (const PaneId paneId : workspace.activeTab()->tree.ids()) {
+                        if (NativePane *p = workspace.pane(paneId)) {
+                            p->endInDaemon = false;
+                        }
+                    }
+                    if (workspace.apply(Command::CloseTab) == Outcome::Empty) {
+                        running = false;
+                    }
+                    notify("tab detached as layout '" + name + "' (Attach layout... opens it again)");
+                }
+            }
+        }
+        else if (id == daemonaction::attachLayout && colon == std::string::npos) {
+            std::vector<ui::PickList::Item> items;
+            for (const auto &info : layoutFiles.list()) {
+                items.push_back({info.name,
+                                 std::to_string(info.panes) + (info.panes == 1 ? " terminal" : " terminals"),
+                                 std::string(daemonaction::attachLayout) + ":" + info.name});
+            }
+            wv.pushLayer(std::make_unique<ui::PickList>("Attach layout", std::move(items), "No detached layouts"));
+        }
+        else if (id == daemonaction::attachLayout || id == daemonaction::attachLayoutGo) {
+            const bool force = id == daemonaction::attachLayoutGo && argument.size() > 6 &&
+                               argument.compare(argument.size() - 6, 6, ":force") == 0;
+            const std::string layoutName = force ? argument.substr(0, argument.size() - 6) : argument;
+            const auto snapshot = SessionSnapshot::validName(layoutName) ? layoutFiles.load(layoutName) : std::nullopt;
+            if (!snapshot || snapshot->tabs.empty()) {
+                notify("layout '" + layoutName + "' cannot be read");
+            }
+            else {
+                const auto plan = planLayoutAttach(snapshot->tabs[0], daemonSessions(false));
+                if (plan.takeOver > 0 && !force) {
+                    wv.pushLayer(takeOverLayoutDialog(layoutName, plan.takeOver));
+                }
+                else {
+                    // Panes are made in the restore's own order, so a terminal is found by its id.
+                    std::set<std::string> usable;
+                    for (const auto &u : plan.use) {
+                        if (!u.empty()) usable.insert(u);
+                    }
+                    const auto report = restoreSession(workspace, *snapshot, [&](const SavedPane &saved) {
+                        nextAttachId.clear();
+                        if (!saved.terminal.empty() && usable.erase(saved.terminal) != 0) {
+                            nextAttachId = saved.terminal; // Once: a terminal named twice is shown once.
+                        }
+                        std::error_code ec;
+                        nextCwd = !saved.cwd.empty() && std::filesystem::is_directory(saved.cwd, ec) ? saved.cwd : std::string();
+                    });
+                    nextAttachId.clear();
+                    nextCwd.clear();
+                    for (const auto &restored : report.panes) {
+                        NativePane *p = workspace.pane(restored.id);
+                        if (p && restored.saved && !restored.saved->terminal.empty() && !p->daemon) {
+                            continue;
+                        }
+                        if (p && restored.saved && !restored.saved->terminal.empty() &&
+                            p->daemon->sessionId() != restored.saved->terminal) {
+                            p->v.note("its terminal is gone: a new one was started here");
+                        }
+                    }
+                    if (report.tabs == 0) {
+                        notify("no room for the layout");
+                    }
+                    else {
+                        layoutFiles.remove(layoutName); // It is attached now, no longer detached.
+                        notify("layout '" + layoutName + "' attached");
+                    }
                 }
             }
         }

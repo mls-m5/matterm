@@ -36,7 +36,7 @@ std::string dumpNode(const SavedNode &n) {
     if (n.leaf) {
         std::string c;
         for (const auto &a : n.pane.command) c += a + "|";
-        return "L(" + n.pane.cwd + ";" + c + ";" + n.pane.text + ")";
+        return "L(" + n.pane.cwd + ";" + c + ";" + n.pane.text + ";" + n.pane.terminal + ")";
     }
     return std::string(n.direction == SplitDirection::SideBySide ? "H" : "V") + std::to_string(n.permille) + "(" +
            dumpNode(*n.first) + "," + dumpNode(*n.second) + ")";
@@ -69,6 +69,27 @@ TEST_CASE("A snapshot survives serialize and parse exactly") {
     EXPECT(back.has_value());
     EXPECT_EQ(dump(*back), dump(s));
     EXPECT_EQ(back->serialize(), s.serialize());
+}
+
+TEST_CASE("A pane can name the daemon terminal it showed; only a 32 hex id is accepted") {
+    const std::string id = "0123456789abcdef0123456789abcdef";
+    SessionSnapshot s = sample();
+    auto &leaf = *s.tabs[1].root;
+    leaf.pane.terminal = id;
+    EXPECT(s.valid());
+    const auto text = s.serialize();
+    const auto back = SessionSnapshot::parse(text);
+    EXPECT(back.has_value());
+    EXPECT_EQ(dump(*back), dump(s));
+    EXPECT(back->tabs[1].root->pane.terminal == id);
+    for (const std::string &bad : {std::string("xyz"), std::string(31, 'a'), std::string(33, 'a'),
+                                  std::string("0123456789ABCDEF0123456789ABCDEF"), std::string("../../etc/passwd")}) {
+        s.tabs[1].root->pane.terminal = bad;
+        EXPECT(!s.valid());
+        auto doc = text;
+        doc.replace(doc.find(id), id.size(), bad);
+        EXPECT(!SessionSnapshot::parse(doc).has_value());
+    }
 }
 
 TEST_CASE("Names are plain file names") {

@@ -41,6 +41,15 @@ std::string SessionFiles::defaultDirectory() {
     return {};
 }
 
+std::string SessionFiles::defaultLayoutDirectory() {
+    std::string dir = defaultDirectory();
+    const std::string tail = "/sessions";
+    if (dir.size() >= tail.size() && dir.compare(dir.size() - tail.size(), tail.size(), tail) == 0) {
+        dir.replace(dir.size() - tail.size(), tail.size(), "/layouts");
+    }
+    return dir;
+}
+
 bool SessionFiles::ensureDirectory(std::string *error) const {
     if (directory_.empty() || directory_.front() != '/') {
         errno = EINVAL;
