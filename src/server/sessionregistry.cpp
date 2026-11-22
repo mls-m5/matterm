@@ -48,6 +48,7 @@ struct Entry : SessionHost {
     bool persistent, attached = false, started = false, closing = false,
                      ended = false;
     bool tombstone = false;
+    bool shared = false;
     int exitCode = -1, exitSignal = 0;
     Time detachedAt{};
     explicit Entry(std::string identifier,
@@ -337,7 +338,8 @@ std::optional<SessionRegistry::Attachment> SessionRegistry::attach(
     auto config = impl_->protocolConfig;
     config.sessionId = entry->id;
     config.startOffset = start;
-    config.features = capable ? featureReplay : 0;
+    config.features =
+        (capable ? featureReplay : 0) | impl_->config.extraFeatures;
     config.welcomeFlags = flags;
     config.resume = resume;
     entry->session = std::make_shared<ServerSession>(config, *entry);
@@ -419,6 +421,23 @@ void SessionRegistry::closeAll(Time now) {
     impl_->tombstones.clear();
     for (auto &[id, entry] : impl_->entries)
         entry->stop(now);
+}
+std::vector<SessionRegistry::Info> SessionRegistry::list() const {
+    std::vector<Info> out;
+    for (const auto &[id, entry] : impl_->entries) {
+        if (entry->closing || entry->ended)
+            continue;
+        out.push_back({id, entry->attached, entry->shared, entry->ring.end()});
+    }
+    return out;
+}
+bool SessionRegistry::setShared(const std::string &id, bool shared) {
+    const auto found = impl_->entries.find(id);
+    if (found == impl_->entries.end() || found->second->closing ||
+        found->second->ended)
+        return false;
+    found->second->shared = shared;
+    return true;
 }
 std::size_t SessionRegistry::size() const {
     return impl_->entries.size();

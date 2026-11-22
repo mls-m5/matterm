@@ -326,6 +326,13 @@ if(BUILD_TESTING)
         endforeach()
     endif()
 
+    if(TARGET matterm-daemon-core)
+        add_executable(daemon_test daemon_test.cpp mls-unit-test/test_main.cpp)
+        target_link_libraries(daemon_test PRIVATE matterm-daemon-core)
+        add_test(NAME daemon COMMAND daemon_test)
+        set_tests_properties(daemon PROPERTIES TIMEOUT 120)
+    endif()
+
     if(TARGET matterm)
         add_test(NAME terminal_cli_help
             COMMAND "${CMAKE_COMMAND}" "-DAPP=$<TARGET_FILE:matterm>"

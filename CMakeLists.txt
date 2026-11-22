@@ -158,6 +158,7 @@ endif()
 
 if(MATTERM_BUILD_SERVER)
     add_subdirectory(src/server)
+    add_subdirectory(src/daemon)
 endif()
 include(cmake/BundledFont.cmake)
 if(MATTERM_BUILD_APP OR MATTERM_BUILD_DEMO)

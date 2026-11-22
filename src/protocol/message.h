@@ -13,6 +13,7 @@ namespace protocol {
 
 constexpr std::uint16_t currentVersion = 1;
 constexpr std::uint32_t featureReplay = 1;
+constexpr std::uint32_t featureDaemon = 2; // The peer is the local daemon (docs/PROTOCOL.md, "Local daemon")
 constexpr std::uint8_t welcomeResumed = 1;
 constexpr std::uint8_t welcomeOutputLost = 2;
 constexpr std::size_t maxMessageSize = 16384; // Including the type byte.

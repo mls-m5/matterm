@@ -466,3 +466,49 @@ and flags `01`, then Output at 1234. Take-over closes the old attachment with:
 
 This is Error code 6, a u16 reason length of 18, and `session taken over`, then
 WebSocket close 1008. There is no extra channel/session-id prefix on Output.
+
+## 12. Local daemon (Unix socket, additive)
+
+`matterm-daemon` serves the same terminal protocol on a Unix socket instead of a WebSocket.
+No network, no password: the socket is `$XDG_RUNTIME_DIR/matterm/daemon.sock` (directory 0700,
+socket 0600; fallback `/tmp/matterm-<uid>/daemon.sock`), and the peer uid is checked with
+`SO_PEERCRED`. Other users are closed without a word. `--daemon-socket PATH` selects another socket.
+
+**Framing.** Each message is a 4-byte big-endian length (1..16384) followed by exactly the bytes a
+WebSocket binary message would carry. A zero or larger length, or anything else that violates
+this, closes the connection (no reply). There is no close code on this transport: the `Error`
+message carries the reason and an orderly close is EOF. Reference: `src/daemon/framing.h`.
+
+**Terminal connections.** The first frame is `Hello`; everything after is section 4–6 and 11
+unchanged. The daemon offers feature bit `featureDaemon` (2) in `Welcome.features` to clients
+that asked for it. Sessions persist across disconnects only when the client also asked for
+`featureReplay`, and a detached session never expires; it ends when its process exits or on
+Shutdown. The daemon runs a fixed command (the user's `$SHELL`), `Hello` cannot choose one.
+
+**Control connections.** A connection whose first frame is `ControlHello` (0x40) is a control
+connection: it has no session. Control types do not overlap the terminal types (client to daemon
+0x40..0x44, daemon to client 0xc0..0xc4), so a terminal decoder rejects them as unknown.
+
+| Type | Message | Fields |
+| --- | --- | --- |
+| 0x40 | ControlHello | u16 version (1) |
+| 0x41 | ListSessions | – |
+| 0x42 | SetShared | string id, u8 shared (0/1) |
+| 0x43 | GetStatus | – |
+| 0x44 | Shutdown | u32 expectedSessions |
+| 0xc0 | ControlWelcome | u16 version, u32 pid, u32 features, string build |
+| 0xc1 | SessionList | u16 n, n x (string id, u8 flags: 1 attached, 2 shared, u64 outputEnd) |
+| 0xc2 | Status | u32 pid, sessions, attached, shared, clients; u64 uptimeMs; u32 idleExitSeconds |
+| 0xc3 | ShutdownReply | u8 done, u32 sessions |
+| 0xc4 | ControlError | u16 code (1 BadMessage, 2 NotControl, 3 UnknownSession, 4 Busy), string reason |
+
+`ListSessions` and `SetShared` are answered with a `SessionList`. `Shutdown` runs only when
+`expectedSessions` equals the number of live sessions at that moment: the client shows the owner
+"this ends N sessions", and sends N only after the owner confirmed. If the count changed, the
+reply is `done=0` with the real count and nothing ends. On `done=1` the daemon ends all
+sessions, removes the socket and exits.
+
+**Lifetime.** `<socket>.lock` is held with `flock` for the daemon's life, so a second daemon on
+the same socket refuses to start; a socket file left by a crash is replaced. The daemon exits by
+itself after `--idle-seconds` (default 60) with no session and no client. `--daemonize` detaches;
+the parent returns when the socket is ready (or prints the error and exits 1).
