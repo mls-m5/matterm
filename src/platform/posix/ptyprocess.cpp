@@ -373,6 +373,14 @@ void PtyProcess::terminate() noexcept {
 int PtyProcess::nativeHandle() const noexcept {
     return impl_->master.value;
 }
+int PtyProcess::childPid() const noexcept {
+    return impl_->child > 0 && !impl_->status ? int(impl_->child) : 0;
+}
+int PtyProcess::foregroundProcessGroup() const noexcept {
+    if (impl_->master.value < 0) return 0;
+    const pid_t group = ::tcgetpgrp(impl_->master.value);
+    return group > 0 ? int(group) : 0;
+}
 bool PtyProcess::closed() const noexcept {
     return impl_->master.value < 0;
 }

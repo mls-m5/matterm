@@ -314,6 +314,36 @@ Suggested order: (1) layout + titles + folders in the native app, (2) restored t
 under a marker, (3) "run it again" offer for the previous command, (4) named sessions in
 the palette, (5) local session daemon, if the owner wants the tmux model.
 
+### Decided and built (2026-11-22, branch `agent2-savedsessions`, model and files only)
+
+Owner decisions: **no automatic restore** (an opt-in setting later); a session is chosen from
+a list (palette style); a previous command is only **offered** ("was running: X - Enter to run
+it again"), never started; a session is saved when the owner **names a tab** and on a
+controlled shutdown (quit, SIGTERM, SIGHUP) of a window whose session is saved, then with a
+text checkpoint of the visible screen. Closing a window or tab that runs a program other than
+the shell asks "Close / Cancel"; a third answer "run in background" is future work.
+
+Pieces (all tested, none wired into the app yet, because the dialog and the list need the
+overlay layer and the palette from agent3):
+
+| Piece | File | Notes |
+|---|---|---|
+| `SessionSnapshot` | `src/frontend/sessionsnapshot.h` | JSON v1, strict reader (exact schema, duplicate keys, depth, size and value limits, UTF-8, no surrogates), same tree and pane limits as `LayoutSnapshot`; folder, command, screen text and titles are cleaned or refused |
+| `probePane`, `commandLine` | `src/frontend/paneprobe.h` | foreground process folder and command line through a `ProcSource`; shells recognized by name; hostile data (newline in an argument, relative folder) not kept; shell quoting of the offer |
+| `LinuxProcSource` | `src/platform/posix/procinfo.*` | /proc/<pid>/cwd and cmdline, bounded |
+| `PtyProcess::childPid`, `foregroundProcessGroup` | `src/platform/posix/ptyprocess.*` | `tcgetpgrp` on the master; tested with a real bash (cd, a running `sleep`, Ctrl+C) |
+| `SessionFiles` | `src/platform/posix/sessionfiles.*` | `~/.config/matterm/sessions/<name>.json` (XDG_CONFIG_HOME first), folder 0700, files 0600, temp file + fsync + rename, loads only files we own, not group/world writable, no symlinks, name inside must match the file name |
+| `captureSession`, `restoreSession`, `visibleText`, `offerText`, `rerunInput`, `SessionPolicy` | `src/frontend/sessionrestore.h` | built on `Workspace::foldTabs` and the commands, the way the browser restores; `willCreate(SavedPane)` tells the frontend the folder of the next shell |
+| `Workspace::setUserTitle` | `src/frontend/workspace.h` | the owner's tab name wins in the strip (the rename UI is section 8) |
+| `CloseRequest`, `WorkspaceView::setBusyProbe/windowClose/answerClose` | `src/frontend/closeprompt.h`, `workspaceview.h` | keys, the strip's x and middle click ask before closing a busy pane or tab; the answer closes by tab id; `backgroundAvailable` is the hook for the third answer |
+
+Wiring still to do in `app/ptyfrontend.cpp` (the app has no probe set, so closing behaves as
+before): set the probe (`probePane` over `PtyLink::childPid/foregroundProcessGroup`), call
+`windowClose()` on SDL_QUIT and show the dialog from `CloseRequest::question()`, a signal
+handler for SIGHUP/SIGTERM that quits through the same path, the session list, the rename
+action calling `SessionPolicy::shouldSave(TabNamed)`, and typing `rerunInput()` into a restored
+pane's shell. Tokens, environment variables and shell state are never saved.
+
 Questions for the owner: restore automatically or ask at start? Named sessions
 wanted? Is "offer to run the program again" enough, or is a daemon that keeps programs
 alive the goal?

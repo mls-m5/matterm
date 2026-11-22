@@ -23,6 +23,14 @@ add_library(palette src/core/palette.cpp)
 target_compile_features(palette PUBLIC cxx_std_17)
 target_include_directories(palette PUBLIC src src/core)
 
+if(UNIX AND NOT EMSCRIPTEN)
+    # Saved sessions: /proc reader and session files (header-only logic is in src/frontend).
+    add_library(sessionfiles src/platform/posix/procinfo.cpp src/platform/posix/sessionfiles.cpp)
+    target_compile_features(sessionfiles PUBLIC cxx_std_17)
+    target_include_directories(sessionfiles PUBLIC src/frontend src/platform/posix)
+    target_link_libraries(sessionfiles PUBLIC palette)
+endif()
+
 # Common cells, storage, and presentation state: no terminal protocol or SDL.
 add_library(cellbuffer src/core/cellbuffer.cpp)
 target_compile_features(cellbuffer PUBLIC cxx_std_17)

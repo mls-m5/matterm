@@ -51,6 +51,11 @@ public:
     std::optional<ExitStatus> pollExit();
     void terminate() noexcept;
     int nativeHandle() const noexcept;
+    // The process the PTY started (0 once it was reaped), and the terminal's foreground
+    // process group (0 if unknown): the shell's own, or the program the shell is running.
+    // For asking /proc what a pane does (docs/TABS_PLAN.md section 9).
+    int childPid() const noexcept;
+    int foregroundProcessGroup() const noexcept;
     bool closed() const noexcept;
 
 private:

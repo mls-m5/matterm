@@ -2,6 +2,7 @@
 #include "ui/commandpalette.h"
 #include "workspaceview.h"
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -203,6 +204,110 @@ TEST_CASE("A held shortcut acts once and held plain keys never start the prefix"
         EXPECT_EQ(split.refused.size(), std::size_t(1));
         EXPECT(r.view.key({'e', true, true, false}, 4).commands.empty());
         EXPECT_EQ(r.space.paneCount(), std::size_t(3));
+    }
+
+    TEST_CASE("Closing a pane or tab that runs a program asks first; Cancel changes nothing") {
+        Rig r;
+        std::set<PaneId> busy;
+        r.view.setBusyProbe([&busy](PaneId id) -> std::optional<std::string> {
+            if (!busy.count(id)) return std::nullopt;
+            return "vim notes.txt";
+        });
+        r.split();
+        r.view.key({'t', true, true, false}, 0); // second tab
+        const PaneId focused = r.space.focusedPaneId();
+        // Nothing runs: closes at once, as before.
+        KeyResult k = r.view.key({'w', false, true, true}, 1); // ClosePane (not busy) -> closes tab 2
+        EXPECT(k.changed && !k.confirm);
+        EXPECT_EQ(r.space.tabCount(), std::size_t(1));
+        // A busy focused pane in a split: the key asks.
+        const PaneId pane = r.space.focusedPaneId();
+        busy.insert(pane);
+        k = r.view.key({'w', false, true, true}, 2);
+        EXPECT(!k.changed && k.confirm.has_value());
+        EXPECT(k.confirm->scope == CloseScope::Pane && k.confirm->pane == pane);
+        EXPECT_EQ(k.confirm->running.size(), std::size_t(1));
+        EXPECT(k.confirm->question().find("vim notes.txt") != std::string::npos);
+        EXPECT_EQ(r.space.paneCount(), std::size_t(2));
+        EXPECT(r.view.pendingClose().has_value());
+        // Cancel: still there, nothing pending.
+        KeyResult a = r.view.answerClose(CloseAnswer::Cancel);
+        EXPECT(!a.changed && !r.view.pendingClose().has_value());
+        EXPECT_EQ(r.space.paneCount(), std::size_t(2));
+        // Close: gone.
+        r.view.key({'w', false, true, true}, 3);
+        a = r.view.answerClose(CloseAnswer::Close);
+        EXPECT(a.changed);
+        EXPECT_EQ(r.space.paneCount(), std::size_t(1));
+        // Answering with nothing pending does nothing.
+        EXPECT(!r.view.answerClose(CloseAnswer::Close).changed);
+        (void)focused;
+    }
+
+    TEST_CASE("Closing a tab asks when any of its panes runs a program, from keys and from the strip") {
+        Rig r;
+        PaneId other = 0;
+        r.view.setBusyProbe([&other](PaneId id) -> std::optional<std::string> {
+            return id == other ? std::optional<std::string>("make -j8") : std::nullopt;
+        });
+        r.split();
+        const auto ids = r.space.activeTab()->tree.ids();
+        other = ids.front() == r.space.focusedPaneId() ? ids.back() : ids.front(); // not the focused one
+        r.view.key({'t', true, true, false}, 0);
+        r.view.key({'t', true, true, false}, 0);
+        EXPECT_EQ(r.space.tabCount(), std::size_t(3));
+        // Select the first tab, close it with the key.
+        r.view.key({'1', false, true, true}, 0);
+        r.space.select(0);
+        KeyResult k = r.view.key({'w', true, true, false}, 1); // CloseTab
+        EXPECT(k.confirm.has_value() && k.confirm->scope == CloseScope::Tab);
+        EXPECT_EQ(r.space.tabCount(), std::size_t(3));
+        // The strip's middle click on that tab asks too.
+        r.view.answerClose(CloseAnswer::Cancel);
+        MouseResult m = r.view.mouse(r.at(10, 5, MouseInput::Type::Down, MouseInput::Button::Middle));
+        EXPECT(m.confirm.has_value() && !m.changed);
+        EXPECT_EQ(r.space.tabCount(), std::size_t(3));
+        // The tab may have moved by the time the answer comes: it is found by id.
+        r.space.moveTab(0, 2);
+        KeyResult a = r.view.answerClose(CloseAnswer::Close);
+        EXPECT(a.changed);
+        EXPECT_EQ(r.space.tabCount(), std::size_t(2));
+        EXPECT_EQ(r.space.paneCount(), std::size_t(2)); // The two-pane tab is gone.
+    }
+
+    TEST_CASE("Closing the window asks once, naming the programs; no probe asks nothing") {
+        Rig r;
+        EXPECT(!r.view.windowClose().has_value());
+        std::set<PaneId> busy;
+        r.view.setBusyProbe([&busy](PaneId id) -> std::optional<std::string> {
+            return busy.count(id) ? std::optional<std::string>("ssh host") : std::nullopt;
+        });
+        EXPECT(!r.view.windowClose().has_value());
+        r.view.key({'t', true, true, false}, 0);
+        for (const PaneId id : {PaneId(1), PaneId(2)}) busy.insert(id);
+        const auto req = r.view.windowClose();
+        EXPECT(req.has_value() && req->scope == CloseScope::Window);
+        EXPECT_EQ(req->running.size(), std::size_t(2));
+        EXPECT(!req->backgroundAvailable);
+        EXPECT(req->question().find("2") == std::string::npos); // Both are named, no "more".
+        EXPECT(req->question().find("are still running") != std::string::npos);
+        // Closing the window changes no layout.
+        EXPECT(!r.view.answerClose(CloseAnswer::Close).changed);
+        EXPECT_EQ(r.space.tabCount(), std::size_t(2));
+    }
+
+    TEST_CASE("The question stays one printable line however hostile the command") {
+        CloseRequest q;
+        q.scope = CloseScope::Tab;
+        q.running.push_back({1, std::string("evil\x1b[2J\nname") + std::string(300, 'x')});
+        for (int i = 0; i < 6; ++i) q.running.push_back({PaneId(2 + i), "p" + std::to_string(i)});
+        const auto text = q.question();
+        for (const char c : text) EXPECT(static_cast<unsigned char>(c) >= 0x20 && c != 0x7f);
+        EXPECT(text.find("and 4 more") != std::string::npos);
+        EXPECT(text.find("...") != std::string::npos);
+        CloseRequest empty;
+        empty.running.push_back({1, ""});
+        EXPECT(empty.question().find("A program") != std::string::npos);
     }
 
     TEST_CASE("Closing the last pane of the last tab says so") {

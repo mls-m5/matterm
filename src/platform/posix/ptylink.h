@@ -39,6 +39,9 @@ public:
     void pump(std::size_t readBudget = 65536, std::size_t writeBudget = 65536);
     // True once all output was delivered and the exit status is known.
     bool finished() const noexcept;
+    // For /proc: the shell's pid and the terminal's foreground process group.
+    int childPid() const noexcept { return process_.childPid(); }
+    int foregroundProcessGroup() const noexcept { return process_.foregroundProcessGroup(); }
     std::optional<PtyProcess::ExitStatus> exitStatus() const noexcept;
 
 private:

@@ -18,6 +18,7 @@
 //           then draw p.strip, each p.panes[i] (view frame, rect, scrollbar), p.dividers.
 // Splits keep their ratios when the window changes size.
 #include "cellhit.h"
+#include "closeprompt.h"
 #include "palette.h"
 #include "panetree.h"
 #include "prefixkeys.h"
@@ -31,6 +32,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -120,6 +122,7 @@ struct MouseResult {
     bool refused = false;                // the "+" of the strip could not make a tab
     bool openPalette = false;            // the strip's palette button, or a layer asked for it
     std::string action;                  // an application action chosen in a layer
+    std::optional<CloseRequest> confirm; // not closed: a program runs there, ask first (answerClose)
 };
 
 struct WheelResult {
@@ -139,6 +142,7 @@ struct KeyResult {
     bool empty = false;                  // the last tab was closed
     bool openPalette = false;            // create the command palette layer and pushLayer() it
     std::string action;                  // an application action chosen in a layer (CommandEntry id)
+    std::optional<CloseRequest> confirm; // not closed: a program runs there, ask first (answerClose)
 };
 
 struct FocusChange {
@@ -359,7 +363,7 @@ public:
             const std::size_t tab = hit.tab < 0 ? 0 : static_cast<std::size_t>(hit.tab);
             if (in.button == MouseInput::Button::Middle) {
                 if (hit.kind == StripHit::Kind::Tab || hit.kind == StripHit::Kind::Close) {
-                    finish(workspace_.closeTabAt(tab), r);
+                    closeTabGuarded(tab, r);
                 }
                 return r;
             }
@@ -368,7 +372,7 @@ public:
                 finish(workspace_.select(tab), r);
                 break;
             case StripHit::Kind::Close:
-                finish(workspace_.closeTabAt(tab), r);
+                closeTabGuarded(tab, r);
                 break;
             case StripHit::Kind::NewTab:
             {
@@ -507,6 +511,50 @@ public:
     // True while a divider or scrollbar drag owns the mouse.
     bool dragging() const { return drag_ == Drag::Divider || drag_ == Drag::Scrollbar; }
 
+    // Closing with a program running (docs/TABS_PLAN.md section 9). The probe says what a pane
+    // runs when its foreground process is not a shell (nullopt: nothing to ask about). Without
+    // a probe nothing is asked, as before. Closing a pane or tab (keys, the strip's x and
+    // middle click) that holds such a pane does not close: the result carries `confirm` and
+    // the same request is pending until answerClose(). A pane whose process has ended is
+    // never asked about (it is closed through Workspace::closePaneAnywhere).
+    using BusyProbe = std::function<std::optional<std::string>(PaneId)>;
+    void setBusyProbe(BusyProbe probe) { busy_ = std::move(probe); }
+    const std::optional<CloseRequest> &pendingClose() const { return pendingClose_; }
+    // Closing the whole window: nullopt when it is fine to quit now; otherwise the request
+    // (also pending, answer it with answerClose; Close then means "quit", nothing is changed here).
+    std::optional<CloseRequest> windowClose() {
+        pendingClose_.reset();
+        std::vector<RunningProgram> running;
+        for (std::size_t t = 0; t < workspace_.tabCount(); ++t) collectBusy(*workspace_.tab(t), running);
+        if (running.empty()) return std::nullopt;
+        CloseRequest req;
+        req.scope = CloseScope::Window;
+        req.running = std::move(running);
+        pendingClose_ = req;
+        return req;
+    }
+    // The answer to the pending request. Cancel (or no request) changes nothing. Close performs
+    // the close of that tab or pane if it still exists and returns what changed.
+    KeyResult answerClose(CloseAnswer answer) {
+        KeyResult r;
+        const auto req = pendingClose_;
+        pendingClose_.reset();
+        if (!req || answer != CloseAnswer::Close || req->scope == CloseScope::Window) return r;
+        Outcome o = Outcome::Ignored;
+        if (req->scope == CloseScope::Tab) {
+            const int i = workspace_.indexOfTab(req->tab);
+            if (i >= 0) o = workspace_.closeTabAt(static_cast<std::size_t>(i));
+        }
+        else {
+            o = workspace_.closePaneAnywhere(req->pane);
+        }
+        if (o == Outcome::Ignored) return r;
+        r.changed = true;
+        r.empty = o == Outcome::Empty;
+        refreshSpec();
+        return r;
+    }
+
 private:
     enum class Drag { None, Divider, Scrollbar, Selecting };
 
@@ -635,12 +683,49 @@ private:
         workspace_.setLayoutSpec(s);
     }
 
+    void collectBusy(const typename Workspace<Pane>::Tab &tab, std::vector<RunningProgram> &out) const {
+        if (!busy_) return;
+        for (const PaneId id : tab.tree.ids()) {
+            if (auto text = busy_(id)) out.push_back({id, std::move(*text)});
+        }
+    }
+    // The request for closing a tab (all its panes) or one pane, nullopt when nothing runs there.
+    std::optional<CloseRequest> guardTab(std::size_t index) {
+        const auto *tab = workspace_.tab(index);
+        if (!tab || !busy_) return std::nullopt;
+        CloseRequest req;
+        req.scope = CloseScope::Tab;
+        req.tab = tab->id;
+        collectBusy(*tab, req.running);
+        return req.running.empty() ? std::nullopt : std::optional<CloseRequest>(req);
+    }
+    std::optional<CloseRequest> guardPane(PaneId id) {
+        if (!busy_ || !workspace_.activeTab()) return std::nullopt;
+        auto text = busy_(id);
+        if (!text) return std::nullopt;
+        CloseRequest req;
+        req.scope = CloseScope::Pane;
+        req.tab = workspace_.activeTab()->id;
+        req.pane = id;
+        req.running.push_back({id, std::move(*text)});
+        return req;
+    }
+
     void run(const CommandCall &call, KeyResult &r) {
         if (call.command == Command::OpenPalette) {
             r.openPalette = true;
             r.changed = true;
             r.commands.push_back(call);
             return;
+        }
+        if (call.command == Command::CloseTab || call.command == Command::ClosePane) {
+            auto req = call.command == Command::CloseTab ? guardTab(workspace_.activeIndex())
+                                                         : guardPane(workspace_.focusedPaneId());
+            if (req) {
+                pendingClose_ = req;
+                r.confirm = std::move(req);
+                return;
+            }
         }
         const Outcome o = workspace_.apply(call.command, call.argument);
         if (o == Outcome::Ignored) {
@@ -654,6 +739,15 @@ private:
         r.changed = true;
         if (o == Outcome::Empty) r.empty = true;
         refreshSpec(); // the strip may appear or disappear
+    }
+    void closeTabGuarded(std::size_t tab, MouseResult &r) {
+        if (auto req = guardTab(tab)) {
+            pendingClose_ = req;
+            r.confirm = std::move(req);
+            r.consumed = true;
+            return;
+        }
+        finish(workspace_.closeTabAt(tab), r);
     }
     void finish(Outcome o, MouseResult &r) {
         if (o == Outcome::Ignored) return;
@@ -736,6 +830,8 @@ private:
     }
 
     Workspace<Pane> &workspace_;
+    BusyProbe busy_;
+    std::optional<CloseRequest> pendingClose_;
     ViewConfig config_;
     mutable std::vector<std::unique_ptr<ui::Layer>> layers_; // bottom first; resized by place()
     PrefixKeys prefix_;

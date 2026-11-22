@@ -36,6 +36,7 @@ public:
 
     struct Tab {
         TabId id = 0;
+        std::string userTitle; // Set by the owner; empty: the focused pane's title
         Tree tree;
         std::set<PaneId> activity; // hidden panes that had output or a bell
     };
@@ -133,6 +134,18 @@ public:
         return false;
     }
 
+    // The owner's name for a tab (empty clears it and returns to the program's title). The caller
+    // limits and cleans the text (SessionSnapshot::cleanTitle).
+    bool setUserTitle(std::size_t index, std::string title) {
+        if (index >= tabs_.size()) return false;
+        tabs_[index].userTitle = std::move(title);
+        return true;
+    }
+    const std::string &userTitle(std::size_t index) const {
+        static const std::string none;
+        return index < tabs_.size() ? tabs_[index].userTitle : none;
+    }
+
     // One entry per tab for the strip. A tab is titled by its focused pane.
     template <class TitleOf>
     std::vector<TabInfo> tabInfos(TitleOf &&titleOf) const {
@@ -140,7 +153,8 @@ public:
         for (std::size_t i = 0; i < tabs_.size(); ++i) {
             TabInfo info;
             info.id = tabs_[i].id;
-            if (const Pane *p = tabs_[i].tree.focusedPane()) info.title = titleOf(*p);
+            if (!tabs_[i].userTitle.empty()) info.title = tabs_[i].userTitle;
+            else if (const Pane *p = tabs_[i].tree.focusedPane()) info.title = titleOf(*p);
             info.active = i == active_;
             info.activity = !tabs_[i].activity.empty();
             out.push_back(std::move(info));
