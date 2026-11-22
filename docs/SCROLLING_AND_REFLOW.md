@@ -284,3 +284,17 @@ grows. Resize bursts still need the 40 ms throttle of `WorkspaceView`.
   decide with the wide-cell work.
 - Whether a clipped row should show a marker (for example a dim `>` in the last column)
   so the user knows text is hidden; a rendering decision for the owner.
+
+## Owner's answer (2026-11-22): reflow is the goal, steady-state speed matters most
+
+- The goal in the future is GNOME Terminal behavior: soft-wrapped lines are remembered
+  and the text reflows when the size changes. "Keep the clipped cells" (prototype
+  `agent2-keepclipped`, ca6e270, not merged) is at most a stopgap.
+- Priority of performance: first the cost when the size does **not** change (writing,
+  scrolling, drawing, memory per row), then the cost of a resize. A resize may take
+  longer (milliseconds to a short pause) if the steady state stays as fast as today.
+- So before any of the two is merged: measure the steady state with and without the
+  change (write throughput, scrolling a full history, memory per row, the lazy-drop
+  hook in `TerminalMemory::at()` on the write path) and compare with `main`.
+- The soft-wrap flag fix of the prototype (flags survive width changes on the primary
+  screen) is a prerequisite of reflow and can be taken on its own.
