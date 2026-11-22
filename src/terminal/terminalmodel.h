@@ -110,6 +110,8 @@ public:
                                         TextCell last,
                                         std::size_t byteLimit) const;
 
+    // Scrolling stops on whole rows (default: pixel scrolling, it may stop inside a row).
+    void setSnapScrollToRows(bool snap);
     void scrollBy(double rows);
     void scrollToOldest();
     void followTail();

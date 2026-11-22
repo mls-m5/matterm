@@ -7,6 +7,7 @@
 struct DaemonOptions {
     bool enabled = false;
     std::string socketPath; // Empty: the default socket.
+    bool snapScroll = false; // --snap-scroll: scrolling comes to rest on whole rows.
 };
 
 // Native entry-point adapter; owns SDL lifecycle after starting the PTY.

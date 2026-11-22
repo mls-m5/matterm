@@ -4,6 +4,11 @@
 #include <cmath>
 #include <stdexcept>
 
+namespace {
+// Input that pauses this long counts as finished (snap-to-rows mode).
+constexpr double kSnapDelaySeconds = 0.12;
+} // namespace
+
 void ScrollViewport::setGeometry(std::size_t retainedRows,
                                  std::size_t visibleRows) {
     retained_ = retainedRows;
@@ -23,6 +28,9 @@ void ScrollViewport::clamp() noexcept {
 void ScrollViewport::scrollBy(double rows) {
     if (!std::isfinite(rows)) {
         throw std::invalid_argument("Non-finite scroll distance");
+    }
+    if (rows != 0) {
+        quiet_ = 0;
     }
     // Clamp the delta before adding, avoiding overflow for extreme inputs.
     target_ += std::clamp(rows, -target_, maxOffset() - target_);
@@ -48,6 +56,10 @@ void ScrollViewport::followTail() {
 void ScrollViewport::advance(double seconds) {
     if (!std::isfinite(seconds) || seconds < 0) {
         throw std::invalid_argument("Invalid scroll animation interval");
+    }
+    if (snap_ && target_ != std::round(target_) &&
+        (quiet_ += seconds) >= kSnapDelaySeconds) {
+        target_ = std::clamp(std::round(target_), 0.0, maxOffset());
     }
     // Frame-rate-independent exponential convergence, with a 70 ms time
     // constant.

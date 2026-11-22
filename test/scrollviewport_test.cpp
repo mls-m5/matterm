@@ -212,4 +212,53 @@ TEST_CASE(
     EXPECT(viewport.pixelOffset(20) <= 0.0f);
 }
 
+TEST_CASE("By default the view rests in the middle of a row (pixel scrolling)") {
+    ScrollViewport viewport;
+    viewport.setGeometry(400, 24);
+    EXPECT(!viewport.snapToRows());
+    viewport.scrollBy(2.4);
+    for (int i = 0; i < 100; ++i) {
+        viewport.advance(0.1); // A long pause: nothing pulls it onto a row.
+    }
+    EXPECT(std::abs(viewport.offset() - 2.4) < 1e-9);
+    EXPECT(viewport.pixelOffset(16) != 0.0f); // Part of a row is cut at the top.
+}
+
+TEST_CASE("Snap to rows: motion is smooth, the rest position is a whole row") {
+    ScrollViewport viewport;
+    viewport.setGeometry(400, 24);
+    viewport.setSnapToRows(true);
+    // While the input keeps coming the target stays fractional.
+    for (int i = 0; i < 10; ++i) {
+        viewport.scrollBy(0.37);
+        viewport.advance(0.016);
+        EXPECT(viewport.targetOffset() != std::round(viewport.targetOffset()));
+    }
+    // After it pauses the target settles on the nearest row and the view arrives there.
+    for (int i = 0; i < 100; ++i) {
+        viewport.advance(0.05);
+    }
+    EXPECT(viewport.targetOffset() == std::round(viewport.targetOffset()));
+    EXPECT(viewport.offset() == viewport.targetOffset());
+    EXPECT_EQ(viewport.pixelOffset(16), 0.0f);
+    EXPECT(viewport.offset() == 4.0); // 3.7 rounds to 4.
+}
+
+TEST_CASE("Snapping never leaves the scrollable range") {
+    ScrollViewport viewport;
+    viewport.setGeometry(30, 24); // 6 rows of history.
+    viewport.setSnapToRows(true);
+    viewport.scrollBy(100);
+    for (int i = 0; i < 50; ++i) {
+        viewport.advance(0.1);
+    }
+    EXPECT(viewport.offset() == 6.0);
+    viewport.scrollBy(-5.6);
+    for (int i = 0; i < 50; ++i) {
+        viewport.advance(0.1);
+    }
+    EXPECT(viewport.offset() == 0.0);
+    EXPECT(viewport.atTail());
+}
+
 TEST_SUIT_END

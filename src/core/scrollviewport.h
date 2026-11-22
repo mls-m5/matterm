@@ -13,6 +13,14 @@ public:
     void oldest();
     void followTail();
     void advance(double seconds);
+    // Off (default): the view stops wherever the input left it, also in the middle of a row
+    // (pixel scrolling). On: once the input has paused, the target settles on a whole row.
+    void setSnapToRows(bool snap) noexcept {
+        snap_ = snap;
+    }
+    bool snapToRows() const noexcept {
+        return snap_;
+    }
     void rowsAppended(std::size_t count, std::size_t retainedRows);
     // Height growth makes saved rows part of the live screen. Keep historical
     // views anchored; offsets near the old tail become zero, not overscroll.
@@ -40,4 +48,6 @@ private:
     std::size_t visible_ = 0;
     double target_ = 0;
     double displayed_ = 0;
+    bool snap_ = false;
+    double quiet_ = 0; // Seconds since the last scrollBy.
 };

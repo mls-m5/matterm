@@ -21,6 +21,9 @@ struct TerminalViewConfig {
     std::size_t rows = 24;
     std::size_t scrollback = 1000;
     CursorGlide::Config glide;
+    // Scrolling by wheel or finger stops on whole rows once it pauses. Off: the view may rest
+    // in the middle of a row (pixel scrolling).
+    bool snapScrollToRows = false;
     // The line written into the terminal when another window takes the session over.
     std::string replacedNotice = "session taken over by another window";
 };
@@ -187,6 +190,7 @@ private:
         parser_.reset(); // Borrows the model.
         model_ =
             std::make_unique<TerminalModel>(columns, rows, config_.scrollback);
+        model_->setSnapScrollToRows(config_.snapScrollToRows);
         VtEvents events;
         events.reply = [this](std::string_view bytes) {
             if (link_ && state_ == State::Live) {

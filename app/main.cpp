@@ -41,6 +41,9 @@ void printUsage(std::ostream &out, const char *program) {
            "  --no-daemon          Run the programs in this process (default).\n"
            "  --daemon-socket PATH Socket of the daemon (default: "
            "$XDG_RUNTIME_DIR/matterm/daemon.sock).\n"
+           "  --snap-scroll        Let scrolling come to rest on whole rows (default: "
+           "smooth\n"
+           "                       pixel scrolling, which may stop inside a row).\n"
            "  --smooth-cursor      Animate cursor movement (native PTY only; "
            "default: off).\n"
            "  --record-output FILE Record raw PTY output to a new file (max 64 "
@@ -306,6 +309,7 @@ int main(int argc, char **argv) {
     bool ptyTabsSmokeTest = false;
     bool smoothCursor = false;
     bool useDaemon = false;
+    bool snapScroll = false;
     std::string daemonSocket;
     bool showcase = false;
     std::string term = "xterm-256color";
@@ -345,6 +349,9 @@ int main(int argc, char **argv) {
         }
         else if (arg == "--daemon") {
             useDaemon = true;
+        }
+        else if (arg == "--snap-scroll") {
+            snapScroll = true;
         }
         else if (arg == "--no-daemon") {
             useDaemon = false;
@@ -425,7 +432,7 @@ int main(int argc, char **argv) {
                                   recordPath,
                                   smoothCursor,
                                   ptyTabsSmokeTest,
-                                  DaemonOptions{useDaemon, daemonSocket});
+                                  DaemonOptions{useDaemon, daemonSocket, snapScroll});
         }
         catch (const std::exception &error) {
             std::cerr << error.what() << '\n';

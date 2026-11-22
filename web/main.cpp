@@ -1368,6 +1368,7 @@ TerminalView::Config viewConfig(const App &app) {
     config.columns = std::size_t(std::max(1, app.backend->columns(true)));
     config.rows = std::size_t(std::max(1, app.backend->rows()));
     config.glide = app.glideConfig;
+    config.snapScrollToRows = !queryParam("snap").empty(); // ?snap=1: rest on whole rows
     config.replacedNotice = "This terminal is controlled from another window. Press Enter to take it back";
     return config;
 }

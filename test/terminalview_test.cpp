@@ -429,4 +429,17 @@ TEST_CASE("The take-over notice can be worded by the owner of the view") {
     EXPECT(!slot.view->sendInput("x"));
 }
 
+TEST_CASE("Snap-to-rows scrolling is a per-view setting, off by default, kept over a reset") {
+    TerminalView plain;
+    EXPECT(!plain.model().viewport().snapToRows());
+    TerminalView::Config config;
+    config.snapScrollToRows = true;
+    TerminalView snapping(config);
+    EXPECT(snapping.model().viewport().snapToRows());
+    snapping.resetForReplay(); // The model is replaced.
+    EXPECT(snapping.model().viewport().snapToRows());
+    snapping.model().resize(40, 10);
+    EXPECT(snapping.model().viewport().snapToRows());
+}
+
 TEST_SUIT_END

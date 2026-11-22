@@ -233,9 +233,18 @@ private:
     std::function<void(std::string_view)> tap_;
 };
 
+// --snap-scroll: scrolling comes to rest on whole rows (default: pixel scrolling).
+bool gSnapScroll = false;
+
+TerminalViewConfig paneViewConfig(int columns, int rows) {
+    TerminalViewConfig config{std::size_t(columns), std::size_t(rows), 1000, {}};
+    config.snapScrollToRows = gSnapScroll;
+    return config;
+}
+
 // A daemon pane says plainly what happened when another window took its terminal over.
 TerminalViewConfig daemonViewConfig(int columns, int rows) {
-    TerminalViewConfig config{std::size_t(columns), std::size_t(rows), 1000, {}};
+    TerminalViewConfig config = paneViewConfig(columns, rows);
     config.replacedNotice = "This terminal is controlled from another window. Press Enter to take it back";
     return config;
 }
@@ -265,7 +274,7 @@ struct NativePane {
                std::function<void(std::string_view)> record)
         : link(std::make_unique<PtyLink>(
               arguments, columns, rows, term, PtyProcess::ColorCapability::TrueColor))
-        , v(TerminalViewConfig{std::size_t(columns), std::size_t(rows), 1000, {}}) {
+        , v(paneViewConfig(columns, rows)) {
         if (record) {
             tap = std::make_unique<TapLink>(*link, std::move(record));
             v.attach(*tap);
@@ -433,6 +442,7 @@ int runPtyFrontend(const char *font,
                    bool smoothCursor,
                    bool tabsSmoke,
                    const DaemonOptions &daemonOptions) {
+    gSnapScroll = daemonOptions.snapScroll;
     if (smokeTest) {
         return runSmokeTest(font, fontSize, arguments, term);
     }

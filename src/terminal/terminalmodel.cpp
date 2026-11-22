@@ -770,6 +770,10 @@ std::optional<std::string> TerminalModel::copyText(
     return text;
 }
 
+void TerminalModel::setSnapScrollToRows(bool snap) {
+    impl_->primary->viewport.setSnapToRows(snap);
+    impl_->alternate->viewport.setSnapToRows(snap);
+}
 void TerminalModel::scrollBy(double rows) {
     impl_->active().viewport.scrollBy(rows);
 }
