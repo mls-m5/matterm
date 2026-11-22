@@ -25,6 +25,9 @@ inline constexpr const char *stopCancel = "daemon.stop.cancel";
 inline constexpr const char *quitKeep =
     "daemon.quitkeep"; // Close the window only.
 inline constexpr const char *status = "daemon.status";
+// --daemon-host: start the ssh connection again now (the terminals there are
+// attached again).
+inline constexpr const char *reconnect = "daemon.reconnect";
 // Sharing (the daemon's per-terminal mark): the pane in focus or every pane of
 // the active tab.
 inline constexpr const char *sharePane = "share.pane";
@@ -78,11 +81,12 @@ inline std::u32string daemonFallbackNote(const std::string &error) {
 
 // Entries for the palette's `extra` list. Without a daemon (the default) there
 // are none, so nobody is offered an action that cannot work.
-inline std::vector<CommandEntry> daemonCommandEntries(bool usingDaemon) {
+inline std::vector<CommandEntry> daemonCommandEntries(bool usingDaemon,
+                                                      bool remote = false) {
     if (!usingDaemon) {
         return {};
     }
-    return {
+    std::vector<CommandEntry> entries = {
         {daemonaction::stop,
          "Stop daemon",
          "End the background program that keeps terminals running, and every "
@@ -103,6 +107,16 @@ inline std::vector<CommandEntry> daemonCommandEntries(bool usingDaemon) {
          {},
          {}},
     };
+    if (remote) {
+        entries.push_back({daemonaction::reconnect,
+                           "Reconnect",
+                           "Start the ssh connection to the other computer "
+                           "again and attach its terminals",
+                           std::nullopt,
+                           {},
+                           {}});
+    }
+    return entries;
 }
 
 // What the palette needs to know to offer the sharing entries that make sense

@@ -502,7 +502,12 @@ int runPtyFrontend(const char *font,
         daemonOptions.required = true;
     }
     const bool remoteDaemon = tunnel != nullptr;
-    bool tunnelNoted = false;
+    // Notices that ssh ended and starts it again on a worker thread (declared
+    // after the tunnel: it goes first).
+    std::unique_ptr<frontend::TunnelReconnector> reconnector;
+    if (tunnel) {
+        reconnector = std::make_unique<frontend::TunnelReconnector>(*tunnel);
+    }
     const std::string daemonPath = daemonSocket(daemonOptions.socketPath);
     std::optional<std::string> daemonFallbackReason; // set: the daemon was wanted and is not there
     if (daemonOptions.enabled) {
@@ -1051,7 +1056,8 @@ int runPtyFrontend(const char *font,
         for (auto &entry : sessionCommandEntries()) {
             extra.push_back(std::move(entry));
         }
-        for (auto &entry : daemonCommandEntries(daemonOptions.enabled)) {
+        for (auto &entry :
+             daemonCommandEntries(daemonOptions.enabled, remoteDaemon)) {
             extra.push_back(std::move(entry));
         }
         if (daemonOptions.enabled) {
@@ -1160,6 +1166,17 @@ int runPtyFrontend(const char *font,
         }
         else if (id == sessionaction::removeCancel) {
             // The dialog closed; nothing else to do.
+        }
+        else if (id == daemonaction::reconnect) {
+            if (!reconnector) {
+                notify("Reconnect is for --daemon-host");
+            }
+            else if (reconnector->retryNow(SDL_GetTicks64())) {
+                notify("Reconnecting to " + daemonOptions.host + " ...");
+            }
+            else {
+                notify("Already reconnecting to " + daemonOptions.host);
+            }
         }
         else if (id == daemonaction::stop || id == daemonaction::status) {
             std::string error;
@@ -2040,9 +2057,33 @@ int runPtyFrontend(const char *font,
                     }
                     continue;
                 }
-                if (key == SDLK_RETURN && !mod.control && !mod.alt && !mod.shift && np.inDaemon() &&
-                    np.reattach()) {
-                    continue; // Enter in a pane that lost its terminal: attach again.
+                if (key == SDLK_RETURN && !mod.control && !mod.alt &&
+                    !mod.shift && np.inDaemon()) {
+                    using State = frontend::TunnelReconnector::State;
+                    if (reconnector &&
+                        reconnector->state() != State::Connected &&
+                        reattachKind(np.v) != Reattach::None) {
+                        // The connection itself is down: retry it now (the
+                        // panes attach when it is up).
+                        notify(reconnector->retryNow(SDL_GetTicks64())
+                                   ? "Reconnecting to " + daemonOptions.host +
+                                         " ..."
+                                   : "Already reconnecting to " +
+                                         daemonOptions.host);
+                        continue;
+                    }
+                    if (np.reattach()) {
+                        // Connected, yet the daemon cannot be reached: the ssh
+                        // may be stuck; replace it.
+                        if (reconnector &&
+                            np.v.state() == TerminalView::State::Disconnected &&
+                            reconnector->retryNow(SDL_GetTicks64())) {
+                            notify("Reconnecting to " + daemonOptions.host +
+                                   " ...");
+                        }
+                        continue; // Enter in a pane that lost its terminal:
+                                  // attach again.
+                    }
                 }
                 auto &model = np.v.model();
                 if (mod.control && mod.shift && key == SDLK_v) {
@@ -2107,13 +2148,49 @@ int runPtyFrontend(const char *font,
             }
         }
         guarded([&] { wv.sync(nowMs); });
-        if (tunnel && !tunnelNoted && !tunnel->alive()) {
-            tunnelNoted = true;
-            notify("The connection to " + daemonOptions.host + " ended; the terminals there keep running. Restart matterm to reconnect.");
+        if (reconnector) {
+            using Event = frontend::TunnelReconnector::Event;
+            const auto host = daemonOptions.host;
+            switch (reconnector->tick(SDL_GetTicks64())) {
+            case Event::Lost:
+                notify("The connection to " + host +
+                       " ended; the terminals there keep running. Reconnecting "
+                       "...");
+                break;
+            case Event::Reconnected:
+                notify("Connected to " + host + " again");
+                workspace.forEachPane([&](PaneId, NativePane &pane, bool) {
+                    // A pane taken over by someone else stays as it is; only
+                    // lost connections come back.
+                    if (pane.inDaemon() &&
+                        pane.v.state() == TerminalView::State::Disconnected) {
+                        pane.reattach();
+                    }
+                });
+                break;
+            case Event::GaveUp:
+                notify("Could not reach " + host + " (" +
+                       reconnector->lastError() +
+                       "). Enter in the pane or Reconnect retries.");
+                workspace.forEachPane([&](PaneId, NativePane &pane, bool) {
+                    if (pane.inDaemon() &&
+                        pane.v.state() == TerminalView::State::Disconnected) {
+                        pane.v.note("disconnected from " + host +
+                                    ", press Enter to retry");
+                    }
+                });
+                break;
+            case Event::None:
+                break;
+            }
         }
+        const bool daemonReachable =
+            !reconnector || reconnector->state() ==
+                                frontend::TunnelReconnector::State::Connected;
         // A slow link: ask less often (each question waits for the answer).
-        if (daemonOptions.enabled && !(tunnel && !tunnel->alive()) &&
-            SDL_GetTicks64() - lastSharedPoll >= (remoteDaemon ? 10000u : 2000u)) {
+        if (daemonOptions.enabled && daemonReachable &&
+            SDL_GetTicks64() - lastSharedPoll >=
+                (remoteDaemon ? 10000u : 2000u)) {
             // The shared marks are the daemon's; another tool may have changed them.
             lastSharedPoll = SDL_GetTicks64();
             std::string error;

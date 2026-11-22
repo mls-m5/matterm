@@ -85,6 +85,7 @@ struct Fake {
         ::unsetenv("FAKE_SSH_UNAME");
         ::unsetenv("FAKE_SSH_FAIL");
         ::unsetenv("FAKE_SSH_NOFORWARD");
+        ::unsetenv("FAKE_SSH_DELAY");
         ::setenv("SHELL", "/bin/sh", 1);
         ::setenv("PS1", "$ ", 1);
     }
@@ -92,6 +93,7 @@ struct Fake {
         ::unsetenv("FAKE_SSH_LOG");
         ::unsetenv("FAKE_SSH_FAIL");
         ::unsetenv("FAKE_SSH_NOFORWARD");
+        ::unsetenv("FAKE_SSH_DELAY");
         ::unsetenv("FAKE_SSH_UNAME");
         ::unsetenv("FAKE_SSH_DAEMON_ON_PATH");
         ::unsetenv("FAKE_SSH_HOME");
@@ -136,6 +138,42 @@ std::vector<std::string> installed(const Fake &fake) {
     return names;
 }
 
+namespace {
+std::uint64_t nowMs() {
+    return std::uint64_t(
+        std::chrono::duration_cast<milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+}
+
+// Ticks until `event` comes (returns true) or the time is up.
+bool untilEvent(TunnelReconnector &reconnector,
+                TunnelReconnector::Event event,
+                int timeoutMs = 20000) {
+    return until(
+        [&] {
+            const auto got = reconnector.tick(nowMs());
+            return got == event;
+        },
+        timeoutMs);
+}
+
+// The numbers n of every "L<n>" word on the screen and in the history, in
+// order.
+std::vector<int> numbersOf(TerminalView &view) {
+    std::vector<int> numbers;
+    std::istringstream in(textOf(view));
+    std::string word;
+    while (in >> word) {
+        if (word.size() > 1 && word[0] == 'L' &&
+            word.find_first_not_of("0123456789", 1) == std::string::npos) {
+            numbers.push_back(std::stoi(word.substr(1)));
+        }
+    }
+    return numbers;
+}
+} // namespace
+
 TEST_SUIT_BEGIN(SshTunnel)
 
 TEST_CASE("The daemon over a tunnel: started there, reached here, a terminal runs in it") {
@@ -174,7 +212,9 @@ TEST_CASE("The daemon over a tunnel: started there, reached here, a terminal run
     EXPECT(remote.has_value());
     EXPECT_EQ(remote->sessions, std::uint32_t(1));
     view.detach();
-    link->detach();
+    link->close(); // Ends the terminal there so that stopRemote below can stop
+                   // the daemon.
+    ::usleep(200000);
 
     // The ssh calls: the daemon asked for with --ensure, host after "--", no questions, our forward.
     const auto calls = fileText(fake.log);
@@ -446,6 +486,187 @@ TEST_CASE("The install directory must be a safe absolute path") {
         std::string error;
         EXPECT(SshTunnel::open(options, error) == nullptr);
     }
+}
+
+TEST_CASE("Reconnect: ssh is killed while a program prints, the pane attaches "
+          "again and no byte is lost") {
+    Fake fake;
+    std::string error;
+    auto tunnel = SshTunnel::open(fake.options(), error);
+    EXPECT(tunnel != nullptr);
+    TunnelReconnector reconnector(*tunnel, ReconnectPolicy{{0, 20}, 5});
+    const auto socket = tunnel->socketPath();
+
+    auto view = TerminalView(TerminalView::Config{60, 10});
+    auto link = attachToDaemon(view, socket, "", 0, clockNow);
+    EXPECT(link != nullptr);
+    EXPECT(until([&] {
+        link->tick();
+        return !link->sessionId().empty();
+    }));
+    EXPECT(view.sendInput("i=0; while [ $i -lt 80 ]; do echo L$i; i=$((i+1)); "
+                          "sleep 0.05; done\n"));
+    EXPECT(until([&] {
+        link->tick();
+        const auto n = numbersOf(view);
+        return !n.empty() && n.back() >= 5;
+    }));
+    EXPECT(reconnector.tick(nowMs()) == TunnelReconnector::Event::None);
+    EXPECT(reconnector.state() == TunnelReconnector::State::Connected);
+
+    // The laptop goes to sleep: ssh is gone, the program goes on there.
+    const auto oldProcess = tunnel->processId();
+    EXPECT_EQ(::kill(oldProcess, SIGKILL), 0);
+    EXPECT(untilEvent(reconnector, TunnelReconnector::Event::Lost, 5000));
+    EXPECT(until([&] {
+        link->tick();
+        return view.state() == TerminalView::State::Disconnected;
+    }));
+    EXPECT(untilEvent(reconnector, TunnelReconnector::Event::Reconnected));
+    EXPECT(reconnector.state() == TunnelReconnector::State::Connected);
+    EXPECT(tunnel->alive());
+    EXPECT(tunnel->processId() != oldProcess);
+    EXPECT_EQ(tunnel->socketPath(),
+              socket); // Same place: the link finds it as before.
+
+    auto fresh = reattachToDaemon(view, link.get(), socket, clockNow);
+    EXPECT(fresh != nullptr);
+    link = std::move(fresh);
+    EXPECT(until([&] {
+        link->tick();
+        const auto n = numbersOf(view);
+        return !n.empty() && n.back() == 79;
+    }));
+    // Every line exactly once, in order: replayed from the offset, not from the
+    // start, not skipped.
+    const auto numbers = numbersOf(view);
+    EXPECT_EQ(numbers.size(), std::size_t(80));
+    for (std::size_t i = 0; i < numbers.size(); ++i) {
+        EXPECT_EQ(numbers[i], int(i));
+    }
+    view.detach();
+    link->close(); // The terminal ends there, or the daemon would refuse to
+                   // stop.
+    ::usleep(200000);
+    stopRemote(fake.dir.path + "/remote.sock");
+}
+
+TEST_CASE(
+    "Reconnect: the attempts back off, give up, and the user's retry goes on") {
+    Fake fake;
+    std::string error;
+    auto tunnel = SshTunnel::open(fake.options(), error);
+    EXPECT(tunnel != nullptr);
+    ReconnectPolicy policy;
+    policy.delaysMs = {0, 150, 300};
+    policy.maxAttempts = 3;
+    TunnelReconnector reconnector(*tunnel, policy);
+
+    ::setenv("FAKE_SSH_FAIL",
+             "ssh: connect to host far-away port 22: Network is unreachable",
+             1);
+    EXPECT_EQ(::kill(tunnel->processId(), SIGKILL), 0);
+    EXPECT(untilEvent(reconnector, TunnelReconnector::Event::Lost, 5000));
+    EXPECT(reconnector.dueMs().has_value());
+
+    // Failed attempts are 0 ms, 150 ms and 300 ms apart: at least that long all
+    // together.
+    const auto began = std::chrono::steady_clock::now();
+    EXPECT(untilEvent(reconnector, TunnelReconnector::Event::GaveUp, 10000));
+    const auto took = std::chrono::duration_cast<milliseconds>(
+        std::chrono::steady_clock::now() - began);
+    EXPECT(took.count() >= 400);
+    EXPECT(reconnector.state() == TunnelReconnector::State::GivenUp);
+    EXPECT_EQ(reconnector.attempt(), 3);
+    EXPECT(reconnector.lastError().find("Network is unreachable") !=
+           std::string::npos);
+    EXPECT(!reconnector.dueMs().has_value());
+    // Given up means quiet: nothing is tried by itself.
+    ::usleep(300000);
+    EXPECT(reconnector.tick(nowMs()) == TunnelReconnector::Event::None);
+    EXPECT(reconnector.state() == TunnelReconnector::State::GivenUp);
+
+    // The link is back; Reconnect from the palette (or Enter in the pane).
+    ::unsetenv("FAKE_SSH_FAIL");
+    EXPECT(reconnector.retryNow(nowMs()));
+    EXPECT(untilEvent(reconnector, TunnelReconnector::Event::Reconnected));
+    EXPECT_EQ(reconnector.attempt(), 0);
+    EXPECT(tunnel->alive());
+    EXPECT(daemonRunning(tunnel->socketPath()));
+    stopRemote(fake.dir.path + "/remote.sock");
+}
+
+TEST_CASE("Reconnect never blocks the caller, however slow the link is") {
+    Fake fake;
+    std::string error;
+    auto tunnel = SshTunnel::open(fake.options(), error);
+    EXPECT(tunnel != nullptr);
+    TunnelReconnector reconnector(*tunnel, ReconnectPolicy{{0}, 3});
+    ::setenv("FAKE_SSH_DELAY", "1.5", 1); // Every ssh call takes 1.5 s.
+    EXPECT_EQ(::kill(tunnel->processId(), SIGKILL), 0);
+    long long slowest = 0;
+    bool sawConnecting = false;
+    bool reconnected = false;
+    const auto end =
+        std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (!reconnected && std::chrono::steady_clock::now() < end) {
+        const auto before = std::chrono::steady_clock::now();
+        const auto event = reconnector.tick(nowMs());
+        const bool alive = tunnel->alive(); // Asked from here while the worker
+                                            // starts and stops processes.
+        (void)alive;
+        slowest =
+            std::max<long long>(slowest,
+                                std::chrono::duration_cast<milliseconds>(
+                                    std::chrono::steady_clock::now() - before)
+                                    .count());
+        sawConnecting =
+            sawConnecting ||
+            reconnector.state() == TunnelReconnector::State::Connecting;
+        reconnected = event == TunnelReconnector::Event::Reconnected;
+        std::this_thread::sleep_for(milliseconds(5));
+    }
+    EXPECT(reconnected);
+    EXPECT(sawConnecting);
+    EXPECT(slowest < 200);
+    ::unsetenv("FAKE_SSH_DELAY");
+    stopRemote(fake.dir.path + "/remote.sock");
+}
+
+TEST_CASE("Reconnect: retryNow replaces an ssh that is alive but stuck") {
+    Fake fake;
+    std::string error;
+    auto tunnel = SshTunnel::open(fake.options(), error);
+    EXPECT(tunnel != nullptr);
+    TunnelReconnector reconnector(*tunnel, ReconnectPolicy{{0}, 3});
+    const auto stuck = tunnel->processId();
+    EXPECT(reconnector.retryNow(nowMs()));
+    EXPECT(!reconnector.retryNow(nowMs())); // One attempt at a time.
+    EXPECT(untilEvent(reconnector, TunnelReconnector::Event::Reconnected));
+    EXPECT(tunnel->processId() != stuck);
+    EXPECT(daemonRunning(tunnel->socketPath()));
+    stopRemote(fake.dir.path + "/remote.sock");
+}
+
+TEST_CASE(
+    "Closing the window during a reconnect does not wait for the attempt") {
+    Fake fake;
+    std::string error;
+    auto tunnel = SshTunnel::open(fake.options(), error);
+    EXPECT(tunnel != nullptr);
+    const auto began = std::chrono::steady_clock::now();
+    {
+        TunnelReconnector reconnector(*tunnel, ReconnectPolicy{{0}, 3});
+        ::setenv("FAKE_SSH_DELAY", "15", 1);
+        EXPECT(reconnector.retryNow(nowMs()));
+        ::usleep(300000);
+    } // The destructor cancels the ssh call.
+    const auto took = std::chrono::duration_cast<milliseconds>(
+        std::chrono::steady_clock::now() - began);
+    EXPECT(took.count() < 5000);
+    ::unsetenv("FAKE_SSH_DELAY");
+    tunnel.reset();
+    stopRemote(fake.dir.path + "/remote.sock");
 }
 
 TEST_SUIT_END

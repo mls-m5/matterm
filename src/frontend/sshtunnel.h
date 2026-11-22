@@ -20,6 +20,8 @@
 #include "daemonclient.h"
 #include "sha256.h"
 
+#include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -29,14 +31,16 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <poll.h>
 #include <spawn.h>
 #include <string>
 #include <sys/stat.h>
-#include <sys/utsname.h>
 #include <sys/un.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -126,6 +130,7 @@ public:
         }
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(options.timeoutMs);
         auto tunnel = std::unique_ptr<SshTunnel>(new SshTunnel());
+        tunnel->options_ = options;
         // 1. Where is the socket, and is the daemon there?
         std::vector<std::string> ask;
         std::string output;
@@ -170,43 +175,52 @@ public:
             return nullptr;
         }
         tunnel->remote_ = remote;
-        std::vector<std::string> forward = baseArguments(options);
-        forward.insert(forward.end(), {"-N", "-o", "ExitOnForwardFailure=yes", "-o", "StreamLocalBindUnlink=yes",
-                                       "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-L",
-                                       tunnel->socket_ + ":" + remote, "--", options.host});
-        if (!tunnel->spawn(options.ssh, forward, error)) {
+        tunnel->daemonPath_ = daemonPath;
+        if (!tunnel->startForward(deadline, nullptr, error)) {
             return nullptr;
         }
-        // 3. Through the tunnel to the daemon.
-        while (true) {
-            if (daemonRunning(tunnel->socket_)) {
-                return tunnel;
-            }
-            if (!tunnel->alive()) {
-                error = "ssh " + options.host + ": the tunnel ended" + tunnel->diagnostics();
-                return nullptr;
-            }
-            if (std::chrono::steady_clock::now() >= deadline) {
-                error = "ssh " + options.host + ": the remote daemon did not answer through the tunnel" +
-                        tunnel->diagnostics();
-                return nullptr;
-            }
-            ::usleep(50000);
+        return tunnel;
+    }
+
+    // Starts the connection again after it ended (or is stuck): the old ssh is
+    // stopped, the remote daemon is asked where its socket is (it is started
+    // there if it is gone), the forward is made again at the same local socket,
+    // so a DaemonLink attaches to it as before. Blocks up to `timeoutMs`: run
+    // it off the UI thread (TunnelReconnector does). `cancel` set from another
+    // thread ends the wait early. The daemon is never copied again here; a copy
+    // that disappeared is an error.
+    bool reconnect(std::string &error,
+                   const std::atomic<bool> *cancel = nullptr) {
+        stopProcess();
+        ::unlink(socket_.c_str());
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::milliseconds(options_.timeoutMs);
+        std::string output;
+        if (!runCapture(options_.ssh,
+                        commandArguments(options_, daemonPath_),
+                        deadline,
+                        output,
+                        error,
+                        {},
+                        nullptr,
+                        cancel)) {
+            error = "ssh " + options_.host + ": " + error;
+            return false;
         }
+        const auto remote = lastLine(output);
+        if (remote.empty() || remote.front() != '/' ||
+            !safeSshWord(remote, true)) {
+            error =
+                "ssh " + options_.host +
+                ": the remote matterm-daemon did not say where its socket is";
+            return false;
+        }
+        remote_ = remote;
+        return startForward(deadline, cancel, error);
     }
 
     ~SshTunnel() {
-        if (pid_ > 0) {
-            ::kill(pid_, SIGTERM);
-            int status = 0;
-            for (int i = 0; i < 100 && ::waitpid(pid_, &status, WNOHANG) == 0; ++i) {
-                ::usleep(20000);
-            }
-            if (::waitpid(pid_, &status, WNOHANG) == 0) {
-                ::kill(pid_, SIGKILL);
-                ::waitpid(pid_, &status, 0);
-            }
-        }
+        stopProcess();
         if (!socket_.empty()) {
             ::unlink(socket_.c_str());
         }
@@ -230,10 +244,12 @@ public:
     }
     // The ssh process (diagnostics, tests).
     pid_t processId() const noexcept {
+        std::lock_guard lock(mutex_);
         return pid_;
     }
     // False once the ssh process has ended (the connection to the other computer is gone).
     bool alive() {
+        std::lock_guard lock(mutex_);
         if (pid_ <= 0) {
             return false;
         }
@@ -247,6 +263,76 @@ public:
 
 private:
     SshTunnel() = default;
+
+    // Stops the ssh process of the forward, if any (TERM, then KILL), and reaps
+    // it.
+    void stopProcess() {
+        pid_t pid = -1;
+        {
+            std::lock_guard lock(mutex_);
+            pid = pid_;
+            pid_ = -1;
+        }
+        if (pid <= 0) {
+            return;
+        }
+        ::kill(pid, SIGTERM);
+        int status = 0;
+        for (int i = 0; i < 100 && ::waitpid(pid, &status, WNOHANG) == 0; ++i) {
+            ::usleep(20000);
+        }
+        if (::waitpid(pid, &status, WNOHANG) == 0) {
+            ::kill(pid, SIGKILL);
+            ::waitpid(pid, &status, 0);
+        }
+    }
+
+    // `ssh -N -L local:remote host`, then wait until the remote daemon answers
+    // through it.
+    bool startForward(std::chrono::steady_clock::time_point deadline,
+                      const std::atomic<bool> *cancel,
+                      std::string &error) {
+        std::vector<std::string> forward = baseArguments(options_);
+        forward.insert(forward.end(),
+                       {"-N",
+                        "-o",
+                        "ExitOnForwardFailure=yes",
+                        "-o",
+                        "StreamLocalBindUnlink=yes",
+                        "-o",
+                        "ServerAliveInterval=15",
+                        "-o",
+                        "ServerAliveCountMax=3",
+                        "-L",
+                        socket_ + ":" + remote_,
+                        "--",
+                        options_.host});
+        if (!spawn(options_.ssh, forward, error)) {
+            return false;
+        }
+        while (true) {
+            if (daemonRunning(socket_)) {
+                return true;
+            }
+            if (!alive()) {
+                error = "ssh " + options_.host + ": the tunnel ended" +
+                        diagnostics();
+                return false;
+            }
+            if (cancel && cancel->load()) {
+                error = "cancelled";
+                return false;
+            }
+            if (std::chrono::steady_clock::now() >= deadline) {
+                error =
+                    "ssh " + options_.host +
+                    ": the remote daemon did not answer through the tunnel" +
+                    diagnostics();
+                return false;
+            }
+            ::usleep(50000);
+        }
+    }
 
     // `ssh ... -- host DAEMON --ensure --print-socket [--daemon-socket PATH]`.
     static std::vector<std::string> commandArguments(const SshTunnelOptions &options, const std::string &daemon) {
@@ -456,7 +542,8 @@ private:
                            std::string &out,
                            std::string &error,
                            const std::string &stdinFile = {},
-                           int *exitStatus = nullptr) {
+                           int *exitStatus = nullptr,
+                           const std::atomic<bool> *cancel = nullptr) {
         arguments.insert(arguments.begin(), program);
         int outPipe[2], errPipe[2];
         if (::pipe(outPipe) != 0) {
@@ -492,7 +579,12 @@ private:
         std::string err;
         bool outOpen = true, errOpen = true;
         bool timedOut = false;
+        bool cancelled = false;
         while (outOpen || errOpen) {
+            if (cancel && cancel->load()) {
+                cancelled = true;
+                break;
+            }
             const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
             if (left.count() <= 0) {
                 timedOut = true;
@@ -521,7 +613,7 @@ private:
         }
         ::close(outPipe[0]);
         ::close(errPipe[0]);
-        if (timedOut) {
+        if (timedOut || cancelled) {
             ::kill(pid, SIGKILL);
         }
         int status = 0;
@@ -529,6 +621,10 @@ private:
         }
         if (exitStatus) {
             *exitStatus = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        }
+        if (cancelled) {
+            error = "cancelled";
+            return false;
         }
         if (timedOut) {
             error = "no answer in time";
@@ -572,10 +668,15 @@ private:
         posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0);
         posix_spawn_file_actions_addopen(&actions, 2, errorFile_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
         auto argv = pointers(arguments);
-        const int rc = ::posix_spawnp(&pid_, program.c_str(), &actions, nullptr, argv.data(), environ);
+        pid_t pid = -1;
+        const int rc = ::posix_spawnp(
+            &pid, program.c_str(), &actions, nullptr, argv.data(), environ);
         posix_spawn_file_actions_destroy(&actions);
+        {
+            std::lock_guard lock(mutex_);
+            pid_ = rc == 0 ? pid : -1;
+        }
         if (rc != 0) {
-            pid_ = -1;
             error = "cannot start " + program + ": " + std::strerror(rc);
             return false;
         }
@@ -598,8 +699,155 @@ private:
         return text.empty() ? std::string() : ": " + text;
     }
 
+    mutable std::mutex
+        mutex_; // pid_: the UI thread asks alive() while a worker reconnects.
     pid_t pid_ = -1;
-    std::string directory_, socket_, errorFile_, remote_;
+    SshTunnelOptions options_;
+    std::string directory_, socket_, errorFile_, remote_, daemonPath_;
+};
+
+// When and how often to try again after the connection ended: attempt i waits
+// delaysMs[i] (the last value repeats) after the loss or the previous failure;
+// after maxAttempts failures it gives up (a pane then says so and waits for the
+// user).
+struct ReconnectPolicy {
+    std::vector<int> delaysMs = {0, 1000, 2000, 5000, 10000, 30000};
+    int maxAttempts = 8;
+    int delayFor(int attempt) const {
+        if (delaysMs.empty() || attempt < 0) {
+            return 0;
+        }
+        return delaysMs[std::min<std::size_t>(std::size_t(attempt),
+                                              delaysMs.size() - 1)];
+    }
+};
+
+// Keeps a SshTunnel connected: notices that its ssh ended, restarts it with
+// backoff on a worker thread (tick() never blocks, the ssh calls take seconds),
+// tells the owner what happened. The tunnel must outlive this object; the
+// destructor cancels a running attempt and waits for it.
+//
+// Not thread safe: the owner calls everything from one thread (the UI thread).
+// `nowMs` is any steady clock in milliseconds.
+class TunnelReconnector {
+public:
+    enum class State {
+        Connected,  // The tunnel's ssh runs.
+        Waiting,    // Lost; the next attempt is due at some time.
+        Connecting, // An attempt is running on the worker thread.
+        GivenUp,    // maxAttempts failed: only retryNow() goes on.
+    };
+    enum class Event { None, Lost, Reconnected, GaveUp };
+
+    explicit TunnelReconnector(SshTunnel &tunnel, ReconnectPolicy policy = {})
+        : tunnel_(tunnel)
+        , policy_(std::move(policy)) {}
+    ~TunnelReconnector() {
+        cancel_ = true;
+        if (worker_.joinable()) {
+            worker_.join();
+        }
+    }
+    TunnelReconnector(const TunnelReconnector &) = delete;
+    TunnelReconnector &operator=(const TunnelReconnector &) = delete;
+
+    // Call every round of the main loop. Returns something to tell the user,
+    // once per change.
+    Event tick(std::uint64_t nowMs) {
+        switch (state_) {
+        case State::Connected:
+            if (!tunnel_.alive()) {
+                state_ = State::Waiting;
+                attempt_ = 0;
+                dueMs_ = nowMs + std::uint64_t(policy_.delayFor(0));
+                return Event::Lost;
+            }
+            break;
+        case State::Waiting:
+            if (nowMs >= dueMs_) {
+                start();
+            }
+            break;
+        case State::Connecting:
+            if (done_.load(std::memory_order_acquire)) {
+                worker_.join();
+                if (ok_) {
+                    state_ = State::Connected;
+                    attempt_ = 0;
+                    error_.clear();
+                    return Event::Reconnected;
+                }
+                error_ = workerError_;
+                if (++attempt_ >= policy_.maxAttempts) {
+                    state_ = State::GivenUp;
+                    return Event::GaveUp;
+                }
+                state_ = State::Waiting;
+                dueMs_ = nowMs + std::uint64_t(policy_.delayFor(attempt_));
+            }
+            break;
+        case State::GivenUp:
+            break;
+        }
+        return Event::None;
+    }
+
+    // The user asks for it (palette "Reconnect", Enter in a disconnected pane):
+    // at once, with the attempts counted from zero. Also when the tunnel looks
+    // alive: its ssh is then replaced (a link that hangs is not seen by
+    // anything else). False when an attempt is already running.
+    bool retryNow(std::uint64_t nowMs) {
+        if (state_ == State::Connecting) {
+            return false;
+        }
+        attempt_ = 0;
+        dueMs_ = nowMs;
+        start();
+        return true;
+    }
+
+    State state() const noexcept {
+        return state_;
+    }
+    int attempt()
+        const noexcept { // Failed attempts since the connection was lost.
+        return attempt_;
+    }
+    const std::string &lastError() const noexcept {
+        return error_;
+    }
+    // When tick() has something to do by itself (a due attempt); empty while
+    // connected or given up.
+    std::optional<std::uint64_t> dueMs() const noexcept {
+        return state_ == State::Waiting ? std::optional<std::uint64_t>(dueMs_)
+                                        : std::nullopt;
+    }
+
+private:
+    void start() {
+        state_ = State::Connecting;
+        done_ = false;
+        ok_ = false;
+        workerError_.clear();
+        worker_ = std::thread([this] {
+            std::string error;
+            ok_ = tunnel_.reconnect(error, &cancel_);
+            workerError_ = std::move(error);
+            done_.store(true, std::memory_order_release);
+        });
+    }
+
+    SshTunnel &tunnel_;
+    ReconnectPolicy policy_;
+    State state_ = State::Connected;
+    int attempt_ = 0;
+    std::uint64_t dueMs_ = 0;
+    std::string error_;
+    std::thread worker_;
+    std::atomic<bool> done_{false};
+    std::atomic<bool> cancel_{false};
+    bool ok_ = false; // Written by the worker before done_, read after it.
+    std::string workerError_; // Same.
 };
 
 } // namespace frontend

@@ -51,8 +51,8 @@ yours to start, watch and clean up, and the new-terminal folder is a folder of *
 4. The app uses LOCAL as the daemon socket, as if the daemon were local, with these differences:
    `--daemon` is implied and required (no fallback to local programs), new terminals start in the
    remote home (a local folder means nothing there), the shared-marks poll runs every 10 s instead of 2 s
-   (each question waits for the answer, and the link may be slow), and a note says so when the tunnel
-   ends. Leaving the window kills the ssh child and removes the socket; the terminals keep running in
+   (each question waits for the answer, and the link may be slow), and the connection comes back by
+   itself when it ends (see "Reconnect"). Leaving the window kills the ssh child and removes the socket; the terminals keep running in
    the remote daemon, as with a local one, and a new `matterm --daemon-host` finds them again.
 
 `--ssh-arg` arguments come first, so they win over ours (ssh keeps the first value of an option):
@@ -120,14 +120,40 @@ the first copy needs a yes, and the file is content-named, 0700, and renamed int
   `BatchMode=yes` an unknown host fails instead of asking: run `ssh host` once first).
 * Nothing listens on a TCP port on either side.
 
+### Reconnect
+
+`frontend::TunnelReconnector` (`sshtunnel.h`) keeps the tunnel up. The main loop calls `tick()` every
+round; it never blocks.
+
+* **Detecting**: the ssh child ended (network drop, laptop sleep: `ServerAliveInterval=15` with 3 misses
+  ends a silent link in about 45 s). The panes notice by themselves (their socket closes, state
+  "disconnected") and keep their screens.
+* **Retrying**: on a worker thread `SshTunnel::reconnect()` stops the old ssh, asks the remote daemon
+  again where its socket is (`--ensure`: it is started there if it is gone), and makes the same
+  `ssh -L` forward at the same local socket, with the same options. Attempts come 0, 1, 2, 5, 10 and
+  then every 30 s after the loss or the previous failure (`ReconnectPolicy`), at most 8. Nothing is
+  copied again; a daemon copy that has disappeared is an error.
+* **Reattaching**: when the forward answers, every pane whose state is "disconnected" attaches again
+  with its session id and the offset it had received (`reattachToDaemon`), so the daemon replays
+  exactly what was printed meanwhile, no more and no less. A pane that was taken over by another window
+  stays as it is.
+* **Giving up**: after the last failed attempt the window says why, the panes say "disconnected from
+  HOST, press Enter to retry", and nothing more is tried by itself.
+* **By hand**: the palette entry "Reconnect" (only with `--daemon-host`) or Enter in a disconnected
+  pane retries at once with the counting from zero. This also replaces an ssh that is alive but stuck;
+  Enter does that when the pane still cannot attach although the tunnel looks up.
+* Closing the window during an attempt cancels the running ssh call; it does not wait for the 20 s.
+* Tests (`test/sshtunnel_test.cpp`, against `test/fakessh.py`): ssh is killed while a program prints and
+  80 numbered lines arrive once each in order; back-off and giving up; retry by hand; a slow link
+  (`FAKE_SSH_DELAY`) never makes `tick()` take more than 200 ms; close during an attempt.
+
 ### Not covered by the prototype
 
-* No reconnect: when ssh dies (laptop sleep, network) the panes close and the note says to restart;
-  the terminals are alive on the remote and reappear with `--daemon-host` again. Reconnecting the
-  panes in place needs the tunnel to be restarted and the daemon links reattached (they remember
-  their offsets: `DaemonLink` already resumes after a lost connection to the local daemon).
-* Opening the tunnel blocks start-up (up to 20 s, one line on stderr). No dialog, no palette entry
-  to connect to a second host, one host per window.
+* Opening the tunnel the first time blocks start-up (up to 20 s, one line on stderr); a reconnect does
+  not block. No dialog, no palette entry to connect to a second host, one host per window.
+* The reconnect has never run against a real sshd or a real network drop, and the window code (notes,
+  Enter, the palette entry) was only started headless: killing the forward ssh made a new one appear,
+  but nobody saw the notes on a real display.
 * Blocking questions to the daemon (status, share) from the UI thread wait for the round trip; on
   a slow link that stutters. They should move to the link's own connection.
 * Version mismatch is only what `ControlHello` already reports; `matterm-daemon` must be on the

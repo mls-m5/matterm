@@ -7,9 +7,10 @@
   fakessh.py [options] -N -L LOCAL:REMOTE -- HOST   listens on the Unix socket LOCAL and relays every
                                                       connection to the Unix socket REMOTE until killed
 Every call appends its arguments (one line, JSON) to $FAKE_SSH_LOG. $FAKE_SSH_FAIL makes the command form
-fail with that message; $FAKE_SSH_NOFORWARD makes the forward form exit at once with that message.
+fail with that message; $FAKE_SSH_NOFORWARD makes the forward form exit at once with that message;
+$FAKE_SSH_DELAY (seconds) makes the command form wait before it does anything (a slow link).
 """
-import json, os, signal, socket, sys, threading, select
+import json, os, signal, socket, sys, threading, select, time
 
 args = sys.argv[1:]
 log = os.environ.get("FAKE_SSH_LOG")
@@ -35,6 +36,8 @@ while i < len(args):
     i += 1
 
 if forward is None:
+    if os.environ.get("FAKE_SSH_DELAY"):
+        time.sleep(float(os.environ["FAKE_SSH_DELAY"]))
     if os.environ.get("FAKE_SSH_FAIL"):
         sys.stderr.write(os.environ["FAKE_SSH_FAIL"] + "\n")
         sys.exit(255)

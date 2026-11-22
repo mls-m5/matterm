@@ -27,6 +27,17 @@ TEST_CASE("The palette offers the daemon actions only when a daemon is used") {
     EXPECT_EQ(offered[2].name, "Daemon status");
 }
 
+TEST_CASE("Reconnect is offered only for a remote daemon") {
+    EXPECT(daemonCommandEntries(false, true).empty());
+    for (const auto &entry : daemonCommandEntries(true)) {
+        EXPECT(entry.name != "Reconnect");
+    }
+    const auto remote = daemonCommandEntries(true, true);
+    EXPECT_EQ(remote.size(), std::size_t(4));
+    EXPECT_EQ(remote.back().id, std::string(daemonaction::reconnect));
+    EXPECT_EQ(remote.back().name, "Reconnect");
+}
+
 TEST_CASE("Attach entries: detach and move only for a daemon pane, attach-all only with leftovers") {
     const auto names = [](const AttachState &s) {
         std::string all;
