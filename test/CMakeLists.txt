@@ -162,6 +162,11 @@ if(BUILD_TESTING)
     target_link_libraries(ui_test PRIVATE cellbuffer)
     add_test(NAME ui COMMAND ui_test)
 
+    add_executable(daemoncommands_test daemoncommands_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(daemoncommands_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+    target_link_libraries(daemoncommands_test PRIVATE cellbuffer)
+    add_test(NAME daemon_commands COMMAND daemoncommands_test)
+
     add_executable(commandregistry_test commandregistry_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(commandregistry_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
     add_test(NAME command_registry COMMAND commandregistry_test)
