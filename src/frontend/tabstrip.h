@@ -35,7 +35,10 @@ inline constexpr char32_t kMinimizeIcon = U'–';
 inline constexpr char32_t kMaximizeIcon = U'□';
 inline constexpr char32_t kRestoreIcon = U'◫'; // U+25EB (the font has no overlapping-squares glyph)
 inline constexpr char32_t kCloseWindowIcon = U'✕';
-inline constexpr char32_t kStripGlyphs[] = {U'●', U'×', U'…', U'≡', kWorkingIcon,
+// The share button's symbol (three dots, like the share icon of a phone). The bundled font has no
+// box-with-arrow; U+2197 and U+21E7 are the other candidates.
+inline constexpr char32_t kShareIcon = U'\u2234';
+inline constexpr char32_t kStripGlyphs[] = {kShareIcon, U'●', U'×', U'…', U'≡', kWorkingIcon,
                                             kMinimizeIcon, kMaximizeIcon, kRestoreIcon, kCloseWindowIcon};
 
 inline constexpr int kMaxTitle = 20; // Columns of a title at most.
@@ -252,15 +255,18 @@ private:
 } // namespace tabstrip_detail
 
 // The share button at the end of the strip (only offered when the panes can be shared, that is
-// when they run in the local daemon): grey "Share" when nothing in the active tab is shared, red
-// "Share N" when N panes are. ASCII only, so no glyph has to exist in the font.
+// when they run in the local daemon): a grey share symbol when nothing in the active tab is shared,
+// a red one followed by the count when N panes are. The difference is in the text (the count), not
+// only in the colour, so it can be seen without telling grey from red.
 struct ShareButton {
     bool shown = false;
     int shared = 0; // Panes of the active tab that are shared.
 };
 
 inline std::u32string shareLabel(const ShareButton &share) {
-    std::u32string text = U" Share ";
+    std::u32string text = U" ";
+    text.push_back(kShareIcon);
+    text.push_back(U' ');
     if (share.shared > 0) {
         for (const char c : std::to_string(share.shared)) {
             text.push_back(char32_t(c));

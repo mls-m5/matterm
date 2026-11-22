@@ -371,7 +371,8 @@ TEST_CASE("A share button sits before the palette button: grey when nothing is s
                     for (int c = share.begin; c < share.end; ++c) {
                         text.push_back(strip.cells[std::size_t(c)].codePoint);
                     }
-                    EXPECT(text.find(U"Share") != std::u32string::npos);
+                    EXPECT(text.find(kShareIcon) != std::u32string::npos); // The symbol, not the word.
+                    EXPECT(text.find(U"Share") == std::u32string::npos);
                     EXPECT((text.find(U"12") != std::u32string::npos) == (shared == 12));
                     const auto bg = strip.cells[std::size_t(share.begin)].background;
                     EXPECT((bg.r > 150 && bg.g < 80) == (shared > 0)); // Red only when something is shared.
@@ -434,6 +435,25 @@ TEST_CASE("Window buttons close the row: minimise, maximise or restore, close") 
     for (const auto &r : buildTabStrip(makeTabs(2, 0), 11, Palette(), 0, true, ShareButton{true, 0}, WindowButtons{true, false}).regions) {
         EXPECT(r.hit.kind != Kind::Minimize);
     }
+}
+
+TEST_CASE("The share button is a symbol; shared or not shows in the text, not only in the colour") {
+    EXPECT(kShareIcon == U'\u2234'); // One constant to change if another symbol is preferred.
+    const std::u32string none = shareLabel(ShareButton{true, 0});
+    const std::u32string two = shareLabel(ShareButton{true, 2});
+    const std::u32string many = shareLabel(ShareButton{true, 12});
+    EXPECT(none == U" \u2234 ");
+    EXPECT(two == U" \u2234 2 ");
+    EXPECT(many == U" \u2234 12 ");
+    // Nothing shared: no digit anywhere. Shared: the count is there. A colour-blind owner can tell.
+    for (const char32_t c : none) EXPECT(c < U'0' || c > U'9');
+    EXPECT(none != two && two != many);
+    EXPECT(none.size() < two.size());
+    // The symbol is a glyph of the strip's font list (the cmap test checks the font has it).
+    bool listed = false;
+    for (const char32_t g : kStripGlyphs) listed = listed || g == kShareIcon;
+    EXPECT(listed);
+    EXPECT_EQ(displayWidth(kShareIcon), 1);
 }
 
 TEST_SUIT_END
