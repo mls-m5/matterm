@@ -317,3 +317,46 @@ the palette, (5) local session daemon, if the owner wants the tmux model.
 Questions for the owner: restore automatically or ask at start? Named sessions
 wanted? Is "offer to run the program again" enough, or is a daemon that keeps programs
 alive the goal?
+
+## 10. A local daemon so the GUI can be restarted without losing processes (proposal, owner 2026-11-22)
+
+Why: while the GUI is developed it must be possible to restart it (new build, crash)
+without killing the shells and programs in it. It also is the "programs keep running"
+option of section 9. Constraint from the owner: the daemon must change rarely, so that
+GUI changes never force a restart of the daemon (and with it the loss of every process).
+
+What exists: `matterm-server` already keeps sessions beyond a connection (persistent
+sessions, replay ring with absolute offsets, take-over, `docs/PROTOCOL.md` with a version in
+`Hello` and a feature list in `Welcome`). It does not parse terminal output (docs/MULTI_TERMINAL.md
+section 4), which is exactly what keeps a daemon small and stable: it owns PTYs, child
+processes and raw byte rings, nothing about cells, fonts, tabs or panes.
+
+Design:
+- **Local transport:** a Unix domain socket in `$XDG_RUNTIME_DIR/matterm/` (directory 0700),
+  peer user id checked (`SO_PEERCRED`), no network, no password. Messages are the
+  existing protocol with length-prefixed framing instead of WebSocket frames.
+- **One client path:** the native pane becomes `TerminalView` + `ClientSession` over that
+  socket, the same code as the browser. The in-process `PtyLink` stays as an option
+  (ephemeral mode, no daemon) for tests and for people who do not want a daemon.
+- **Lifecycle:** the GUI starts the daemon when it is not running (like `ssh-agent`/tmux),
+  and the daemon exits by itself when it has no sessions and no client for a while. A
+  session ends when its process ends or the user closes the pane, never because a GUI left.
+- **Palette entries:** "Stop daemon" (asks first, naming how many programs would end),
+  "Quit and keep running" (detach everything), "Show daemon status", and later "Restart
+  daemon after an update".
+- **Stability rules for the daemon:** the protocol version only grows by additions within
+  a major version (new optional fields and features negotiated in `Hello`/`Welcome`); the
+  daemon never learns about UI concepts (layout, titles and the like stay in the GUI's
+  saved session file); a GUI that needs a newer protocol says so and offers to restart the
+  daemon only when no session would be lost. Handing sessions to a new daemon binary (PTY
+  file descriptors passed over the socket with `SCM_RIGHTS`) is a later option.
+- **Screen after a GUI restart:** the replay ring only holds recent bytes. For an exact
+  screen the GUI saves a checkpoint of each pane's model on a controlled exit and
+  attaches from the byte offset of that checkpoint (the checkpoint idea of section 9 and
+  docs/MULTI_TERMINAL.md section 12); after a crash it replays the ring and accepts that
+  older history is gone.
+- **Development:** a separate socket name (`--daemon-socket`) so experiments never touch the
+  daemon that holds real work.
+
+Open: the framing format; whether the ring size should be larger for a local daemon (it is
+a local resource, 256 KB is the browser default); idle exit time; Windows/macOS later.
