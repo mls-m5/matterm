@@ -536,9 +536,17 @@ std::string defaultConfigDirectory(const GetEnv &getenv) {
 void validateSettings(const Settings &settings) {
     const auto &c = settings.server;
     boost::system::error_code ec;
-    boost::asio::ip::make_address(c.address, ec);
+    const auto listenAddress = boost::asio::ip::make_address(c.address, ec);
     if (ec)
         throw ConfigError("listen_address: must be an IPv4 or IPv6 address");
+    if (!c.daemonSocket.empty() && !c.exposeLocalSessions)
+        throw ConfigError("--daemon-socket: only meaningful with --expose-local-sessions");
+    if (!c.daemonSocket.empty() && c.daemonSocket.front() != '/')
+        throw ConfigError("--daemon-socket: must be an absolute path");
+    if (c.exposeLocalSessions && !listenAddress.is_loopback() && !c.allowRemoteListen)
+        throw ConfigError(
+            "--expose-local-sessions with a listen address beyond loopback needs --allow-remote-listen "
+            "(your terminals would be reachable from the network)");
     try {
         ProxySource proxy(c.trustedProxy, c.trustedProxyHops);
     }
@@ -780,6 +788,15 @@ CommandLine parseCommandLine(const std::vector<std::string> &arguments) {
         else if (option == "--allow-plain-http") {
             result.allowPlainHttp = true;
         }
+        else if (option == "--expose-local-sessions") {
+            result.exposeLocalSessions = true;
+        }
+        else if (option == "--daemon-socket") {
+            result.daemonSocket = value();
+        }
+        else if (option == "--allow-remote-listen") {
+            result.allowRemoteListen = true;
+        }
         else if (option == "--set-password" ||
                  option == "--setup-credentials") {
             result.setPassword = true;
@@ -824,6 +841,12 @@ void applyCommandLine(const CommandLine &commandLine, Settings &settings) {
         c.staticDir = *commandLine.staticDir;
     if (commandLine.allowPlainHttp)
         c.allowPlainHttp = true;
+    if (commandLine.exposeLocalSessions)
+        c.exposeLocalSessions = true;
+    if (commandLine.daemonSocket)
+        c.daemonSocket = *commandLine.daemonSocket;
+    if (commandLine.allowRemoteListen)
+        c.allowRemoteListen = true;
     if (commandLine.program)
         c.process.arguments = *commandLine.program;
 }

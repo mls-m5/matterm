@@ -150,7 +150,8 @@ struct PtyProcess::Impl {
                int rows,
                const std::string &term,
                ColorCapability color,
-               const std::optional<std::vector<std::string>> &allowList) {
+               const std::optional<std::vector<std::string>> &allowList,
+               const std::string &workingDirectory) {
         dimensions(columns, rows);
         if (arguments.empty() || arguments[0].empty() || term.empty() ||
             term.find('\0') != std::string::npos) {
@@ -161,6 +162,9 @@ struct PtyProcess::Impl {
             if (argument.find('\0') != std::string::npos) {
                 throw std::invalid_argument("NUL in process argument");
             }
+        }
+        if (workingDirectory.find('\0') != std::string::npos) {
+            throw std::invalid_argument("NUL in working directory");
         }
         const auto path = executable(arguments[0]);
         auto env = environment(term, color, allowList);
@@ -213,6 +217,10 @@ struct PtyProcess::Impl {
                     if (fd != errorWrite.value)
                         ::close(static_cast<int>(fd));
                 }
+            }
+            // A folder that cannot be entered is not an error: stay where we are.
+            if (!workingDirectory.empty() && ::chdir(workingDirectory.c_str()) != 0) {
+                // Deliberately ignored.
             }
             // All allocation/environment/PATH preparation happened before fork.
             ::execve(path.c_str(), argv.data(), envp.data());
@@ -274,9 +282,11 @@ PtyProcess::PtyProcess(
     int rows,
     const std::string &term,
     ColorCapability color,
-    std::optional<std::vector<std::string>> environmentAllowList)
+    std::optional<std::vector<std::string>> environmentAllowList,
+    const std::string &workingDirectory)
     : impl_(std::make_unique<Impl>()) {
-    impl_->start(arguments, columns, rows, term, color, environmentAllowList);
+    impl_->start(
+        arguments, columns, rows, term, color, environmentAllowList, workingDirectory);
 }
 PtyProcess::~PtyProcess() = default;
 PtyProcess::ReadResult PtyProcess::read(char *buffer, std::size_t capacity) {

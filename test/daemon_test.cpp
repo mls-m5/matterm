@@ -1,191 +1,9 @@
-#include "control.h"
-#include "daemon.h"
-#include "framing.h"
-#include "message.h"
+#include "daemonfixture.h"
 #include "mls-unit-test/unittest.h"
 
-#include <atomic>
-#include <chrono>
-#include <filesystem>
-#include <optional>
-#include <poll.h>
-#include <cstring>
 #include <random>
-#include <sys/stat.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <thread>
-#include <unistd.h>
 
-namespace {
 using namespace std::chrono_literals;
-
-// A blocking test client speaking the daemon framing.
-class Client {
-public:
-    explicit Client(const std::string &path) {
-        fd_ = ::socket(AF_UNIX, SOCK_STREAM, 0);
-        sockaddr_un a{};
-        a.sun_family = AF_UNIX;
-        std::strncpy(a.sun_path, path.c_str(), sizeof a.sun_path - 1);
-        if (::connect(fd_, reinterpret_cast<sockaddr *>(&a), sizeof a) != 0) {
-            ::close(fd_);
-            fd_ = -1;
-        }
-    }
-    ~Client() { close(); }
-    void close() {
-        if (fd_ >= 0) ::close(fd_);
-        fd_ = -1;
-    }
-    bool connected() const { return fd_ >= 0; }
-    bool sendRaw(const std::string &bytes) const {
-        return ::send(fd_, bytes.data(), bytes.size(), MSG_NOSIGNAL) == ssize_t(bytes.size());
-    }
-    bool sendFrame(const std::string &payload) const {
-        std::string f;
-        return mtd::encodeFrame(payload, f) && sendRaw(f);
-    }
-    template <class M>
-    bool send(const M &m) const {
-        std::string b;
-        protocol::encode(protocol::ClientMessage{m}, b);
-        return sendFrame(b);
-    }
-    bool sendControl(const mtd::ControlRequest &m) const {
-        std::string b;
-        return mtd::encode(m, b) && sendFrame(b);
-    }
-    // Next frame, or nullopt on EOF/timeout. `eof` tells which.
-    std::optional<std::string> frame(int timeoutMs = 3000) {
-        const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
-        for (;;) {
-            std::optional<std::string> got;
-            if (!pending_.empty()) {
-                got = std::move(pending_.front());
-                pending_.erase(pending_.begin());
-                return got;
-            }
-            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(end - std::chrono::steady_clock::now());
-            if (left.count() <= 0 || fd_ < 0) return std::nullopt;
-            pollfd p{fd_, POLLIN, 0};
-            if (::poll(&p, 1, int(left.count())) <= 0) continue;
-            char buf[4096];
-            const auto n = ::recv(fd_, buf, sizeof buf, 0);
-            if (n <= 0) {
-                eof = true;
-                return std::nullopt;
-            }
-            if (!decoder_.feed(std::string_view(buf, std::size_t(n)),
-                               [&](std::string_view f) { pending_.emplace_back(f); })) {
-                eof = true;
-                return std::nullopt;
-            }
-        }
-    }
-    std::optional<mtd::ControlReply> controlReply() {
-        const auto f = frame();
-        return f ? mtd::decodeReply(*f) : std::nullopt;
-    }
-    std::optional<protocol::ServerMessage> server(int timeoutMs = 3000) {
-        const auto f = frame(timeoutMs);
-        if (!f) return std::nullopt;
-        return protocol::decodeServer(*f).message;
-    }
-    // Reads server messages until the output so far contains `needle`.
-    bool outputContains(const std::string &needle, int timeoutMs = 5000) {
-        const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
-        while (std::chrono::steady_clock::now() < end) {
-            if (output.find(needle) != std::string::npos) return true;
-            const auto m = server(200);
-            if (!m) {
-                if (eof) return false;
-                continue;
-            }
-            if (const auto *o = std::get_if<protocol::Output>(&*m)) {
-                output += o->data;
-                send(protocol::Ack{o->offset + o->data.size()});
-            }
-        }
-        return output.find(needle) != std::string::npos;
-    }
-    bool atEof(int timeoutMs = 2000) {
-        const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
-        while (std::chrono::steady_clock::now() < end) {
-            frame(200);
-            if (eof) return true;
-        }
-        return false;
-    }
-    std::string output;
-    bool eof = false;
-
-private:
-    int fd_ = -1;
-    mtd::FrameDecoder decoder_;
-    std::vector<std::string> pending_;
-};
-
-struct Running {
-    std::string dir;
-    std::string path;
-    std::unique_ptr<mtd::Daemon> d;
-    std::thread thread;
-    explicit Running(unsigned idle = 60, std::optional<uid_t> uid = std::nullopt, std::string existingDir = {}) {
-        if (existingDir.empty()) {
-            std::string t = (std::filesystem::temp_directory_path() / "mtdXXXXXX").string();
-            dir = ::mkdtemp(t.data());
-        }
-        else {
-            dir = existingDir;
-        }
-        path = dir + "/d.sock";
-        auto config = mtd::defaultConfig();
-        config.socketPath = path;
-        config.privateDirectory = false;
-        config.idleExitSeconds = idle;
-        config.allowedUid = uid;
-        config.process.arguments = {"/bin/sh"};
-        d = std::make_unique<mtd::Daemon>(std::move(config));
-        std::string error;
-        started = d->start(error);
-        startError = error;
-        if (started) thread = std::thread([this] { d->run(); });
-    }
-    ~Running() {
-        stop();
-        if (!dir.empty() && ownsDir) std::filesystem::remove_all(dir);
-    }
-    void stop() {
-        if (thread.joinable()) {
-            d->stop();
-            thread.join();
-        }
-    }
-    void join() {
-        if (thread.joinable()) thread.join();
-    }
-    bool started = false;
-    bool ownsDir = true;
-    std::string startError;
-};
-
-protocol::Hello hello(const std::string &id = {}, std::uint64_t offset = 0) {
-    protocol::Hello h;
-    h.sessionId = id;
-    h.resumeOffset = offset;
-    h.features = protocol::featureReplay | protocol::featureDaemon;
-    return h;
-}
-
-std::optional<protocol::Welcome> attach(Client &c, const std::string &id = {}, std::uint64_t offset = 0) {
-    if (!c.send(hello(id, offset))) return std::nullopt;
-    const auto m = c.server();
-    if (!m) return std::nullopt;
-    if (const auto *w = std::get_if<protocol::Welcome>(&*m)) return *w;
-    return std::nullopt;
-}
-} // namespace
 
 TEST_SUIT_BEGIN(Daemon)
 
@@ -297,7 +115,7 @@ TEST_CASE("Control messages round trip and reject malformed input") {
 TEST_CASE("A session runs through the socket and has the daemon feature") {
     Running r;
     EXPECT(r.started);
-    Client c(r.path);
+    DaemonClient c(r.path);
     EXPECT(c.connected());
     const auto w = attach(c);
     EXPECT(w.has_value());
@@ -321,7 +139,7 @@ TEST_CASE("Sessions survive a client disconnect and replay after reconnect") {
     EXPECT(r.started);
     std::string id;
     {
-        Client c(r.path);
+        DaemonClient c(r.path);
         const auto w = attach(c);
         EXPECT(w.has_value());
         id = w->sessionId;
@@ -330,7 +148,7 @@ TEST_CASE("Sessions survive a client disconnect and replay after reconnect") {
     }
     std::this_thread::sleep_for(200ms);
     {
-        Client ctl(r.path);
+        DaemonClient ctl(r.path);
         EXPECT(ctl.sendControl(mtd::ControlHello{}));
         const auto welcome = ctl.controlReply();
         EXPECT(welcome.has_value() && std::holds_alternative<mtd::ControlWelcome>(*welcome));
@@ -343,7 +161,7 @@ TEST_CASE("Sessions survive a client disconnect and replay after reconnect") {
         EXPECT_FALSE(l.sessions[0].attached);
         EXPECT_FALSE(l.sessions[0].shared);
     }
-    Client again(r.path);
+    DaemonClient again(r.path);
     const auto w = attach(again, id, 0);
     EXPECT(w.has_value());
     EXPECT_EQ(w->sessionId, id);
@@ -355,10 +173,10 @@ TEST_CASE("Sessions survive a client disconnect and replay after reconnect") {
 TEST_CASE("Marking a session shared is visible in the list and refused for unknown ids") {
     Running r;
     EXPECT(r.started);
-    Client c(r.path);
+    DaemonClient c(r.path);
     const auto w = attach(c);
     EXPECT(w.has_value());
-    Client ctl(r.path);
+    DaemonClient ctl(r.path);
     EXPECT(ctl.sendControl(mtd::ControlHello{}));
     EXPECT(ctl.controlReply().has_value());
     EXPECT(ctl.sendControl(mtd::SetShared{w->sessionId, true}));
@@ -381,7 +199,7 @@ TEST_CASE("Marking a session shared is visible in the list and refused for unkno
 TEST_CASE("Another user is refused without a word") {
     Running r(60, geteuid() + 1);
     EXPECT(r.started);
-    Client c(r.path);
+    DaemonClient c(r.path);
     EXPECT(c.connected());
     c.send(hello());
     EXPECT(!c.frame(1000).has_value());
@@ -393,24 +211,24 @@ TEST_CASE("Framing violations on the socket close the connection") {
     EXPECT(r.started);
     for (const std::string &bad : {std::string("\0\0\0\0", 4), std::string("\0\0\x40\x01xx", 6),
                                   std::string("\xde\xad\xbe\xef", 4)}) {
-        Client c(r.path);
+        DaemonClient c(r.path);
         EXPECT(c.sendRaw(bad));
         EXPECT(c.atEof());
     }
     // And the daemon is still fine.
-    Client ok(r.path);
+    DaemonClient ok(r.path);
     EXPECT(attach(ok).has_value());
 }
 
 TEST_CASE("A first frame that is neither Hello nor ControlHello is an error") {
     Running r;
     EXPECT(r.started);
-    Client c(r.path);
+    DaemonClient c(r.path);
     EXPECT(c.send(protocol::Input{"x"}));
     const auto m = c.server();
     EXPECT(m.has_value() && std::holds_alternative<protocol::Error>(*m));
     EXPECT(c.atEof());
-    Client silent(r.path); // Says nothing: dropped after the hello timeout (default 5 s) - not waited for here.
+    DaemonClient silent(r.path); // Says nothing: dropped after the hello timeout (default 5 s) - not waited for here.
     EXPECT(silent.connected());
 }
 
@@ -429,12 +247,12 @@ TEST_CASE("A session keeps the daemon alive past the idle time") {
     Running r(1);
     EXPECT(r.started);
     {
-        Client c(r.path);
+        DaemonClient c(r.path);
         EXPECT(attach(c).has_value());
     }
     std::this_thread::sleep_for(2500ms);
     EXPECT(r.d->reason() == mtd::ExitReason::None);
-    Client ctl(r.path);
+    DaemonClient ctl(r.path);
     EXPECT(ctl.sendControl(mtd::ControlHello{}));
     EXPECT(ctl.controlReply().has_value());
 }
@@ -447,7 +265,7 @@ TEST_CASE("Two daemons cannot share a socket") {
     EXPECT_FALSE(second.started);
     EXPECT(second.startError.find("already") != std::string::npos);
     // The first one is untouched.
-    Client c(first.path);
+    DaemonClient c(first.path);
     EXPECT(attach(c).has_value());
 }
 
@@ -471,7 +289,7 @@ TEST_CASE("A stale socket file from a dead daemon is replaced") {
     Running b(60, std::nullopt, dir);
     b.ownsDir = false;
     EXPECT(b.started);
-    Client c(b.path);
+    DaemonClient c(b.path);
     EXPECT(attach(c).has_value());
     b.stop();
     std::filesystem::remove_all(dir);
@@ -480,9 +298,9 @@ TEST_CASE("A stale socket file from a dead daemon is replaced") {
 TEST_CASE("Shutdown runs only with the confirmed session count") {
     Running r;
     EXPECT(r.started);
-    Client c(r.path);
+    DaemonClient c(r.path);
     EXPECT(attach(c).has_value());
-    Client ctl(r.path);
+    DaemonClient ctl(r.path);
     EXPECT(ctl.sendControl(mtd::ControlHello{}));
     EXPECT(ctl.controlReply().has_value());
     EXPECT(ctl.sendControl(mtd::Shutdown{0})); // The client believed there were none.
@@ -501,6 +319,149 @@ TEST_CASE("Shutdown runs only with the confirmed session count") {
     EXPECT(r.d->reason() == mtd::ExitReason::Shutdown);
     EXPECT(!std::filesystem::exists(r.path));
     EXPECT(c.atEof());
+}
+
+TEST_CASE("CreateSession starts a shell in the folder and GetSessionInfo reads it back") {
+    Running r;
+    EXPECT(r.started);
+    std::string t = (std::filesystem::temp_directory_path() / "mtcwdXXXXXX").string();
+    const std::string dir = ::mkdtemp(t.data());
+    auto ctl = controlClient(r.path);
+    EXPECT(ctl != nullptr);
+    const auto id = createSession(*ctl, dir);
+    EXPECT(id.has_value());
+    DaemonClient c(r.path);
+    const auto w = attach(c, *id, 0);
+    EXPECT(w.has_value());
+    EXPECT_EQ(w->sessionId, *id);
+    EXPECT(c.send(protocol::Input{"pwd\n"}));
+    EXPECT(c.outputContains(dir));
+    auto i = info(*ctl, *id);
+    EXPECT(i.has_value());
+    EXPECT_EQ(i->cwd, dir);
+    EXPECT_FALSE(i->busy);
+    EXPECT(c.send(protocol::Input{"exec sleep 30\n"}));
+    bool busy = false;
+    for (int n = 0; n < 50 && !busy; ++n) {
+        std::this_thread::sleep_for(100ms);
+        i = info(*ctl, *id);
+        busy = i && i->busy;
+    }
+    EXPECT(busy);
+    EXPECT_EQ(i->command.size(), std::size_t(2));
+    EXPECT_EQ(i->command.at(0), std::string("sleep"));
+    EXPECT(!info(*ctl, "nonexistent").has_value());
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("CreateSession ignores a folder that does not exist and refuses nothing else it was not asked") {
+    Running r;
+    EXPECT(r.started);
+    auto ctl = controlClient(r.path);
+    EXPECT(ctl != nullptr);
+    EXPECT(createSession(*ctl, "/nonexistent/for/sure").has_value());
+    EXPECT(createSession(*ctl, "relative/path").has_value());
+    EXPECT(createSession(*ctl, "").has_value());
+    EXPECT(ctl->sendControl(mtd::ListSessions{}));
+    const auto l = ctl->controlReply();
+    EXPECT_EQ(std::get<mtd::SessionList>(*l).sessions.size(), std::size_t(3));
+}
+
+TEST_CASE("Control codec: the session messages round trip") {
+    std::string b;
+    EXPECT(mtd::encode(mtd::ControlRequest(mtd::CreateSession{"/tmp", 80, 24}), b));
+    auto q = mtd::decodeRequest(b);
+    EXPECT(q.has_value());
+    EXPECT_EQ(std::get<mtd::CreateSession>(*q).cwd, std::string("/tmp"));
+    b.clear();
+    EXPECT(mtd::encode(mtd::ControlRequest(mtd::CreateSession{"/tmp", 0, 24}), b));
+    EXPECT_FALSE(mtd::decodeRequest(b).has_value());
+    b.clear();
+    mtd::SessionInfo si{"abc", "/home/x", true, {"vim", "a b"}};
+    EXPECT(mtd::encode(mtd::ControlReply(si), b));
+    auto p = mtd::decodeReply(b);
+    EXPECT(p.has_value());
+    const auto &got = std::get<mtd::SessionInfo>(*p);
+    EXPECT(got.busy);
+    EXPECT_EQ(got.command.size(), std::size_t(2));
+    EXPECT_EQ(got.command[1], std::string("a b"));
+    b.clear();
+    EXPECT(mtd::encode(mtd::ControlRequest(mtd::ExposedHello{}), b));
+    EXPECT(std::holds_alternative<mtd::ExposedHello>(*mtd::decodeRequest(b)));
+    b.clear();
+    EXPECT(mtd::encode(mtd::ControlReply(mtd::SessionCreated{"id1"}), b));
+    EXPECT_EQ(std::get<mtd::SessionCreated>(*mtd::decodeReply(b)).id, std::string("id1"));
+}
+
+TEST_CASE("An exposed connection sees and attaches to shared sessions only") {
+    Running r;
+    EXPECT(r.started);
+    auto owner = controlClient(r.path);
+    EXPECT(owner != nullptr);
+    const auto priv = createSession(*owner, "");
+    const auto pub = createSession(*owner, "");
+    EXPECT(priv.has_value() && pub.has_value());
+    EXPECT(owner->sendControl(mtd::SetShared{*pub, true}));
+    EXPECT(owner->controlReply().has_value());
+    {
+        auto web = exposedClient(r.path);
+        EXPECT(web != nullptr);
+        EXPECT(web->sendControl(mtd::ListSessions{}));
+        const auto l = web->controlReply();
+        EXPECT(l.has_value());
+        const auto &sessions = std::get<mtd::SessionList>(*l).sessions;
+        EXPECT_EQ(sessions.size(), std::size_t(1));
+        EXPECT_EQ(sessions[0].id, *pub);
+    }
+    {
+        // The private session cannot be attached, and looks like one that does not exist.
+        auto web = exposedClient(r.path);
+        EXPECT(web != nullptr);
+        EXPECT(web->send(hello(*priv)));
+        const auto m = web->server();
+        EXPECT(m.has_value() && std::holds_alternative<protocol::Error>(*m));
+        EXPECT(web->atEof());
+        auto web2 = exposedClient(r.path);
+        EXPECT(web2->send(hello("nonexistent")));
+        const auto m2 = web2->server();
+        EXPECT(m2.has_value() && std::holds_alternative<protocol::Error>(*m2));
+        EXPECT_EQ(std::get<protocol::Error>(*m2).reason, std::get<protocol::Error>(*m).reason);
+    }
+    {
+        // Nor can it create, probe or end anything.
+        for (const mtd::ControlRequest &req : std::vector<mtd::ControlRequest>{
+                 mtd::CreateSession{"", 80, 24}, mtd::GetSessionInfo{*priv}, mtd::SetShared{*priv, true},
+                 mtd::Shutdown{2}, mtd::GetStatus{}}) {
+            auto web = exposedClient(r.path);
+            EXPECT(web != nullptr);
+            EXPECT(web->sendControl(req));
+            const auto e = web->controlReply();
+            EXPECT(e.has_value() && std::holds_alternative<mtd::ControlError>(*e));
+            EXPECT(web->atEof());
+        }
+        auto web = exposedClient(r.path);
+        EXPECT(web->send(hello())); // No session id: would create one.
+        const auto m = web->server();
+        EXPECT(m.has_value() && std::holds_alternative<protocol::Error>(*m));
+        EXPECT(owner->sendControl(mtd::ListSessions{}));
+        EXPECT_EQ(std::get<mtd::SessionList>(*owner->controlReply()).sessions.size(), std::size_t(2));
+    }
+    // The shared one works, and stopping the sharing cuts the viewer but not the session.
+    auto web = exposedClient(r.path);
+    EXPECT(web != nullptr);
+    const auto w = attach(*web, *pub, 0);
+    EXPECT(w.has_value());
+    EXPECT(web->send(protocol::Input{"echo seen-$((6*7))\n"}));
+    EXPECT(web->outputContains("seen-42"));
+    EXPECT(owner->sendControl(mtd::SetShared{*pub, false}));
+    EXPECT(owner->controlReply().has_value());
+    EXPECT(web->atEof());
+    EXPECT(owner->sendControl(mtd::ListSessions{}));
+    EXPECT_EQ(std::get<mtd::SessionList>(*owner->controlReply()).sessions.size(), std::size_t(2));
+    // Taking the session back as its owner works (it is merely detached).
+    DaemonClient mine(r.path);
+    EXPECT(attach(mine, *pub, 0).has_value());
+    EXPECT(mine.outputContains("seen-42"));
 }
 
 TEST_SUIT_END

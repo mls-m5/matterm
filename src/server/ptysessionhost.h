@@ -10,6 +10,7 @@ struct ProcessConfig {
     std::vector<std::string> arguments{"/bin/sh"};
     std::vector<std::string> environmentAllowList{
         "HOME", "USER", "LOGNAME", "PATH", "LANG", "LC_ALL", "LC_CTYPE"};
+    std::string workingDirectory; // Empty: inherited.
     std::chrono::milliseconds terminationGrace{500};
     std::chrono::milliseconds terminationDrainTimeout{1000};
 };
@@ -42,6 +43,13 @@ public:
     // True once the process is reaped and its end was reported (or abandoned).
     bool finished() const noexcept {
         return finished_;
+    }
+    // The started process and the terminal's foreground process group (0 when unknown).
+    int childPid() const noexcept {
+        return process_ ? process_->childPid() : 0;
+    }
+    int foregroundProcessGroup() const noexcept {
+        return process_ ? process_->foregroundProcessGroup() : 0;
     }
 
 private:

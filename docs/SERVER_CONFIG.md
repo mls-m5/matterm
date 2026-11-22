@@ -155,6 +155,9 @@ cannot verify host firewall/container topology. Prefer an exact proxy IP.
 | `--credentials PATH` | `credentials` |
 | `--trusted-proxy none\|IP\|any`, `--trusted-proxy-hops N` | `trusted_proxy`, `trusted_proxy_hops` |
 | `--allow-plain-http` | sets `allow_plain_http` to true (it cannot unset it) |
+| `--expose-local-sessions` | offer the sessions the owner marked *shared* in the local `matterm-daemon` to logged-in browsers (command line only, no config key; see below) |
+| `--daemon-socket PATH` | the daemon's socket for `--expose-local-sessions` (absolute; default `$XDG_RUNTIME_DIR/matterm/daemon.sock`); an error without `--expose-local-sessions` |
+| `--allow-remote-listen` | required for `--expose-local-sessions` with a listen address other than loopback; the server warns at start |
 | `-- PROGRAM ARG...` | `process.arguments` |
 | `--setup-credentials` (alias `--set-password`) | on a terminal asks for the password twice without echo (an empty answer generates and prints a random one), otherwise reads one line from stdin; writes the credentials file; honors `--config` and `--credentials` |
 
@@ -175,3 +178,23 @@ Without `static_dir`/`--static-dir`, the server looks for `site/index.html` and
 `build-web/site/index.html` in its own directory and up to five parents (so
 `build/server/src/server/matterm-server` finds `build-web/site` in the repository
 root) and logs which one it uses.
+
+## Local sessions of the laptop (`--expose-local-sessions`)
+
+The server becomes a client of `matterm-daemon` (docs/TABS_PLAN.md section 11). Only sessions the
+owner marked shared are visible; the daemon enforces it, the server cannot list or attach to the
+others even with the right password. Without the flag the server never contacts the daemon and
+the browser calls below answer 404 / "session unavailable".
+
+- `POST /local-sessions` (cookie and Origin as for `/ws`) returns
+  `{"sessions":[{"id":"...","attached":true|false}]}` (the shared ones), 502 when the daemon is
+  unreachable.
+- On `/ws` a `Hello` whose `sessionId` is `local:<id>` takes that session over (exclusive: the
+  owner's window is told `Replaced`); from then on the connection carries the ordinary terminal
+  protocol of that session, with the browser's size and input. Taking it back from the laptop
+  tells the browser `Replaced`; the owner stopping the sharing cuts the browser, the session
+  keeps running. Ask for `featureReplay` in the `Hello`.
+- Every take-over attempt is logged as `Local session take-over attempt session=<id> source=<hash>`
+  (never screen contents).
+- Listening beyond loopback (`--listen`, which already needs `--allow-plain-http`) with this flag also
+  needs `--allow-remote-listen`: anyone with the password then gets a shell as you.

@@ -14,16 +14,36 @@
 
 namespace mtd {
 
-constexpr std::uint16_t kControlVersion = 1;
+// 2: CreateSession and GetSessionInfo (a version 1 daemon answers them with BadMessage).
+constexpr std::uint16_t kControlVersion = 2;
 constexpr std::size_t kMaxListed = 256;
+constexpr std::size_t kMaxPath = 4096;
+constexpr std::size_t kMaxArguments = 32;
+constexpr std::size_t kMaxArgument = 1024;
 
 struct ControlHello { std::uint16_t version = kControlVersion; };
+// First frame of a connection from the web server (`matterm-server --expose-local-sessions`).
+// Such a connection sees and attaches to shared sessions only; it cannot create, end, mark or
+// probe sessions, and it is cut when a session it uses stops being shared. Answered with
+// ControlWelcome. Then it may send ListSessions (shared ones only) or a terminal Hello.
+struct ExposedHello { std::uint16_t version = kControlVersion; };
 struct ListSessions {};
 struct SetShared { std::string id; bool shared = false; };
 struct GetStatus {};
 // The owner confirmed ending `expectedSessions` sessions. Runs only when that is still the
 // number of live sessions; otherwise the daemon answers with the real count and does nothing.
 struct Shutdown { std::uint32_t expectedSessions = 0; };
+
+// Starts a session in `cwd` (empty: the daemon's folder; a folder that does not exist is
+// ignored) with an initial size. The command and environment are never the client's choice:
+// the daemon runs the user's shell. Answered with SessionCreated; attach with Hello{id}.
+struct CreateSession {
+    std::string cwd;
+    std::uint16_t columns = 80;
+    std::uint16_t rows = 24;
+};
+// What a session runs, for saving and for the close question (read from /proc by the daemon).
+struct GetSessionInfo { std::string id; };
 
 struct ControlWelcome {
     std::uint16_t version = kControlVersion;
@@ -47,18 +67,31 @@ struct Status {
     std::uint64_t uptimeMs = 0;
     std::uint32_t idleExitSeconds = 0;
 };
+struct SessionCreated { std::string id; };
+struct SessionInfo {
+    std::string id;
+    std::string cwd;                  // Absolute, empty when unknown.
+    bool busy = false;                // The foreground process is not a shell.
+    std::vector<std::string> command; // Its command line when busy and safe to keep.
+};
 struct ShutdownReply {
     bool done = false;           // false: refused because the count was not current
     std::uint32_t sessions = 0;  // The live sessions at that moment
 };
-enum class ControlErrorCode : std::uint16_t { BadMessage = 1, NotControl = 2, UnknownSession = 3, Busy = 4 };
+enum class ControlErrorCode : std::uint16_t {
+    BadMessage = 1,
+    NotControl = 2,
+    UnknownSession = 3,
+    Busy = 4,
+    StartFailed = 5 // CreateSession: registry full or the shell did not start.
+};
 struct ControlError {
     ControlErrorCode code = ControlErrorCode::BadMessage;
     std::string reason;
 };
 
-using ControlRequest = std::variant<ControlHello, ListSessions, SetShared, GetStatus, Shutdown>;
-using ControlReply = std::variant<ControlWelcome, SessionList, Status, ShutdownReply, ControlError>;
+using ControlRequest = std::variant<ControlHello, ExposedHello, ListSessions, SetShared, GetStatus, Shutdown, CreateSession, GetSessionInfo>;
+using ControlReply = std::variant<ControlWelcome, SessionList, Status, ShutdownReply, ControlError, SessionCreated, SessionInfo>;
 
 // True for a first byte in the control range (either direction).
 inline bool isControlType(std::uint8_t type) { return (type & 0xf0) == 0x40 || (type & 0xf0) == 0xc0; }

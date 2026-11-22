@@ -5,6 +5,7 @@
 // No UI concepts, no network, no password: the socket is private to the user (SO_PEERCRED).
 #include "ptysessionhost.h"
 #include "sessionregistry.h"
+#include "socketpath.h"
 
 #include <memory>
 #include <optional>
@@ -29,8 +30,6 @@ struct DaemonConfig {
 
 // Persistent sessions, large rings, detached sessions never expire, offers the "daemon" feature.
 DaemonConfig defaultConfig();
-// $XDG_RUNTIME_DIR/matterm/daemon.sock, else /tmp/matterm-<uid>/daemon.sock.
-std::string defaultSocketPath();
 
 enum class ExitReason { None, Idle, Shutdown, Stopped };
 

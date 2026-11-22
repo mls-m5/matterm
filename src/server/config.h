@@ -53,10 +53,12 @@ std::string printConfig(const Settings &settings);
 
 struct CommandLine {
     std::optional<std::string> configPath, listen, origin, credentials,
-        staticDir, trustedProxy;
+        staticDir, trustedProxy, daemonSocket;
     std::optional<unsigned short> port;
     std::optional<unsigned> trustedProxyHops;
     bool allowPlainHttp = false;
+    bool exposeLocalSessions = false;
+    bool allowRemoteListen = false;
     bool setPassword = false;
     bool printConfig = false;
     bool help = false;

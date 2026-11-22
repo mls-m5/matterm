@@ -11,7 +11,7 @@
 
 namespace {
 void usage() {
-    std::fputs("usage: matterm-daemon [--daemon-socket PATH] [--idle-seconds N] [--daemonize]\n"
+    (void)std::fputs("usage: matterm-daemon [--daemon-socket PATH] [--idle-seconds N] [--daemonize]\n"
                "  --daemon-socket PATH  use PATH instead of $XDG_RUNTIME_DIR/matterm/daemon.sock\n"
                "  --idle-seconds N      exit after N seconds with no sessions and no client (default 60, 0 = never)\n"
                "  --daemonize           detach; the parent returns once the socket is ready\n",
@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
             char buf[512];
             const auto n = ::read(ready[0], buf, sizeof buf - 1);
             if (n == 1 && buf[0] == 0) return 0;
-            if (n > 1) std::fprintf(stderr, "matterm-daemon: %.*s\n", int(n - 1), buf + 1);
+            if (n > 1) (void)std::fprintf(stderr, "matterm-daemon: %.*s\n", int(n - 1), buf + 1);
             return 1;
         }
         ::close(ready[0]);
@@ -76,7 +76,7 @@ int main(int argc, char **argv) {
             [[maybe_unused]] const auto w = ::write(ready[1], msg.data(), msg.size());
         }
         else {
-            std::fprintf(stderr, "matterm-daemon: %s\n", error.c_str());
+            (void)std::fprintf(stderr, "matterm-daemon: %s\n", error.c_str());
         }
         return 1;
     }

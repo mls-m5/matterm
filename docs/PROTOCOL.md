@@ -512,3 +512,32 @@ sessions, removes the socket and exits.
 the same socket refuses to start; a socket file left by a crash is replaced. The daemon exits by
 itself after `--idle-seconds` (default 60) with no session and no client. `--daemonize` detaches;
 the parent returns when the socket is ready (or prints the error and exits 1).
+
+**Control version 2** (additive; a version 1 daemon answers the new types with `ControlError`
+BadMessage and closes). `ControlWelcome.version` tells which one runs.
+
+| Type | Message | Fields |
+| --- | --- | --- |
+| 0x45 | CreateSession | string cwd, u16 columns, u16 rows |
+| 0x46 | GetSessionInfo | string id |
+| 0x47 | ExposedHello | u16 version |
+| 0xc5 | SessionCreated | string id |
+| 0xc6 | SessionInfo | string id, string cwd, u8 busy, u8 n, n x string argument |
+
+`CreateSession` starts the user's shell (never a client-chosen command or environment) in `cwd`
+when that is an absolute existing folder (anything else: the daemon's own folder) with the given
+size, and answers `SessionCreated`; the client then attaches with `Hello{sessionId=id}` and
+`featureReplay`. `ControlError` code 5 `StartFailed`: registry full or the shell did not start.
+`GetSessionInfo` answers what the foreground process of the terminal is: `cwd` is its folder,
+`busy` is true when it is not a shell and `argument` is its command line (only when it is
+printable and bounded; see `frontend::probePane`). Errors: UnknownSession.
+
+**Exposed connections** (`matterm-server --expose-local-sessions`). A connection whose first
+frame is `ExposedHello` is answered with `ControlWelcome` and then limited to what a web
+browser may reach: `ListSessions` returns shared sessions only, and a terminal `Hello` must
+name a shared session (no session id would create one: refused). An unknown, a private and an
+ended session are answered identically (`Error ResumeUnsupported "session unavailable"`), so
+nothing leaks about private sessions. Any other control message gets `ControlError` and the
+connection is closed. When the owner stops sharing a session (`SetShared false`) an exposed
+connection attached to it receives `Error Replaced "sharing stopped"` and is closed; the session
+itself keeps running.

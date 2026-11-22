@@ -13,6 +13,12 @@ struct ServerConfig {
     unsigned short port = 8080;
     std::string allowedOrigin = "http://localhost:8080";
     bool allowPlainHttp = false;
+    // Offer the sessions the owner marked shared in the local daemon to logged-in browsers
+    // (command line only, never from the config file: it must be a visible decision).
+    bool exposeLocalSessions = false;
+    std::string daemonSocket; // Empty: the daemon's default socket.
+    // Needed for a non-loopback listen address while local sessions are exposed.
+    bool allowRemoteListen = false;
     std::string passwordHash;
     std::string trustedProxy = "none";
     unsigned trustedProxyHops = 0;

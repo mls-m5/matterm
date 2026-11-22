@@ -3,6 +3,8 @@
 #include "control.h"
 #include "framing.h"
 #include "message.h"
+#include "paneprobe.h"
+#include "procinfo.h"
 
 #include <utility>
 
@@ -53,12 +55,6 @@ DaemonConfig defaultConfig() {
     return c;
 }
 
-std::string defaultSocketPath() {
-    const char *runtime = std::getenv("XDG_RUNTIME_DIR");
-    if (runtime && *runtime == '/') return std::string(runtime) + "/matterm/daemon.sock";
-    return "/tmp/matterm-" + std::to_string(geteuid()) + "/daemon.sock";
-}
-
 struct Daemon::Impl : std::enable_shared_from_this<Impl> {
     class Connection;
     DaemonConfig config;
@@ -88,6 +84,8 @@ struct Daemon::Impl : std::enable_shared_from_this<Impl> {
     void accept();
     void schedulePump();
     void finish(ExitReason why);
+    // A session stopped being shared: whoever the web server attached to it is dropped.
+    void cutExposed(const std::string &id);
     std::uint32_t liveSessions() const { return std::uint32_t(registry->list().size()); }
 };
 
@@ -107,7 +105,7 @@ public:
     }
 
 private:
-    enum class Mode { Unknown, Terminal, Control };
+    enum class Mode { Unknown, Exposed, Terminal, Control };
 
     void armHelloTimer() {
         timer_.expires_after(std::chrono::milliseconds(d_.config.helloTimeoutMs));
@@ -151,12 +149,23 @@ private:
         }
         if (isControlType(std::uint8_t(frame[0]))) {
             const auto request = decodeRequest(frame);
-            if (!request || !std::holds_alternative<ControlHello>(*request)) {
+            if (mode_ == Mode::Exposed) {
+                // Only the shared list is on offer here.
+                if (request && std::holds_alternative<ListSessions>(*request)) {
+                    handle(ListSessions{});
+                    return;
+                }
+                controlError(ControlErrorCode::BadMessage, "not available to an exposed connection");
+                closeAfterFlush();
+                return;
+            }
+            const bool exposed = request && std::holds_alternative<ExposedHello>(*request);
+            if (!request || (!exposed && !std::holds_alternative<ControlHello>(*request))) {
                 controlError(ControlErrorCode::BadMessage, "expected ControlHello");
                 closeAfterFlush();
                 return;
             }
-            mode_ = Mode::Control;
+            mode_ = exposed ? Mode::Exposed : Mode::Control;
             ControlWelcome w;
             w.pid = std::uint32_t(getpid());
             w.features = protocol::featureDaemon;
@@ -169,6 +178,12 @@ private:
             protocolError(protocol::ErrorCode::BadMessage, "expected Hello");
             return;
         }
+        const auto &hello = std::get<protocol::Hello>(*decoded.message);
+        if (mode_ == Mode::Exposed && !isShared(hello.sessionId)) {
+            // Unknown, private and gone look the same from outside.
+            protocolError(protocol::ErrorCode::ResumeUnsupported, "session unavailable");
+            return;
+        }
         std::weak_ptr<Connection> weak = shared_from_this();
         server::SessionRegistry::Transport transport;
         transport.send = [weak](std::string data) {
@@ -177,9 +192,17 @@ private:
         transport.close = [weak](int) {
             if (const auto s = weak.lock()) s->closeAfterFlush();
         };
+        exposedAttach_ = mode_ == Mode::Exposed;
         mode_ = Mode::Terminal; // Set first: attach may send Welcome or Error immediately.
-        attachment_ = d_.registry->attach(std::get<protocol::Hello>(*decoded.message), std::move(transport), timeNow());
+        attachment_ = d_.registry->attach(hello, std::move(transport), timeNow());
         if (!attachment_) closeAfterFlush();
+    }
+    bool isShared(const std::string &id) const {
+        if (id.empty()) return false; // An exposed connection cannot create sessions.
+        for (const auto &i : d_.registry->list()) {
+            if (i.id == id) return i.shared;
+        }
+        return false;
     }
     void control(std::string_view frame) {
         const auto request = decodeRequest(frame);
@@ -194,9 +217,11 @@ private:
         controlError(ControlErrorCode::BadMessage, "duplicate ControlHello");
         closeAfterFlush();
     }
+    void handle(const ExposedHello &) { handle(ControlHello{}); }
     void handle(const ListSessions &) {
         SessionList list;
         for (const auto &i : d_.registry->list()) {
+            if (mode_ == Mode::Exposed && !i.shared) continue;
             if (list.sessions.size() >= kMaxListed) break;
             list.sessions.push_back({i.id, i.attached, i.shared, i.outputEnd});
         }
@@ -207,7 +232,34 @@ private:
             controlError(ControlErrorCode::UnknownSession, "no such session");
             return;
         }
+        if (!m.shared) d_.cutExposed(m.id);
         handle(ListSessions{});
+    }
+    void handle(const CreateSession &m) {
+        std::string cwd;
+        struct stat st{};
+        if (frontend::plainPath(m.cwd) && ::stat(m.cwd.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) cwd = m.cwd;
+        const auto id = d_.registry->create(cwd, m.columns, m.rows, timeNow());
+        if (!id) {
+            controlError(ControlErrorCode::StartFailed, "cannot start a session");
+            return;
+        }
+        reply(SessionCreated{*id});
+    }
+    void handle(const GetSessionInfo &m) {
+        const auto ids = d_.registry->processIds(m.id);
+        if (!ids) {
+            controlError(ControlErrorCode::UnknownSession, "no such session");
+            return;
+        }
+        const frontend::LinuxProcSource source;
+        const auto state = frontend::probePane(source, ids->shell, ids->foreground);
+        SessionInfo info;
+        info.id = m.id;
+        info.cwd = state.cwd;
+        info.busy = state.busy;
+        info.command = state.command;
+        reply(info);
     }
     void handle(const GetStatus &) {
         Status s;
@@ -287,6 +339,11 @@ private:
         }
         if (closing_) kill();
     }
+    // The session this connection shows to the web server, if it is one.
+    const std::string *exposedSession() const {
+        return exposedAttach_ && attachment_ ? &attachment_->id : nullptr;
+    }
+    void cut(protocol::ErrorCode code, const char *reason) { protocolError(code, reason); }
     void closeAfterFlush() {
         if (dead_) return;
         closing_ = true;
@@ -333,6 +390,7 @@ private:
     std::function<void()> onFlushed_;
     Mode mode_ = Mode::Unknown;
     bool counted_ = false;
+    bool exposedAttach_ = false;
     bool writing_ = false;
     bool closing_ = false;
     bool dead_ = false;
@@ -383,7 +441,7 @@ bool Daemon::Impl::start(std::string &error) {
         acceptor.emplace(ioc, stream::endpoint(path));
         ::umask(old);
         socketBound = true;
-        ::chmod(path.c_str(), 0600);
+        [[maybe_unused]] const auto chmodResult = ::chmod(path.c_str(), 0600);
     }
     catch (const std::exception &e) {
         error = std::string("cannot listen on ") + path + ": " + e.what();
@@ -391,7 +449,7 @@ bool Daemon::Impl::start(std::string &error) {
     }
     registry = std::make_unique<server::SessionRegistry>(config.registry, config.process, protocol::SessionConfig{});
     pump.emplace(ioc);
-    ::signal(SIGPIPE, SIG_IGN);
+    (void)::signal(SIGPIPE, SIG_IGN);
     signals.emplace(ioc, SIGINT, SIGTERM);
     signals->async_wait([this](const boost::system::error_code &ec, int) {
         if (!ec) finish(ExitReason::Stopped);
@@ -447,6 +505,15 @@ void Daemon::Impl::schedulePump() {
         }
         schedulePump();
     });
+}
+
+void Daemon::Impl::cutExposed(const std::string &id) {
+    for (auto &w : connections) {
+        if (const auto c = w.lock()) {
+            const auto *s = c->exposedSession();
+            if (s && *s == id) c->cut(protocol::ErrorCode::Replaced, "sharing stopped");
+        }
+    }
 }
 
 void Daemon::Impl::finish(ExitReason why) {

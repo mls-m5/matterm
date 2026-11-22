@@ -11,11 +11,16 @@ enum Type : std::uint8_t {
     tSetShared = 0x42,
     tGetStatus = 0x43,
     tShutdown = 0x44,
+    tCreateSession = 0x45,
+    tGetSessionInfo = 0x46,
+    tExposedHello = 0x47,
     tControlWelcome = 0xc0,
     tSessionList = 0xc1,
     tStatus = 0xc2,
     tShutdownReply = 0xc3,
-    tControlError = 0xc4
+    tControlError = 0xc4,
+    tSessionCreated = 0xc5,
+    tSessionInfo = 0xc6
 };
 constexpr std::size_t kMaxId = 64;
 constexpr std::size_t kMaxText = 256;
@@ -52,6 +57,7 @@ private:
 };
 
 bool write(std::string &o, const ControlHello &m) { put8(o, tControlHello); put16(o, m.version); return true; }
+bool write(std::string &o, const ExposedHello &m) { put8(o, tExposedHello); put16(o, m.version); return true; }
 bool write(std::string &o, const ListSessions &) { put8(o, tListSessions); return true; }
 bool write(std::string &o, const SetShared &m) {
     put8(o, tSetShared);
@@ -61,6 +67,32 @@ bool write(std::string &o, const SetShared &m) {
 }
 bool write(std::string &o, const GetStatus &) { put8(o, tGetStatus); return true; }
 bool write(std::string &o, const Shutdown &m) { put8(o, tShutdown); put32(o, m.expectedSessions); return true; }
+bool write(std::string &o, const CreateSession &m) {
+    put8(o, tCreateSession);
+    if (!putString(o, m.cwd, kMaxPath)) return false;
+    put16(o, m.columns);
+    put16(o, m.rows);
+    return true;
+}
+bool write(std::string &o, const GetSessionInfo &m) {
+    put8(o, tGetSessionInfo);
+    return putString(o, m.id, kMaxId);
+}
+bool write(std::string &o, const SessionCreated &m) {
+    put8(o, tSessionCreated);
+    return putString(o, m.id, kMaxId);
+}
+bool write(std::string &o, const SessionInfo &m) {
+    if (m.command.size() > kMaxArguments) return false;
+    put8(o, tSessionInfo);
+    if (!putString(o, m.id, kMaxId) || !putString(o, m.cwd, kMaxPath)) return false;
+    put8(o, m.busy ? 1 : 0);
+    put8(o, std::uint8_t(m.command.size()));
+    for (const auto &a : m.command) {
+        if (!putString(o, a, kMaxArgument)) return false;
+    }
+    return true;
+}
 bool write(std::string &o, const ControlWelcome &m) {
     put8(o, tControlWelcome);
     put16(o, m.version);
@@ -117,6 +149,11 @@ std::optional<ControlRequest> decodeRequest(std::string_view bytes) {
         if (!r.get(m.version) || m.version == 0 || !r.done()) return std::nullopt;
         return m;
     }
+    case tExposedHello: {
+        ExposedHello m;
+        if (!r.get(m.version) || m.version == 0 || !r.done()) return std::nullopt;
+        return m;
+    }
     case tListSessions:
         return r.done() ? std::optional<ControlRequest>(ListSessions{}) : std::nullopt;
     case tSetShared: {
@@ -129,6 +166,19 @@ std::optional<ControlRequest> decodeRequest(std::string_view bytes) {
     case tShutdown: {
         Shutdown m;
         if (!r.get(m.expectedSessions) || !r.done()) return std::nullopt;
+        return m;
+    }
+    case tCreateSession: {
+        CreateSession m;
+        if (!r.get(m.cwd, kMaxPath) || !r.get(m.columns) || !r.get(m.rows) || m.columns == 0 || m.rows == 0 ||
+            m.columns > protocol::maxDimension || m.rows > protocol::maxDimension || !r.done()) {
+            return std::nullopt;
+        }
+        return m;
+    }
+    case tGetSessionInfo: {
+        GetSessionInfo m;
+        if (!r.get(m.id, kMaxId) || m.id.empty() || !r.done()) return std::nullopt;
         return m;
     }
     default:
@@ -178,9 +228,27 @@ std::optional<ControlReply> decodeReply(std::string_view bytes) {
     case tControlError: {
         ControlError m;
         std::uint16_t code;
-        if (!r.get(code) || code < 1 || code > 4 || !r.get(m.reason, kMaxText) || !r.done()) return std::nullopt;
+        if (!r.get(code) || code < 1 || code > 5 || !r.get(m.reason, kMaxText) || !r.done()) return std::nullopt;
         m.code = static_cast<ControlErrorCode>(code);
         return m;
+    }
+    case tSessionCreated: {
+        SessionCreated m;
+        if (!r.get(m.id, kMaxId) || m.id.empty() || !r.done()) return std::nullopt;
+        return m;
+    }
+    case tSessionInfo: {
+        SessionInfo m;
+        std::uint8_t n;
+        if (!r.get(m.id, kMaxId) || !r.get(m.cwd, kMaxPath) || !r.getBool(m.busy) || !r.get(n) || n > kMaxArguments) {
+            return std::nullopt;
+        }
+        for (std::uint8_t i = 0; i < n; ++i) {
+            std::string a;
+            if (!r.get(a, kMaxArgument)) return std::nullopt;
+            m.command.push_back(std::move(a));
+        }
+        return r.done() ? std::optional<ControlReply>(std::move(m)) : std::nullopt;
     }
     default:
         return std::nullopt;

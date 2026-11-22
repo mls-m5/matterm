@@ -439,6 +439,41 @@ bool SessionRegistry::setShared(const std::string &id, bool shared) {
     found->second->shared = shared;
     return true;
 }
+std::optional<std::string> SessionRegistry::create(const std::string &workingDirectory,
+                                                   std::uint16_t columns,
+                                                   std::uint16_t rows,
+                                                   Time now) {
+    if (!impl_->config.persistentSessions || impl_->config.replayBufferBytes == 0 ||
+        impl_->entries.size() >= impl_->config.maxSessions || columns == 0 || rows == 0 ||
+        columns > maxDimension || rows > maxDimension)
+        return std::nullopt;
+    std::string id;
+    do {
+        id = newId();
+    } while (impl_->entries.count(id) ||
+             std::any_of(impl_->tombstones.begin(),
+                         impl_->tombstones.end(),
+                         [&](const auto &t) { return t.id == id; }));
+    auto process = impl_->process;
+    process.workingDirectory = workingDirectory;
+    auto entry = std::make_shared<Entry>(id, true, impl_->config.replayBufferBytes, std::move(process));
+    if (!entry->startProcess(columns, rows))
+        return std::nullopt;
+    entry->detachedAt = now;
+    impl_->entries.emplace(id, entry);
+    if (detachedSize() > impl_->config.maxDetachedSessions) {
+        entry->stop(now);
+        return std::nullopt;
+    }
+    return id;
+}
+std::optional<SessionRegistry::ProcessIds> SessionRegistry::processIds(const std::string &id) const {
+    const auto found = impl_->entries.find(id);
+    if (found == impl_->entries.end() || found->second->closing || found->second->ended ||
+        !found->second->started)
+        return std::nullopt;
+    return ProcessIds{found->second->pty.childPid(), found->second->pty.foregroundProcessGroup()};
+}
 std::size_t SessionRegistry::size() const {
     return impl_->entries.size();
 }

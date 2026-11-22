@@ -25,13 +25,16 @@ public:
 
     enum class ColorCapability { Unspecified, TrueColor };
 
+    // `workingDirectory`: the child starts there when it can chdir into it (empty or
+    // unusable: the inherited directory).
     PtyProcess(const std::vector<std::string> &arguments,
                int columns,
                int rows,
                const std::string &term = "xterm-256color",
                ColorCapability color = ColorCapability::Unspecified,
                std::optional<std::vector<std::string>> environmentAllowList =
-                   std::nullopt);
+                   std::nullopt,
+               const std::string &workingDirectory = {});
     ~PtyProcess();
     PtyProcess(const PtyProcess &) = delete;
     PtyProcess &operator=(const PtyProcess &) = delete;

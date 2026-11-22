@@ -1,5 +1,7 @@
 #include "server.h"
+#include "localsessions.h"
 #include "proxysource.h"
+#include "socketpath.h"
 #include <algorithm>
 #include <array>
 #include <boost/asio.hpp>
@@ -74,8 +76,11 @@ std::map<std::string, StaticFile> loadStatic(const std::string &directory) {
         throw std::runtime_error("Static directory has no index.html");
     return files;
 }
+class Connection;
 struct Shared {
     ServerConfig config;
+    // Browser connections bridged to a shared daemon session, by daemon session id.
+    std::map<std::string, std::weak_ptr<Connection>> bridges;
     std::map<std::string, StaticFile> files;
     PasswordVerifier password;
     ProxySource proxy;
@@ -93,6 +98,10 @@ struct Shared {
         std::array<char, crypto_shorthash_BYTES * 2 + 1> text{};
         sodium_bin2hex(text.data(), text.size(), digest.data(), digest.size());
         return text.data();
+    }
+    std::string daemonSocket() const {
+        return config.daemonSocket.empty() ? mtd::defaultSocketPath()
+                                           : config.daemonSocket;
     }
     explicit Shared(ServerConfig cfg)
         : config(std::move(cfg))
@@ -303,6 +312,24 @@ private:
                 response(http::status::ok, "Sessions closed\n");
             return;
         }
+        if (request.method() == http::verb::post &&
+            request.target() == "/local-sessions") {
+            // POST so that browsers send an Origin header (checked above).
+            const auto token =
+                request.count(http::field::cookie) == 1
+                    ? sessionCookie(view(request[http::field::cookie]))
+                    : std::nullopt;
+            if (!token || !shared_->sessions.valid(*token)) {
+                response(http::status::unauthorized, "Unauthorized\n");
+                return;
+            }
+            if (!shared_->config.exposeLocalSessions) {
+                response(http::status::not_found, "Not found\n");
+                return;
+            }
+            listLocalSessions();
+            return;
+        }
         if (request.method() == http::verb::get && request.target() == "/ws" &&
             ws::is_upgrade(request)) {
             if (request.count(http::field::cookie) != 1 ||
@@ -385,13 +412,20 @@ private:
                     beast::buffers_to_string(self->buffer_.data());
                 self->buffer_.consume(self->buffer_.size());
                 try {
-                    if (self->attachment_) {
+                    if (self->bridge_) {
+                        self->bridge_->send(bytes);
+                    }
+                    else if (self->attachment_) {
                         self->shared_->registry.onMessage(
                             *self->attachment_, bytes, timeNow());
                     }
                     else {
                         const auto decoded = protocol::decodeClient(bytes);
-                        if (!decoded ||
+                        if (decoded && std::holds_alternative<protocol::Hello>(*decoded.message) &&
+                            std::get<protocol::Hello>(*decoded.message).sessionId.rfind("local:", 0) == 0) {
+                            self->startBridge(std::get<protocol::Hello>(*decoded.message));
+                        }
+                        else if (!decoded ||
                             !std::holds_alternative<protocol::Hello>(
                                 *decoded.message)) {
                             self->protocolError(protocol::ErrorCode::BadMessage,
@@ -440,6 +474,115 @@ private:
                 if (!self->closing_ && !self->dead_)
                     self->read();
             });
+    }
+    static bool plainId(const std::string &id) {
+        return !id.empty() && id.size() <= protocol::maxSessionIdSize &&
+               std::all_of(id.begin(), id.end(), [](unsigned char c) {
+                   return std::isalnum(c) || c == '_' || c == '-';
+               });
+    }
+    // POST /local-sessions: the shared sessions of the local daemon, as JSON.
+    void listLocalSessions() {
+        const auto path = shared_->daemonSocket();
+        listSharedSessions(
+            socket_.get_executor(),
+            path,
+            std::chrono::milliseconds(2000),
+            [self = shared_from_this()](
+                std::optional<std::vector<LocalSessionInfo>> sessions) {
+                if (!sessions) {
+                    self->response(http::status::bad_gateway,
+                                   "Local daemon unavailable\n");
+                    return;
+                }
+                std::string body = "{\"sessions\":[";
+                bool first = true;
+                for (const auto &s : *sessions) {
+                    if (!plainId(s.id))
+                        continue;
+                    body += (first ? "" : ",");
+                    body += "{\"id\":\"" + s.id + "\",\"attached\":" +
+                            (s.attached ? "true" : "false") + "}";
+                    first = false;
+                }
+                body += "]}\n";
+                self->response(http::status::ok,
+                               std::move(body),
+                               {},
+                               0,
+                               "application/json");
+            });
+    }
+    // The browser asked for "local:<id>": take over a shared session of the local daemon.
+    // The daemon decides what is visible; this connection only forwards frames both ways.
+    void startBridge(protocol::Hello hello) {
+        const auto refuse = [this] {
+            protocolError(protocol::ErrorCode::ResumeUnsupported,
+                          "session unavailable");
+        };
+        hello.sessionId.erase(0, 6);
+        if (!shared_->config.exposeLocalSessions || !plainId(hello.sessionId)) {
+            refuse();
+            return;
+        }
+        const auto id = hello.sessionId;
+        std::shared_ptr<Connection> previous;
+        if (const auto found = shared_->bridges.find(id);
+            found != shared_->bridges.end())
+            previous = found->second.lock();
+        const bool transfer = previous && previous->lease_;
+        if (!shared_->sessions.claimGeneration(generation_, transfer)) {
+            protocolError(protocol::ErrorCode::LimitExceeded, "upgrade limit");
+            return;
+        }
+        lease_ = true;
+        if (!authenticated_) {
+            authenticated_ = true;
+            --shared_->unauthenticated;
+        }
+        if (previous)
+            previous->protocolError(protocol::ErrorCode::Replaced,
+                                    "session taken over");
+        shared_->bridges[id] = shared_from_this();
+        bridgeId_ = id;
+        // Who took which terminal, never what was on the screen.
+        std::clog << "Local session take-over attempt session=" << id
+                  << " source=" << shared_->auditSource(source_) << '\n';
+        std::weak_ptr<Connection> weak = shared_from_this();
+        bridge_ = DaemonConnection::open(
+            socket_.get_executor(),
+            shared_->daemonSocket(),
+            [weak](std::string frame) {
+                if (const auto s = weak.lock())
+                    s->fromDaemon(std::move(frame));
+            },
+            [weak] {
+                if (const auto s = weak.lock())
+                    s->bridgeClosed();
+            });
+        std::string bytes;
+        protocol::encode(protocol::ClientMessage{hello}, bytes);
+        bridge_->send(bytes);
+    }
+    void fromDaemon(std::string frame) {
+        bridgeAnswered_ = true;
+        if (!frame.empty() && std::uint8_t(frame[0]) == 0x85) {
+            // The daemon explains why it ends the session: keep the matching close code.
+            const auto decoded = protocol::decodeServer(frame);
+            if (decoded && std::holds_alternative<protocol::Error>(*decoded.message))
+                bridgeCloseCode_ = protocol::closeCodeFor(
+                    std::get<protocol::Error>(*decoded.message).code);
+        }
+        send(std::move(frame));
+    }
+    void bridgeClosed() {
+        if (closing_ || dead_)
+            return;
+        if (!bridgeAnswered_)
+            protocolError(protocol::ErrorCode::Internal,
+                          "local sessions unavailable");
+        else
+            close(bridgeCloseCode_);
     }
     void releaseLease() {
         if (lease_) {
@@ -506,6 +649,19 @@ private:
         dead_ = true;
         if (attachment_)
             shared_->registry.detach(*attachment_, timeNow());
+        if (bridge_) {
+            const auto bridge = std::move(bridge_);
+            bridge_.reset();
+            bridge->close();
+        }
+        if (!bridgeId_.empty()) {
+            const auto found = shared_->bridges.find(bridgeId_);
+            if (found != shared_->bridges.end()) {
+                const auto owner = found->second.lock();
+                if (!owner || owner.get() == this)
+                    shared_->bridges.erase(found);
+            }
+        }
         releaseLease();
         timer_.cancel();
         beast::error_code ignored;
@@ -527,7 +683,7 @@ private:
                 self->close(1008); // Cookie rotation/expiry detaches, never
                                    // transfers old rights.
             }
-            else if (!self->attachment_ &&
+            else if (!self->attachment_ && !self->bridge_ &&
                      Clock::now() >= self->helloDeadline_) {
                 self->protocolError(protocol::ErrorCode::Timeout,
                                     "expected Hello");
@@ -542,6 +698,10 @@ private:
     http::request_parser<http::string_body> parser_;
     std::optional<http::response<http::string_body>> response_;
     std::optional<SessionRegistry::Attachment> attachment_;
+    std::shared_ptr<DaemonConnection> bridge_;
+    std::string bridgeId_;
+    bool bridgeAnswered_ = false;
+    int bridgeCloseCode_ = 1000;
     std::deque<std::string> queue_;
     std::size_t queuedBytes_ = 0;
     std::string source_;
@@ -578,6 +738,20 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
                 std::string::npos ||
             !config.maxConnections || !config.maxUnauthenticated)
             throw std::invalid_argument("Invalid server configuration/origin");
+        if (config.exposeLocalSessions) {
+            if (!address.is_loopback() && !config.allowRemoteListen)
+                throw std::invalid_argument(
+                    "--expose-local-sessions beyond loopback needs "
+                    "--allow-remote-listen");
+            std::clog << "matterm-server: shared sessions of the local daemon ("
+                      << (config.daemonSocket.empty() ? mtd::defaultSocketPath()
+                                                      : config.daemonSocket)
+                      << ") are offered to logged-in browsers\n";
+            if (!address.is_loopback())
+                std::clog << "WARNING: local terminals are reachable from the "
+                             "network (--allow-remote-listen); anyone with the "
+                             "password gets a shell as you\n";
+        }
         if (config.trustedProxy == "any")
             std::clog << "WARNING: trusted_proxy=any requires network "
                          "isolation; only the proxy may reach this port\n";

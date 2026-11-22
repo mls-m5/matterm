@@ -58,6 +58,19 @@ public:
     std::vector<Info> list() const;
     // Marks a live session shared or private. False for an unknown or ending session.
     bool setShared(const std::string &id, bool shared);
+    // Starts a persistent session nobody is attached to yet (the client then attaches
+    // with Hello{sessionId}). `workingDirectory` empty: the daemon's own. Nullopt when the
+    // registry is full, cannot persist sessions, or the process did not start.
+    std::optional<std::string> create(const std::string &workingDirectory,
+                                      std::uint16_t columns,
+                                      std::uint16_t rows,
+                                      protocol::Time now);
+    // Process ids of a live session, for asking /proc what it runs.
+    struct ProcessIds {
+        int shell = 0;
+        int foreground = 0;
+    };
+    std::optional<ProcessIds> processIds(const std::string &id) const;
     std::size_t size() const;
     std::size_t detachedSize() const;
     std::size_t replayCost() const;
