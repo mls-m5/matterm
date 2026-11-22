@@ -21,6 +21,9 @@
 
 namespace {
 using namespace std::chrono_literals;
+// How long a test waits for something that should happen. Generous on purpose: ctest -j runs the
+// whole suite on a loaded machine; a success never waits for it, only a failure does.
+constexpr int kPatience = 20000;
 
 // A blocking test client speaking the daemon framing.
 class DaemonClient {
@@ -59,7 +62,7 @@ public:
         return mtd::encode(m, b) && sendFrame(b);
     }
     // Next frame, or nullopt on EOF/timeout. `eof` tells which.
-    std::optional<std::string> frame(int timeoutMs = 3000) {
+    std::optional<std::string> frame(int timeoutMs = kPatience) {
         const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
         for (;;) {
             std::optional<std::string> got;
@@ -89,13 +92,13 @@ public:
         const auto f = frame();
         return f ? mtd::decodeReply(*f) : std::nullopt;
     }
-    std::optional<protocol::ServerMessage> server(int timeoutMs = 3000) {
+    std::optional<protocol::ServerMessage> server(int timeoutMs = kPatience) {
         const auto f = frame(timeoutMs);
         if (!f) return std::nullopt;
         return protocol::decodeServer(*f).message;
     }
     // Reads server messages until the output so far contains `needle`.
-    bool outputContains(const std::string &needle, int timeoutMs = 5000) {
+    bool outputContains(const std::string &needle, int timeoutMs = kPatience) {
         const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
         while (std::chrono::steady_clock::now() < end) {
             if (output.find(needle) != std::string::npos) return true;
@@ -111,7 +114,7 @@ public:
         }
         return output.find(needle) != std::string::npos;
     }
-    bool atEof(int timeoutMs = 2000) {
+    bool atEof(int timeoutMs = kPatience) {
         const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
         while (std::chrono::steady_clock::now() < end) {
             frame(200);

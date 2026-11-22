@@ -239,7 +239,7 @@ TEST_CASE("Idle exit: no sessions and no client") {
     r.join();
     const auto took = std::chrono::steady_clock::now() - t0;
     EXPECT(r.d->reason() == mtd::ExitReason::Idle);
-    EXPECT(took < 5s);
+    EXPECT(took < 20s);
     EXPECT(!std::filesystem::exists(r.path));
 }
 

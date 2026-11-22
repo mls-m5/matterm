@@ -337,3 +337,65 @@ foreground, which is the same as the scrollbar thumb at rest.
 line at width 10 gives rows 0 and 1 marked, row 2 not; an erase or a hard newline clears the
 mark). `sdlbackend` pixel test: with the mark on, pixels in the gutter beside a wrapped row
 differ from an unwrapped row and no cell pixel changes.
+
+## Reflow measured against keep-clipped (2026-11-22, agent2; recommendation)
+
+**What was measured.** `bench/reflowbench.cpp` (`matterm-reflow-bench`, Release, one process, this
+machine) is a prototype of history reflow on the real storage (`TerminalMemory` rows plus the model's
+per-row soft-wrap flags): join rows across `softWrap`, drop trailing default blanks of each logical line
+(padding rule: rows have no written extent), lay the line out again, set the flags. It is not wired into
+`TerminalModel`: no cursor, saved cursor, viewport anchor, selection or alternate-screen handling. It
+checks the round trip (narrow, widen: text and flags restored exactly: yes in all runs). History of 200-column
+rows; "short" = every logical line fits one row, "mixed" = 70% short, 25% up to 1.5 rows, 5% up to 5 rows,
+"long" = 0.5 to 3.5 rows.
+
+| history rows | width change | mix | narrow | widen back | drag step (one column, whole history re-laid) |
+|---|---|---|---|---|---|
+| 1000 | 200 -> 100 | short / mixed / long | 4.4 / 1.5 / 2.5 ms | 10.8 / 6.7 / 14.9 ms | 2.8 / 3.3 / 4.1 ms |
+| 10000 | 200 -> 100 | short / mixed / long | 44.9 / 17.9 / 15.9 ms | 78.4 / 73.9 / 87.1 ms | 35 / 33 / 30 ms |
+| 10000 | 200 -> 66 | short / mixed / long | 23.3 / 16.8 / 10.0 ms | 58.6 / 66.0 / 32.0 ms | 23 / 24 / 21 ms |
+
+Row counts after narrowing 10000 rows to 100 columns: 13 000 to 18 000 (the saved-row limit then trims the
+oldest). For comparison, the keep-clipped prototype (table above, same window and history) does a
+10000-row narrow+wide pair in 0.2 ms (stored width enough) to 9 ms (window was wider once), a drag step in
+0.24 to 0.45 ms; clipping as it is today 10 ms and 5 to 7 ms.
+
+**Steady state (owner's first priority).**
+- Reflow needs nothing on the write path: the soft-wrap flags are already maintained by the writer, and the
+  padding rule needs no written extent. Steady-state cost = main (0%), memory per row unchanged (width x 12
+  bytes), plus the row count growth only while narrow.
+- Keep-clipped adds a hook to the mutable `TerminalMemory::at()` (measured earlier on `agent2-keepclipped`,
+  13ac6ef: about +6 to 7% on the write-heavy terminal benchmark after the one-counter optimisation, +9 to 12%
+  before) and stores up to `keptColumns` (512) cells per row once the window was wide: 12 bytes x rows x
+  widest width, 59 MiB per pane at 10000 rows and 512 columns.
+
+**Resize cost.** A single reflow of a full 10000-row history is 15 to 90 ms: inside "milliseconds to a short
+pause", but a divider drag re-laying everything at every step (about 30 ms x steps) is not. Keep-clipped
+handles a drag in well under a millisecond per step. So reflow needs:
+1. coalescing: re-lay only after the width has been stable for ~100 ms (and once more on release), during the
+   drag draw the old rows clipped; or
+2. lazy reflow: re-lay the live screen and the newest ~1000 rows at once (3 to 4 ms) and the rest in the
+   background in slices (or on the first scroll above them), anchored by logical line.
+The prototype is a straightforward double loop; a reusable line buffer, no `FChar` default-blank test per
+cell and slot-wise copies would likely halve it, but that is not measured.
+
+**Recommendation.**
+1. **Go for reflow, skip keep-clipped.** It matches the owner's goal (GNOME Terminal), costs nothing in the
+   steady state, and its drag cost is a solvable scheduling problem, while keep-clipped taxes every write and
+   still cuts text on screen.
+2. **Scope step 1 to the saved history only** (rows above the live screen), as already proposed: the live screen
+   and the alternate screen stay clip/pad, programs redraw them after SIGWINCH, the shell-redraw artifacts of
+   reflowing the live screen are avoided. Text that scrolls into history after a narrowing is already clipped
+   (accepted; it is the same as today for the live screen).
+3. **Prerequisites, in this order:** (a) soft-wrap flags survive width changes on the primary screen (small, from
+   the keep-clipped prototype, mergeable alone: `13ac6ef`/`ca6e270` terminalmodel part); (b) an audit test that
+   every wrapping path sets and clears `softWrap` (autowrap, deferred wrap, ICH/DCH, scroll regions, ED/EL);
+   (c) the padding rule written down: trailing default-styled blanks of a logical line are padding, a line the
+   user ended with spaces loses them on reflow (cosmetic; wrapped rows are never trimmed).
+4. **Then** integrate with the model (cursor mapping is not needed for history-only reflow; the viewport anchor
+   and selection/link invalidation are), with the coalescing or lazy scheme above, and re-measure with a Release
+   build of the integrated model against `main` (write throughput, scroll of a full history, memory per row).
+5. Do not merge `agent2-keepclipped` unless the owner wants the stopgap before reflow.
+
+Limits of these numbers: one machine, synthetic text, the algorithm outside the model, no allocation-failure
+rollback measured (the new history is built beside the old, so peak memory is 2x the history for the duration).

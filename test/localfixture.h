@@ -49,6 +49,7 @@ protocol::Hello localHello(const std::string &id) {
 // Next server message, or nullopt when the connection ends.
 std::optional<protocol::ServerMessage> next(Client &c) {
     try {
+        c.socket.next_layer().expires_after(std::chrono::seconds(30)); // A stuck read fails, not hangs.
         return c.read();
     }
     catch (const std::exception &) {
