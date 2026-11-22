@@ -171,6 +171,13 @@ if(BUILD_TESTING)
     target_link_libraries(terminalview_test PRIVATE matterm::transport matterm::vt matterm::terminal)
     add_test(NAME terminal_view COMMAND terminalview_test)
 
+    if(UNIX)
+        add_executable(daemonlink_test daemonlink_test.cpp mls-unit-test/test_main.cpp)
+        target_include_directories(daemonlink_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+        target_link_libraries(daemonlink_test PRIVATE matterm::transport matterm::unixchannel matterm::vt matterm::terminal)
+        add_test(NAME daemon_link COMMAND daemonlink_test)
+    endif()
+
     add_executable(scriptedlink_test scriptedlink_test.cpp mls-unit-test/test_main.cpp)
     target_link_libraries(scriptedlink_test PRIVATE matterm::transport matterm::vt)
     add_test(NAME scripted_link COMMAND scriptedlink_test)
