@@ -199,3 +199,43 @@ Checked with `test/tabs_stress_test.cpp` (real shells) and the sanitizer build:
   the child only closes descriptors and execs, but a reaper thread or a helper process
   started early would be safer. Hidden panes are parsed on the GUI thread (up to
   64 KiB per pane per frame), so many busy panes cost frame time.
+
+## 8. Discoverability, overlays, settings and a small cell UI toolkit (proposal, 2026-11-22)
+
+The owner finds the key bindings hard to remember. Nothing here is decided or built.
+
+- **One command registry.** `Command` plus metadata (name, short description, default
+  shortcut per platform) as the single source for the key tables, the palette, the
+  help view and the docs. Rebinding later is a setting on top of it.
+- **Ways to find a command**, cheapest first:
+  1. *Which-key hint:* after the prefix (browser) a small box appears after about half
+     a second and lists the next keys (`c` new tab, `%` split ...). Nothing to open.
+  2. *Help view:* prefix `?` (desktop: a shortcut) lists all commands and keys, scrollable.
+  3. *Command palette:* a text field with a filtered list of commands and their keys;
+     Enter runs the command. Desktop Ctrl+Shift+P; browser prefix `:`. Also the way
+     to open a tab or split without remembering anything.
+  4. *Mouse menu:* a button at the end of the tab strip (and right-click) with the
+     same list, shortcuts shown beside each entry.
+- **Overlays need a layer stack, not special rendering.** An overlay is a cell grid drawn
+  by one more `render(frame, PaneArea)` after the panes (the backend already draws a
+  frame into a rectangle), with its own border, over a cleared area. Input goes to the
+  topmost layer first: overlay, then strip/dividers/scrollbars, then the pane. The
+  layer stack lives in `WorkspaceView`; the frame signature must include the overlay.
+- **A small cell UI toolkit follows naturally** (SDL-free, in `src/frontend/ui/`, tested
+  without a window): label, text input, list with a filter, checkbox, choice, button,
+  vertical/horizontal layout, a focus ring, key and mouse events in, actions out, a
+  `CellBuffer` out. Start with only what the palette and the help view need (text
+  input, list, scrollable text), and add widgets when the settings view needs them.
+  It can be reused by Mattrix OS programs and the chat screen later. This is not a
+  general TUI framework: no terminal output backend, no theming engine at first.
+- **Settings view** needs a settings model first: what can be set (font size, prefix
+  key, smooth cursor, sound, palette, scrollback), where it is stored (desktop: a
+  config file; browser: localStorage) and how it is validated. The view is then a
+  list of widgets over that model. Do the model and the palette before the view.
+- **Suggested order:** command registry, which-key hint, layer stack, palette and help
+  view (this forces text input, list and scroll), mouse menu, settings model, settings view.
+
+Open items noted by the owner:
+- The scrollbar of the left pane (in the divider gutter) is hard to see: in the browser
+  run of 2026-11-22 it is a thin sliver (about 3 px) next to the divider and takes
+  the divider's grey, while the pane at the window edge has the full 12 px bar.
