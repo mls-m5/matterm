@@ -26,6 +26,8 @@ terminals alive when the window closes), a "Mattrix OS" demo (fakeos) and a chat
   secrets. No licence for now.
 - No solutions that need `.bashrc` edits.
 
+Dependencies and install commands: `docs/DEPENDENCIES.md`.
+
 ## Verification recipe (what "green" means)
 
 ```
