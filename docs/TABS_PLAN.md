@@ -766,3 +766,31 @@ auto`); the question for the owner is which of these he wants.
 - Tests: `test/windowhit_test.cpp` (widths, the ring of the border for 1 and 4 px at many sizes,
   the probe's rectangles). The SDL drawing of the probe was run only with the dummy driver
   (software variant ok, the others report why they are not available).
+
+### 16.5 Round 4 (owner, 2026-11-22): the border outside the content, strip colour, resize pointer
+
+Dragging to resize works now. Decided and done:
+
+- **The border does not cover content** (this replaces the overdraw of 16.4). `windowInset(own,
+  maximised)` is `{left 4, right 4, top 0, bottom 4}` px (`kBorderWidth`); the view (strip, panes,
+  dividers, layers) is laid out in the window minus the inset (`updateWindow` gives the view the
+  smaller size, drawing adds the left inset, mouse coordinates subtract it, `dragSpans` takes the
+  offset). No border at the top: the strip is the top edge. Border only left, right and bottom, not
+  when maximised, not with the system frame. A test checks that the pixels the border covers are
+  exactly the pixels the view does not (`borderRects` and `windowInset`).
+- **Grip.** The grip stays 8 px (`kResizeEdge`) and corners 16 px (`kResizeCorner`): the outer 4 px
+  are the visible border, **the inner 4 px are grip only (inside the content, not drawn)**. The top
+  8 px of the window are grip too although nothing is drawn there (the strip row's top).
+- **Colour.** `borderColor` is `tabstrip_detail::colors(palette).stripBg`, the very value the strip
+  fills its gaps with, where the window is dragged; no mixing, no brighter outer pixel (a test
+  compares it with the background of the strip's drag cells).
+- **Pointer.** Over the grip the pointer shows the system resize shapes (`SDL_SYSTEM_CURSOR_SIZEWE`,
+  `SIZENS`, `SIZENWSE`, `SIZENESW`), created once. `cursorShapeFor(zone)` (pure, tested) maps the
+  same `classifyWindowPoint` the hit test uses, so a resize shape shows exactly where a press
+  resizes; not in a maximised window (no resize zones there). Leaving the zone, or the window
+  (`SDL_WINDOWEVENT_LEAVE`), restores the cursor the program used (arrow or divider shape).
+  If SDL gives no system cursor (a Wayland session without a cursor theme) one line is written to
+  stderr and the pointer stays an arrow.
+- Test hook: `MATTERM_ASSUME_HIT_TEST=1` takes the own frame as if the hit test worked (the dummy
+  driver has none), so the ctest `pty_frontend_tabs_smoke_borderless` runs the whole tabs smoke
+  script with the inset layout.

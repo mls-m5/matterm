@@ -143,49 +143,114 @@ TEST_CASE("The borders are as wide as decided: 4 px visible, 8 px grip, 16 px co
     EXPECT_GT(kResizeEdge, kBorderWidth); // The grip is wider than what is drawn, never narrower.
 }
 
-TEST_CASE("A border is drawn round a normal window and not round a maximised one") {
-    for (const int thickness : {1, 4}) {
-        for (const auto &size : {std::pair{10, 7}, std::pair{1, 1}, std::pair{2, 2}, std::pair{3, 50}, std::pair{8, 8},
-                                 std::pair{9, 9}, std::pair{1000, 600}}) {
-            const auto ring = borderRects(size.first, size.second, false, thickness);
-            // The rectangles cover every pixel of the outermost ring once and nothing inside.
-            for (int y = 0; y < size.second; ++y) {
-                for (int x = 0; x < size.first; ++x) {
-                    int covered = 0;
-                    for (const auto &r : ring) {
-                        if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) ++covered;
-                    }
-                    const bool edge = x < thickness || y < thickness || x >= size.first - thickness ||
-                                      y >= size.second - thickness;
-                    EXPECT_EQ(covered, (edge ? 1 : 0));
+TEST_CASE("The border is on the left, right and bottom only, and never over the view") {
+    for (const auto &size : {std::pair{10, 7}, std::pair{1, 1}, std::pair{2, 2}, std::pair{3, 50}, std::pair{8, 8},
+                             std::pair{9, 9}, std::pair{1000, 600}}) {
+        const int w = size.first, h = size.second;
+        const auto ring = borderRects(w, h, false);
+        const WindowInset inset = windowInset(true, false);
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                int covered = 0;
+                for (const auto &r : ring) {
+                    if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) ++covered;
                 }
-            }
-            for (const auto &r : ring) {
-                EXPECT(r.w > 0 && r.h > 0 && r.x >= 0 && r.y >= 0 && r.x + r.w <= size.first &&
-                       r.y + r.h <= size.second);
+                const bool edge = x < kBorderWidth || x >= w - kBorderWidth || y >= h - kBorderWidth;
+                EXPECT_EQ(covered, (edge ? 1 : 0)); // Every border pixel once, nothing else, no top edge.
+                // The view is what the border leaves: the same pixels, not one more or less.
+                const bool inView = x >= inset.left && x < w - inset.right && y >= inset.top && y < h - inset.bottom;
+                EXPECT_EQ(inView, !edge);
             }
         }
+        for (const auto &r : ring) {
+            EXPECT(r.w > 0 && r.h > 0 && r.x >= 0 && r.y >= 0 && r.x + r.w <= w && r.y + r.h <= h);
+        }
     }
-    EXPECT_EQ(borderRects(1000, 600, false).size(), std::size_t(4));
+    EXPECT_EQ(borderRects(1000, 600, false).size(), std::size_t(3));
     EXPECT(borderRects(1000, 600, true).empty());
     EXPECT(borderRects(0, 0, false).empty());
     EXPECT(borderRects(-5, 10, false).empty());
     EXPECT(borderRects(100, 100, false, 0).empty());
-    // A colour from the theme: between the background and the foreground, discreet, not either.
+    // The top of the window is the strip: no inset there, ever.
+    EXPECT_EQ(windowInset(true, false).top, 0);
+    EXPECT_EQ(windowInset(true, false).left, kBorderWidth);
+    EXPECT_EQ(windowInset(true, false).right, kBorderWidth);
+    EXPECT_EQ(windowInset(true, false).bottom, kBorderWidth);
+    // No inset with the system frame, and none when maximised.
+    const WindowInset none = windowInset(false, false);
+    EXPECT(none.left == 0 && none.right == 0 && none.top == 0 && none.bottom == 0);
+    const WindowInset maximised = windowInset(true, true);
+    EXPECT(maximised.left == 0 && maximised.right == 0 && maximised.top == 0 && maximised.bottom == 0);
+}
+
+TEST_CASE("The border has exactly the colour of the strip where the window is dragged") {
     const Palette palette;
-    const Rgb8 c = borderColor(palette);
-    const auto same = [](Rgb8 a, Rgb8 b) { return a.r == b.r && a.g == b.g && a.b == b.b; };
-    EXPECT(!same(c, palette.background) && !same(c, palette.foreground));
-    EXPECT(c.r >= std::min(palette.background.r, palette.foreground.r) &&
-           c.r <= std::max(palette.background.r, palette.foreground.r));
-    // The outermost pixel is brighter than the band (when the text is brighter than the background).
-    const Rgb8 edge = borderEdgeColor(palette);
-    EXPECT_GT(int(edge.r) + int(edge.g) + int(edge.b) - (int(c.r) + int(c.g) + int(c.b)) +
-                  (palette.foreground.r > palette.background.r ? 0 : 1000),
-              0);
-    // The border is part of the window: the edge pixel it covers is still a resize zone.
+    const Rgb8 border = borderColor(palette);
+    std::vector<TabInfo> tabs(1);
+    tabs[0].title = "a";
+    tabs[0].active = true;
+    const TabStrip strip = buildTabStrip(tabs, 80, Palette(), 0, true, ShareButton{true, 0}, WindowButtons{true, false});
+    const auto spans = dragSpans(strip, 8, 1.0);
+    EXPECT(!spans.empty());
+    for (const auto &span : spans) {
+        for (int px = span.begin; px < span.end; px += 8) {
+            const Rgb8 bg = strip.cells[std::size_t(px / 8)].background;
+            EXPECT(bg.r == border.r && bg.g == border.g && bg.b == border.b);
+        }
+    }
+}
+
+TEST_CASE("The grip is the 4 px of border and 4 px of content: the border is not the whole grip") {
+    EXPECT_EQ(kResizeEdge, kBorderWidth + 4);
     WindowGeometry g = window();
-    EXPECT(classifyWindowPoint(g, 0, 300) == Zone::ResizeLeft);
+    const WindowInset inset = windowInset(true, false);
+    // The first content pixel (just inside the border) still resizes.
+    EXPECT(classifyWindowPoint(g, inset.left, 300) == Zone::ResizeLeft);
+    EXPECT(classifyWindowPoint(g, kResizeEdge, 300) == Zone::Normal);
+}
+
+TEST_CASE("The pointer shows the resize shape the zone asks for") {
+    EXPECT(cursorShapeFor(Zone::Normal) == CursorShape::Default);
+    EXPECT(cursorShapeFor(Zone::Drag) == CursorShape::Default);
+    EXPECT(cursorShapeFor(Zone::ResizeLeft) == CursorShape::ResizeEastWest);
+    EXPECT(cursorShapeFor(Zone::ResizeRight) == CursorShape::ResizeEastWest);
+    EXPECT(cursorShapeFor(Zone::ResizeTop) == CursorShape::ResizeNorthSouth);
+    EXPECT(cursorShapeFor(Zone::ResizeBottom) == CursorShape::ResizeNorthSouth);
+    EXPECT(cursorShapeFor(Zone::ResizeTopLeft) == CursorShape::ResizeNorthwestSoutheast);
+    EXPECT(cursorShapeFor(Zone::ResizeBottomRight) == CursorShape::ResizeNorthwestSoutheast);
+    EXPECT(cursorShapeFor(Zone::ResizeTopRight) == CursorShape::ResizeNortheastSouthwest);
+    EXPECT(cursorShapeFor(Zone::ResizeBottomLeft) == CursorShape::ResizeNortheastSouthwest);
+    // The same function the hit test uses: every resize zone of a real window gives a resize shape,
+    // the handle and the inside give the default; a maximised window has no resize shape anywhere.
+    WindowGeometry g = window();
+    for (int y = 0; y < g.height; y += 3) {
+        for (int x = 0; x < g.width; x += 3) {
+            const Zone z = classifyWindowPoint(g, x, y);
+            EXPECT((cursorShapeFor(z) != CursorShape::Default) == (z != Zone::Normal && z != Zone::Drag));
+        }
+    }
+    g.maximized = true;
+    for (int y = 0; y < g.height; y += 7) {
+        for (int x = 0; x < g.width; x += 7) {
+            EXPECT(cursorShapeFor(classifyWindowPoint(g, x, y)) == CursorShape::Default);
+        }
+    }
+}
+
+TEST_CASE("The drag map follows the view when it is moved right by the border") {
+    std::vector<TabInfo> tabs(1);
+    tabs[0].title = "a";
+    const TabStrip strip = buildTabStrip(tabs, 80, Palette(), 0, true, ShareButton{true, 0}, WindowButtons{true, false});
+    const auto plain = dragSpans(strip, 8, 1.0);
+    const auto moved = dragSpans(strip, 8, 1.0, kBorderWidth);
+    EXPECT_EQ(plain.size(), moved.size());
+    for (std::size_t i = 0; i < plain.size(); ++i) {
+        EXPECT_EQ(moved[i].begin, plain[i].begin + kBorderWidth);
+        EXPECT_EQ(moved[i].end, plain[i].end + kBorderWidth);
+    }
+    // High DPI: the offset is in drawable pixels like the cells.
+    const auto half = dragSpans(strip, 8, 2.0, 8);
+    EXPECT_EQ(half.front().begin, (plain.front().begin + 8) / 2);
 }
 
 TEST_CASE("Every pixel of the edge band outside the strip handle resizes, whatever the size") {

@@ -616,7 +616,10 @@ int runPtyFrontend(const char *font,
     if (daemonOptions.borderless) {
         // Edge resizing through the hit test needs a resizable window (Wayland ignores it otherwise).
         SDL_SetWindowResizable(window.get(), SDL_TRUE);
-        const bool installed = borderless::install(window.get(), hitState) == 0;
+        // MATTERM_ASSUME_HIT_TEST=1 (self-tests under the dummy video driver, which has no hit test)
+        // takes the own frame as if the hit test had worked, so the border and inset code runs.
+        const char *assume = std::getenv("MATTERM_ASSUME_HIT_TEST");
+        const bool installed = borderless::install(window.get(), hitState) == 0 || (assume && *assume == '1');
         const frontend::FrameChoice frame =
             frontend::chooseFrame(true, installed, installed ? std::string() : std::string(SDL_GetError()));
         ownFrame = frame.mode == frontend::FrameMode::Own;
@@ -678,6 +681,40 @@ int runPtyFrontend(const char *font,
     const CursorPtr rowsCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS));
     using Cursor = MouseResult::Cursor;
     Cursor shownCursor = Cursor::Default;
+    // The pointer over the edges of a borderless window: system cursors, made once. Where the
+    // desktop has no cursor theme SDL may give none; then the pointer simply stays an arrow.
+    CursorPtr edgeCursors[4];
+    frontend::CursorShape edgeShape = frontend::CursorShape::Default;
+    if (ownFrame) {
+        const SDL_SystemCursor ids[4] = {SDL_SYSTEM_CURSOR_SIZEWE, SDL_SYSTEM_CURSOR_SIZENS,
+                                         SDL_SYSTEM_CURSOR_SIZENWSE, SDL_SYSTEM_CURSOR_SIZENESW};
+        for (int i = 0; i < 4; ++i) {
+            edgeCursors[i].reset(SDL_CreateSystemCursor(ids[i]));
+            if (!edgeCursors[i]) {
+                std::cerr << "matterm: no resize pointer shape from the desktop (" << SDL_GetError()
+                          << "); the pointer stays an arrow at the window edges\n";
+                break;
+            }
+        }
+    }
+    const auto appCursor = [&]() -> SDL_Cursor * {
+        return shownCursor == Cursor::ResizeColumns ? columnsCursor.get()
+               : shownCursor == Cursor::ResizeRows  ? rowsCursor.get()
+                                                    : arrowCursor.get();
+    };
+    // Same classification as the hit test, so what shows a resize pointer is what resizes.
+    const auto showEdgeCursor = [&](frontend::CursorShape shape) {
+        if (shape == edgeShape) {
+            return;
+        }
+        edgeShape = shape;
+        if (shape == frontend::CursorShape::Default) {
+            SDL_SetCursor(appCursor()); // Back to what the program uses otherwise.
+        }
+        else if (SDL_Cursor *cursor = edgeCursors[int(shape) - 1].get()) {
+            SDL_SetCursor(cursor);
+        }
+    };
 
     // Window coordinates (events, mouse state) to drawable pixels.
     const auto drawableSize = [&] {
@@ -688,18 +725,28 @@ int runPtyFrontend(const char *font,
         }
         return std::pair<int, int>{w, h};
     };
+    // The border of --borderless is outside the view: the strip, panes and layers are laid out
+    // inside it, so it never covers content (left, right and bottom only; none when maximised).
+    const auto insetNow = [&] {
+        return frontend::windowInset(ownFrame, (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MAXIMIZED) != 0);
+    };
+    // The view's own pixels: coordinates relative to its top left corner, inside the border.
     const auto toDrawable = [&](int x, int y) {
         int ww = 0, wh = 0;
         SDL_GetWindowSize(window.get(), &ww, &wh);
         const auto [dw, dh] = drawableSize();
+        const frontend::WindowInset inset = insetNow();
         if (ww <= 0 || wh <= 0) {
-            return std::pair<int, int>{x, y};
+            return std::pair<int, int>{x - inset.left, y - inset.top};
         }
-        return std::pair<int, int>{int(double(x) * dw / ww),
-                                   int(double(y) * dh / wh)};
+        return std::pair<int, int>{int(double(x) * dw / ww) - inset.left,
+                                   int(double(y) * dh / wh) - inset.top};
     };
     const auto updateWindow = [&] {
-        const auto [w, h] = drawableSize();
+        const auto [fullW, fullH] = drawableSize();
+        const frontend::WindowInset inset = insetNow();
+        const int w = std::max(1, fullW - inset.left - inset.right);
+        const int h = std::max(1, fullH - inset.top - inset.bottom);
         const WindowMetrics now{
             w, h, backend.cellWidth(), backend.cellHeight()};
         const auto &old = wv.window();
@@ -1603,7 +1650,9 @@ int runPtyFrontend(const char *font,
         e.key.keysym.mod = mods;
         SDL_PushEvent(&e);
     };
-    const auto pushMouse = [](Uint32 type, int x, int y) {
+    const auto pushMouse = [&](Uint32 type, int viewX, int y) {
+        // The script works in view pixels; events are in window pixels (the border is outside the view).
+        const int x = viewX + insetNow().left;
         SDL_Event e{};
         e.type = type;
         if (type == SDL_MOUSEMOTION) {
@@ -1913,6 +1962,9 @@ int runPtyFrontend(const char *font,
                                     ? MouseInput::Button::Right
                                     : MouseInput::Button::None;
                 }
+                if (ownFrame && motion) {
+                    showEdgeCursor(frontend::cursorShapeFor(hitState.classify(event.motion.x, event.motion.y)));
+                }
                 MouseResult r;
                 guarded([&] { r = wv.mouse(in, now); });
                 if (r.empty) {
@@ -1921,11 +1973,9 @@ int runPtyFrontend(const char *font,
                 layoutExtras(r);
                 if (r.cursor != shownCursor) {
                     shownCursor = r.cursor;
-                    SDL_SetCursor(shownCursor == Cursor::ResizeColumns
-                                      ? columnsCursor.get()
-                                  : shownCursor == Cursor::ResizeRows
-                                      ? rowsCursor.get()
-                                      : arrowCursor.get());
+                    if (edgeShape == frontend::CursorShape::Default) {
+                        SDL_SetCursor(appCursor());
+                    }
                 }
                 if (!r.pane) {
                     continue;
@@ -2007,6 +2057,9 @@ int runPtyFrontend(const char *font,
                         dragging = false;
                     }
                 }
+            }
+            else if (ownFrame && event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_LEAVE) {
+                showEdgeCursor(frontend::CursorShape::Default); // The pointer left the window.
             }
             else if (event.type == SDL_WINDOWEVENT &&
                      (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST ||
@@ -2323,7 +2376,7 @@ int runPtyFrontend(const char *font,
         const FramePlan plan = wv.plan();
         if (ownFrame) { // What SDL's hit test reads: the handle is the strip's gaps.
             hitState.set(borderless::geometryOf(
-                window.get(), plan.strip, plan.stripRect.h, backend.cellWidth(), wv.window().width));
+                window.get(), plan.strip, plan.stripRect.h, backend.cellWidth(), drawableSize().first, insetNow().left));
         }
         const Palette stripPalette;
         std::optional<CellBuffer> stripBuffer;
@@ -2506,42 +2559,40 @@ int runPtyFrontend(const char *font,
                 shownTitle = title;
                 SDL_SetWindowTitle(window.get(), title.c_str());
             }
+            const int ox = insetNow().left; // Where the view starts: after the border.
             backend.beginFrame(stripPalette.background);
             if (stripFrame) {
                 backend.render(*stripFrame,
-                               PaneArea{{plan.stripRect.x, plan.stripRect.y, plan.stripRect.w, plan.stripRect.h}, {}});
+                               PaneArea{{plan.stripRect.x + ox, plan.stripRect.y, plan.stripRect.w, plan.stripRect.h}, {}});
             }
             for (const auto &d : drawn) {
                 const auto &pp = *d.plan;
                 backend.render(d.frame,
-                               PaneArea{{pp.rect.x, pp.rect.y, pp.rect.w, pp.rect.h},
-                                        {pp.scrollbar.x, pp.scrollbar.y, pp.scrollbar.w, pp.scrollbar.h}});
+                               PaneArea{{pp.rect.x + ox, pp.rect.y, pp.rect.w, pp.rect.h},
+                                        {pp.scrollbar.x + ox, pp.scrollbar.y, pp.scrollbar.w, pp.scrollbar.h}});
                 if (d.badge && d.badgeRect.w > 0) {
                     backend.render(d.badgeFrame,
-                                   PaneArea{{d.badgeRect.x, d.badgeRect.y, d.badgeRect.w, d.badgeRect.h}, {}});
+                                   PaneArea{{d.badgeRect.x + ox, d.badgeRect.y, d.badgeRect.w, d.badgeRect.h}, {}});
                 }
                 if (pp.shared) {
                     // Shared with browsers: a small red square in the pane's corner.
                     const int side = std::max(4, backend.cellHeight() / 3);
-                    backend.drawRect({pp.rect.x + pp.rect.w - side - 2, pp.rect.y + 2, side, side}, Rgb8{210, 40, 40});
+                    backend.drawRect({pp.rect.x + ox + pp.rect.w - side - 2, pp.rect.y + 2, side, side}, Rgb8{210, 40, 40});
                 }
             }
             for (const auto &d : plan.dividers) {
-                backend.drawRect({d.rect.x, d.rect.y, d.rect.w, d.rect.h}, Rgb8{46, 51, 60});
+                backend.drawRect({d.rect.x + ox, d.rect.y, d.rect.w, d.rect.h}, Rgb8{46, 51, 60});
             }
             for (std::size_t i = 0; i < layerFrames.size(); ++i) {
                 const auto &layer = plan.layers[i];
-                backend.render(layerFrames[i], PaneArea{{layer.rect.x, layer.rect.y, layer.rect.w, layer.rect.h}, {}});
+                backend.render(layerFrames[i], PaneArea{{layer.rect.x + ox, layer.rect.y, layer.rect.w, layer.rect.h}, {}});
             }
-            if (ownFrame) { // The window has no frame: a discreet 1 px border shows where its edge is.
+            if (ownFrame) { // The window has no frame: the border (outside the view) shows where its edge is.
                 int w = 0, h = 0;
                 SDL_GetRendererOutputSize(SDL_GetRenderer(window.get()), &w, &h);
                 const bool maximized = (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MAXIMIZED) != 0;
                 for (const auto &edge : frontend::borderRects(w, h, maximized)) {
                     backend.drawRect({edge.x, edge.y, edge.w, edge.h}, frontend::borderColor(stripPalette));
-                }
-                for (const auto &edge : frontend::borderRects(w, h, maximized, 1)) {
-                    backend.drawRect({edge.x, edge.y, edge.w, edge.h}, frontend::borderEdgeColor(stripPalette));
                 }
             }
             backend.present();

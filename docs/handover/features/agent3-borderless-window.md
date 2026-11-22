@@ -101,6 +101,25 @@ Decided by the owner: system frame only when the hit test fails; restore glyph `
 - Not verified: everything on a real display; the OpenGL and accelerated variants (the sandbox has
   neither); clang-tidy.
 
+## Update 4 (owner's fourth round)
+
+- **The border no longer covers content.** The window's content is laid out inside a 4 px border on
+  the left, right and bottom (none at the top, where the strip is the edge; none when maximised). The
+  grip is still 8 px: the outer 4 px are the visible border, the inner 4 px are grip but not drawn.
+  Check: the first and last text columns and the bottom row are complete; the strip's top row is
+  complete; maximise removes the border and the layout fills the screen again.
+- **Colour:** exactly the strip's own background (the part you drag). Check: border and drag area look
+  the same. (The "brighter outermost pixel" is gone.)
+- **Pointer:** resize shapes over the grip (left/right: horizontal arrows, top/bottom: vertical, corners:
+  diagonal), the arrow or divider shape again when the pointer leaves. Check on GNOME Wayland: do
+  the shapes show at all? If not, the desktop may have no cursor theme SDL can load: look for the stderr
+  line `no resize pointer shape from the desktop (...)` and send it. Check that the shape changes at
+  the same pixels where a press starts a resize, in all four corners, and that it returns to the
+  arrow over the terminal text and on the strip.
+- Not verified: everything with a real display. Run headless: the whole tabs smoke script with the
+  inset layout (`MATTERM_ASSUME_HIT_TEST=1`, ctest `pty_frontend_tabs_smoke_borderless`).
+- Shadow / `--csd`: stopped, nothing built (the owner's alpha test showed no transparency).
+
 ## Open design questions (the owner decides)
 
 (1-3 of the first round are decided, see above.)

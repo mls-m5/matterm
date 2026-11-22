@@ -86,14 +86,15 @@ inline frontend::WindowGeometry geometryOf(SDL_Window *window,
                                            const frontend::TabStrip &strip,
                                            int stripHeightDrawable,
                                            int cellWidthDrawable,
-                                           int drawableWidth) {
+                                           int drawableWidth,
+                                           int viewOffsetX) {
     frontend::WindowGeometry g;
     SDL_GetWindowSize(window, &g.width, &g.height);
     const double scale = g.width > 0 ? double(drawableWidth) / g.width : 1.0;
     g.stripHeight =
         int(std::lround(stripHeightDrawable / (scale > 0 ? scale : 1.0)));
     g.maximized = (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED) != 0;
-    g.drag = frontend::dragSpans(strip, cellWidthDrawable, scale);
+    g.drag = frontend::dragSpans(strip, cellWidthDrawable, scale, viewOffsetX);
     return g;
 }
 

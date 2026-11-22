@@ -87,15 +87,16 @@ inline WindowZone classifyWindowPoint(const WindowGeometry &g, int x, int y) {
 // The columns of the strip without a region (the gaps between tabs and before
 // the buttons), as window pixels. `cellWidth` is in drawable pixels; `scale` is
 // drawable pixels per window pixel (2 on a high-DPI screen). Adjacent gap
-// columns are one span.
+// columns are one span. `offsetX` (drawable pixels) is where the view starts: the border's width.
 inline std::vector<DragSpan> dragSpans(const TabStrip &strip,
                                        int cellWidth,
-                                       double scale) {
+                                       double scale,
+                                       int offsetX = 0) {
     std::vector<DragSpan> spans;
     if (cellWidth <= 0 || scale <= 0)
         return spans;
     const auto toWindow = [&](int column) {
-        return int(std::lround(double(column) * cellWidth / scale));
+        return int(std::lround((double(column) * cellWidth + offsetX) / scale));
     };
     const int columns = int(strip.cells.size());
     int open = -1;
@@ -119,35 +120,69 @@ struct BorderRect {
     int x = 0, y = 0, w = 0, h = 0;
 };
 
+// What the border takes from the window: the view (strip, panes, layers) is laid out inside it, so
+// the border never covers content. No border at the top, where the strip is the edge of the window,
+// and none with the system frame or when maximised.
+struct WindowInset {
+    int left = 0, right = 0, top = 0, bottom = 0;
+};
+
+inline WindowInset windowInset(bool ownFrame, bool maximized) {
+    if (!ownFrame || maximized) {
+        return {};
+    }
+    return {kBorderWidth, kBorderWidth, 0, kBorderWidth};
+}
+
+// The border: left, right and bottom, kBorderWidth wide, exactly the pixels windowInset takes. The
+// rectangles cover them once (the bottom ones run into the corners, the sides stop above them).
 inline std::vector<BorderRect> borderRects(int width, int height, bool maximized, int thickness = kBorderWidth) {
     if (maximized || width <= 0 || height <= 0 || thickness <= 0) {
         return {};
     }
-    const int tx = std::min(thickness, width);
-    const int ty = std::min(thickness, height);
+    const int bottom = std::max(0, height - thickness);
     std::vector<BorderRect> rects;
-    rects.push_back({0, 0, width, ty}); // Top.
-    const int bottom = std::max(ty, height - thickness);
-    if (bottom < height) {
-        rects.push_back({0, bottom, width, height - bottom});
+    rects.push_back({0, 0, std::min(thickness, width), height}); // Left, the full height.
+    const int right = std::max(std::min(thickness, width), width - thickness);
+    if (right < width) {
+        rects.push_back({right, 0, width - right, height}); // Right.
     }
-    if (bottom > ty) { // The sides between them.
-        rects.push_back({0, ty, tx, bottom - ty});
-        const int right = std::max(tx, width - thickness);
-        if (right < width) {
-            rects.push_back({right, ty, width - right, bottom - ty});
-        }
+    const int innerLeft = std::min(thickness, width);
+    if (bottom < height && right > innerLeft) {
+        rects.push_back({innerLeft, bottom, right - innerLeft, height - bottom}); // Bottom, between the sides.
     }
     return rects;
 }
 
-// Discreet: a third of the way from the background to the text colour; the outermost pixel is
-// drawn brighter so the edge of the window can be found against any background.
+// Exactly the colour of the strip, where the window is dragged (the gaps between the tabs): the
+// border then looks like the edge of the strip going round the window. Not a guessed shade.
 inline Rgb8 borderColor(const Palette &palette) {
-    return tabstrip_detail::mix(palette.background, palette.foreground, 33);
+    return tabstrip_detail::colors(palette).stripBg;
 }
-inline Rgb8 borderEdgeColor(const Palette &palette) {
-    return tabstrip_detail::mix(palette.background, palette.foreground, 60);
+
+// The pointer shape over the edges: the same classification as the hit test.
+enum class CursorShape {
+    Default,
+    ResizeEastWest,
+    ResizeNorthSouth,
+    ResizeNorthwestSoutheast,
+    ResizeNortheastSouthwest,
+};
+
+inline CursorShape cursorShapeFor(WindowZone zone) {
+    switch (zone) {
+    case WindowZone::ResizeLeft:
+    case WindowZone::ResizeRight: return CursorShape::ResizeEastWest;
+    case WindowZone::ResizeTop:
+    case WindowZone::ResizeBottom: return CursorShape::ResizeNorthSouth;
+    case WindowZone::ResizeTopLeft:
+    case WindowZone::ResizeBottomRight: return CursorShape::ResizeNorthwestSoutheast;
+    case WindowZone::ResizeTopRight:
+    case WindowZone::ResizeBottomLeft: return CursorShape::ResizeNortheastSouthwest;
+    case WindowZone::Normal:
+    case WindowZone::Drag: break;
+    }
+    return CursorShape::Default;
 }
 
 // What --window-test says about a call. Most window calls return nothing; whether they worked can
