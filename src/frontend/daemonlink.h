@@ -199,11 +199,11 @@ inline std::unique_ptr<DaemonLink> reattachToDaemon(
     if (kind == Reattach::Fresh) {
         id.clear();
     }
-    return attachToDaemon(view,
-                          socketPath,
-                          std::move(id),
-                          id.empty() ? 0 : offset,
-                          std::move(clock));
+    // Before `id` is moved: the order of evaluation of the arguments is not
+    // specified.
+    const std::uint64_t resumeOffset = id.empty() ? 0 : offset;
+    return attachToDaemon(
+        view, socketPath, std::move(id), resumeOffset, std::move(clock));
 }
 
 } // namespace frontend

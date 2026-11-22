@@ -39,6 +39,8 @@ struct TempDir {
     }
     ~TempDir() {
         const std::string command = "rm -rf '" + path + "'";
+        // NOLINTNEXTLINE(cert-env33-c): test cleanup of a directory this test
+        // made
         [[maybe_unused]] const int rc = std::system(command.c_str());
     }
 };
@@ -236,6 +238,7 @@ TEST_CASE("The daemon over a tunnel: started there, reached here, a terminal run
 TEST_CASE("matterm-daemon --print-socket says where its socket is and starts nothing") {
     const std::string socket = "/tmp/matterm-print-socket-test.sock";
     const std::string command = std::string(MATTERM_DAEMON_BIN) + " --print-socket --daemon-socket " + socket;
+    // NOLINTNEXTLINE(cert-env33-c): runs our own daemon binary
     FILE *output = ::popen(command.c_str(), "r");
     EXPECT(output != nullptr);
     std::string line;

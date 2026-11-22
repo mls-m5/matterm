@@ -51,7 +51,8 @@ public:
         std::string out;
         char buffer[9];
         for (const auto word : h_) {
-            std::snprintf(buffer, sizeof buffer, "%08x", static_cast<unsigned>(word));
+            (void)std::snprintf(
+                buffer, sizeof buffer, "%08x", static_cast<unsigned>(word));
             out += buffer;
         }
         return out;
