@@ -205,6 +205,26 @@ void SdlBackend::render(const RenderFrame &frame) {
                     colors.background = {49, 86, 145};
                 }
             }
+            {
+                const auto index = y * frame.cells.columns() + x;
+                const auto inRange = [index](const auto &ranges) {
+                    for (const auto &r : ranges) {
+                        if (index >= r.first && index < r.second) {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+                if (!frame.matchRanges.empty() && inRange(frame.matchRanges)) {
+                    colors.foreground = {20, 20, 20};
+                    colors.background = {230, 190, 70};
+                }
+                if (!frame.selectionRanges.empty() &&
+                    inRange(frame.selectionRanges)) {
+                    colors.foreground = {255, 255, 255};
+                    colors.background = {49, 86, 145};
+                }
+            }
             s.backgrounds.quad(left,
                                top,
                                float(s.cellWidth),

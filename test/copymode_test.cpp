@@ -237,4 +237,116 @@ TEST_CASE("A selection that became invalid (resize) ends the selecting state "
     EXPECT(r.changed);
 }
 
+TEST_CASE("/ searches forward, n and N repeat, ? searches backward, all with "
+          "wrap-around") {
+    TerminalModel model(20, 3, 20);
+    model.write(
+        U"one two three\r\nfour five\r\nsix seven eight\r\nlast line two");
+    std::optional<Selection> selection;
+    CopyMode mode(model);
+    const auto first = model.firstRetainedRow();
+    auto type = [&](const std::string &text) {
+        for (const char c : text) {
+            mode.key(ch(c), model, selection);
+        }
+    };
+    mode.key(ch('g'), model, selection); // Row 0 of the text, column 0.
+    type("/two");
+    EXPECT(mode.badge(model).find("/two") !=
+           std::string::npos); // The prompt shows what is typed.
+    mode.key(ch(keys::Enter), model, selection);
+    // "two" in the first row (column 4) comes after column 0.
+    EXPECT_EQ(mode.cursor().row, first);
+    EXPECT_EQ(mode.cursor().column, std::size_t(4));
+    type("n"); // The next one: "last line two" (row 3, column 10).
+    EXPECT_EQ(mode.cursor().row, first + 3);
+    EXPECT_EQ(mode.cursor().column, std::size_t(10));
+    type("n"); // Wraps to the first again.
+    EXPECT_EQ(mode.cursor().row, first);
+    EXPECT(mode.badge(model).find("wrapped") != std::string::npos);
+    type("N"); // The other direction: back to the last row.
+    EXPECT_EQ(mode.cursor().row, first + 3);
+    type("?five");
+    mode.key(ch(keys::Enter), model, selection);
+    EXPECT_EQ(mode.cursor().row, first + 1);
+    EXPECT_EQ(mode.cursor().column, std::size_t(5));
+}
+
+TEST_CASE("Search: smart case, not found, Esc and Backspace while typing") {
+    Fixture f;
+    f.press("g0");
+    f.press("/ONE"); // A capital: case matters, and "ONE" is not there.
+    f.press(ch(keys::Enter));
+    EXPECT(f.mode->badge(f.model).find("not found") != std::string::npos);
+    EXPECT_EQ(f.mode->cursor().row, f.first());
+    f.press("/");
+    f.press("tzz");
+    f.press(ch(keys::Backspace));
+    f.press(ch(keys::Backspace));
+    f.press(ch(keys::Escape)); // Cancels the search, not the mode.
+    EXPECT(f.mode->badge(f.model).find("COPY") != std::string::npos);
+    f.press("/LAST"); // No match with capitals.
+    f.press(ch(keys::Enter));
+    EXPECT(f.mode->badge(f.model).find("not found") != std::string::npos);
+    f.press("/last"); // No capitals: matches "last" case-insensitively.
+    f.press(ch(keys::Enter));
+    EXPECT_EQ(f.mode->cursor().row, f.first() + f.model.historySize() + 2);
+    f.press("n");
+    EXPECT(f.mode->badge(f.model).find("wrapped") != std::string::npos);
+}
+
+TEST_CASE(
+    "A search in a selection extends it, and matches are marked in the frame") {
+    Fixture f;
+    f.press("g0v");
+    f.press("/five");
+    f.press(ch(keys::Enter));
+    f.model.advanceViewport(10);
+    auto frame = f.model.frame(16);
+    f.mode->apply(f.model, frame);
+    EXPECT(!frame.matchRanges.empty());
+    // The typed pattern is marked too while typing.
+    f.press("y");
+    // y copied from the start of the text to the match.
+    Fixture g;
+    g.press("g0v/five");
+    g.press(ch(keys::Enter));
+    const auto r = g.press(ch('y'));
+    EXPECT(r.text.rfind("one two three\nfour ", 0) == 0);
+}
+
+TEST_CASE("Ctrl+V selects a block; y copies the columns of every row") {
+    Fixture f;
+    f.press("g0"); // "one two three" row 0, column 0
+    f.press(ctrl('v'));
+    EXPECT(f.mode->selecting());
+    EXPECT(f.mode->badge(f.model).find("BLOCK") != std::string::npos);
+    f.press("jjll"); // Rows 0..2, columns 0..2
+    f.model.advanceViewport(10);
+    auto frame = f.model.frame(16);
+    f.mode->apply(f.model, frame);
+    EXPECT_EQ(frame.selectionRanges.size(), std::size_t(3));
+    const auto r = f.press(ch('y'));
+    EXPECT(r.action == CopyMode::Action::Copy);
+    EXPECT_EQ(r.text, "one\nfou\nsix");
+    EXPECT(!f.mode->selecting());
+}
+
+TEST_CASE("Ctrl+V again, or v, ends a block; moving the other way keeps the "
+          "rectangle normalized") {
+    Fixture f;
+    f.press("g");
+    f.press("jjj$"); // Last row, last non-blank column: 8
+    f.press(ctrl('v'));
+    f.press("kkk0"); // Up to row 0, column 0
+    const auto r = f.press(ch('y'));
+    EXPECT(r.text.rfind("one two th", 0) ==
+           std::string::npos); // Block, not the linear text
+    EXPECT(r.text.find('\n') != std::string::npos);
+    Fixture g;
+    g.press(ctrl('v'));
+    g.press(ctrl('v'));
+    EXPECT(!g.mode->selecting());
+}
+
 TEST_SUIT_END

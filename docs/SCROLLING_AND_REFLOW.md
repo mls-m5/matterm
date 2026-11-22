@@ -399,3 +399,8 @@ cell and slot-wise copies would likely halve it, but that is not measured.
 
 Limits of these numbers: one machine, synthetic text, the algorithm outside the model, no allocation-failure
 rollback measured (the new history is built beside the old, so peak memory is 2x the history for the duration).
+
+**Prepared (2026-11-22):** `RenderFrame::wrapMarks` (one flag per supplied row, empty = unknown) and
+`TerminalModel::viewWrapMarks()` (the flags of the current frame's rows, from `softWrap`) exist and
+are tested. No backend draws the mark yet: that waits for the reflow work to land, since without
+reflow the mark would promise something that does not happen.

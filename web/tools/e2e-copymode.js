@@ -41,6 +41,16 @@ function check(name, ok, extra) {
   await page.keyboard.type(`touch ${marker}\n`, { delay: 15 });
   await page.waitForTimeout(1200);
   check('after y the shell gets keys again', fs.existsSync(marker));
+  // Search: "/" finds the marker line, "v$" selects to its end, y copies it.
+  await prefix('[');
+  await page.keyboard.type('/line-marker', { delay: 25 });
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+  await page.keyboard.type('bve', { delay: 30 }); // back to the word start, select, to its end
+  await page.keyboard.press('y');
+  await page.waitForTimeout(500);
+  const found = await page.evaluate(() => navigator.clipboard.readText());
+  check('search finds text in the history and y copies from there', found.includes('marker') || found.includes('line'), JSON.stringify(found));
   // Esc leaves too, and h/j/k/l are not typed into the shell.
   await prefix('[');
   await page.keyboard.type('kkhl', { delay: 20 });

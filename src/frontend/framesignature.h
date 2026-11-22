@@ -65,6 +65,16 @@ inline void addFrame(FrameSignature &s,
     s.add(frame.selectionEnd);
     s.add(frame.underlineBegin);
     s.add(frame.underlineEnd);
+    for (const auto &r : frame.selectionRanges) {
+        s.add(r.first);
+        s.add(r.second);
+    }
+    s.add(frame.selectionRanges.size());
+    for (const auto &r : frame.matchRanges) {
+        s.add(r.first);
+        s.add(r.second);
+    }
+    s.add(frame.matchRanges.size());
     s.bytes(palette.colors.data(), sizeof palette.colors);
     s.add(palette.foreground);
     s.add(palette.background);

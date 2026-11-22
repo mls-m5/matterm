@@ -482,7 +482,16 @@ retained text; the program gets no keys while the mode is on, and keeps running.
 - **Shown:** the virtual cursor is a block at its cell, the selection is highlighted as usual, and
   a small badge `COPY` (with `SELECT` while selecting and `row/total`) sits in the pane's top right
   corner. The window or page title is not used.
-- **Not in it (yet):** search (`/`), rectangular selection, marks. Mouse still works as usual; a
+- **Search:** `/` forward, `?` backward: type the pattern (shown in the badge, matches marked while
+  typing), Enter runs it, Esc or Backspace on an empty pattern cancels the search (not the mode).
+  `n` / `N` repeat in the same / the other direction, wrapping around the end ("search wrapped" in
+  the badge; "not found: ..." when there is none). ASCII patterns, smart case (no capital: case is
+  ignored), matches do not span rows. All matches in view are drawn in a highlight colour
+  (`RenderFrame::matchRanges`); a search while selecting extends the selection.
+- **Block selection:** `Ctrl+V` starts a rectangle between the anchor and the cursor (badge
+  `BLOCK`, one `RenderFrame::selectionRanges` interval per row); `y` copies the columns of every
+  row, trailing blanks trimmed, rows joined by newlines. `Ctrl+V` or `v` again ends it.
+- **Not in it (yet):** marks, search across wrapped rows, non-ASCII patterns. Mouse still works as usual; a
   mouse selection made while the mode is on is simply the current selection.
 - **Code:** `src/frontend/copymode.h` (no SDL; tests in `test/copymode_test.cpp`) holds the state
   and key handling; `TerminalView::copyMode` is the per-pane `std::optional`; both front ends

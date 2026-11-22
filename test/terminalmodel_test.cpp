@@ -403,4 +403,13 @@ TEST_CASE("A full line followed by an explicit newline is not a soft wrap") {
     }
 }
 
+TEST_CASE("viewWrapMarks marks the rows of the frame that continue on the next one") {
+    TerminalModel model(10, 3, 10);
+    model.write(U"0123456789ABCDE\r\nxy"); // The first line wraps once.
+    const auto marks = model.viewWrapMarks();
+    const auto frame = model.frame(16);
+    EXPECT_EQ(marks.size(), frame.cells.rows());
+    EXPECT(marks.size() == 3 && marks[0] && !marks[1] && !marks[2]);
+}
+
 TEST_SUIT_END

@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace frontend {
 
@@ -59,6 +60,14 @@ public:
                std::optional<Selection> &selection) {
         Result result;
         clamp(model);
+        message_.clear();
+        if (searching_) {
+            return searchKey(chord, model, selection);
+        }
+        if (rect_ && rectEpoch_ != model.selectionEpoch()) {
+            rect_ = selecting_ =
+                false; // The text moved under it (resize, reset).
+        }
         const int k = foldKey(chord.key);
         const bool plain = !chord.ctrl && !chord.alt;
         const std::size_t lastRow = lastRowOf(model);
@@ -68,6 +77,22 @@ public:
             switch (k) {
             case 'c':
                 return leave(selection);
+            case 'v':
+                // Rectangular selection: the block between the anchor and the
+                // cursor.
+                if (selecting_ && rect_) {
+                    selecting_ = rect_ = false;
+                }
+                else {
+                    selection.reset();
+                    selecting_ = rect_ = true;
+                    rectRow_ = row_;
+                    rectColumn_ = column_;
+                    rectEpoch_ = model.selectionEpoch();
+                }
+                result.changed = true;
+                moved = false;
+                break;
             case 'b':
                 moveUp(page);
                 break;
@@ -153,7 +178,7 @@ public:
         else if (plain && chord.key == 'v') {
             if (selecting_) {
                 selection.reset();
-                selecting_ = false;
+                selecting_ = rect_ = false;
             }
             else {
                 begin(model, selection, 1);
@@ -168,6 +193,26 @@ public:
             result.changed = true;
             moved = false;
         }
+        else if (plain && (chord.key == '/' || chord.key == '?')) {
+            searching_ = true;
+            searchForward_ = chord.key == '/';
+            query_.clear();
+            result.changed = true;
+            moved = false;
+        }
+        else if (plain && (chord.key == 'n' || chord.key == 'N')) {
+            if (lastQuery_.empty()) {
+                message_ = "no previous search";
+                moved = false;
+                result.changed = true;
+            }
+            else {
+                moved = search(model,
+                               lastQuery_,
+                               chord.key == 'n' ? lastForward_ : !lastForward_);
+                result.changed = true;
+            }
+        }
         else if (plain && chord.key == 'V') {
             begin(model, selection, 3);
             result.changed = true;
@@ -179,7 +224,7 @@ public:
         }
         if (moved) {
             clamp(model);
-            if (selecting_) {
+            if (selecting_ && !rect_) {
                 if (selection && selection->valid(model)) {
                     selection->extend(model, cursor());
                 }
@@ -196,6 +241,7 @@ public:
 
     // Draws the virtual cursor over the frame (the real one is hidden).
     void apply(const TerminalModel &model, RenderFrame &frame) const {
+        applyHighlights(model, frame);
         const auto viewFirst =
             model.firstRetainedRow() + model.viewport().firstRow();
         const bool shown = row_ >= viewFirst &&
@@ -214,13 +260,53 @@ public:
         frame.cursor.rowOffset = 0;
     }
 
+    // The block selection and the search matches, as extra intervals of the
+    // frame.
+    void applyHighlights(const TerminalModel &model, RenderFrame &frame) const {
+        const auto viewFirst =
+            model.firstRetainedRow() + model.viewport().firstRow();
+        const auto columns = frame.cells.columns();
+        const auto rows = frame.cells.rows();
+        if (selecting_ && rect_) {
+            const auto r1 = std::min(rectRow_, row_),
+                       r2 = std::max(rectRow_, row_);
+            const auto c1 = std::min(rectColumn_, column_),
+                       c2 = std::max(rectColumn_, column_);
+            for (std::size_t r = std::max(r1, viewFirst);
+                 r <= r2 && r - viewFirst < rows;
+                 ++r) {
+                const auto base = (r - viewFirst) * columns;
+                frame.selectionRanges.emplace_back(
+                    base + c1, base + std::min(c2 + 1, columns));
+            }
+        }
+        const std::string &pattern = searching_ ? query_ : lastQuery_;
+        if (!pattern.empty()) {
+            for (std::size_t y = 0; y < rows; ++y) {
+                const auto text = rowText(model, viewFirst + y);
+                for (const auto column : matchesIn(text, pattern)) {
+                    const auto at = y * columns + column;
+                    frame.matchRanges.emplace_back(at, at + pattern.size());
+                }
+            }
+        }
+    }
+
     // The badge for the pane's corner: "COPY 12/340" or "SELECT 12/340" (line
     // of all lines).
     std::string badge(const TerminalModel &model) const {
         const auto first = model.firstRetainedRow();
         const auto total = model.historySize() + model.rows();
         const auto line = std::min(row_ - std::min(row_, first) + 1, total);
-        return std::string(selecting_ ? " SELECT " : " COPY ") +
+        if (searching_) {
+            return std::string(" ") + (searchForward_ ? "/" : "?") + query_ +
+                   "_ ";
+        }
+        if (!message_.empty()) {
+            return " " + message_ + " ";
+        }
+        return std::string(selecting_ ? (rect_ ? " BLOCK " : " SELECT ")
+                                      : " COPY ") +
                std::to_string(line) + "/" + std::to_string(total) + " ";
     }
 
@@ -389,10 +475,176 @@ private:
                unsigned clicks) {
         selection = Selection::at(model, cursor(), clicks);
         selecting_ = true;
+        rect_ = false;
     }
+    // ---- search ----
+    // The text of one row as code points (a missing cell is a blank).
+    static std::u32string rowText(const TerminalModel &model, std::size_t row) {
+        std::u32string text;
+        text.reserve(model.columns());
+        for (std::size_t c = 0; c < model.columns(); ++c) {
+            text.push_back(at(model, row, c));
+        }
+        return text;
+    }
+    static char32_t lower(char32_t c) {
+        return c >= U'A' && c <= U'Z' ? c - U'A' + U'a' : c;
+    }
+    // Smart case: a pattern without capitals ignores case.
+    static bool caseless(const std::string &pattern) {
+        return std::none_of(pattern.begin(), pattern.end(), [](char c) {
+            return c >= 'A' && c <= 'Z';
+        });
+    }
+    // Start columns of the matches of an ASCII pattern in a row (matches never
+    // wrap to the next row).
+    static std::vector<std::size_t> matchesIn(const std::u32string &text,
+                                              const std::string &pattern) {
+        std::vector<std::size_t> found;
+        if (pattern.empty() || pattern.size() > text.size()) {
+            return found;
+        }
+        const bool fold = caseless(pattern);
+        for (std::size_t i = 0; i + pattern.size() <= text.size(); ++i) {
+            bool same = true;
+            for (std::size_t j = 0; j < pattern.size() && same; ++j) {
+                const char32_t a = text[i + j],
+                               b = char32_t(
+                                   static_cast<unsigned char>(pattern[j]));
+                same = fold ? lower(a) == lower(b) : a == b;
+            }
+            if (same) {
+                found.push_back(i);
+            }
+        }
+        return found;
+    }
+    // Moves to the next (or previous) match after the cursor, wrapping around
+    // the end. False and a message when there is none.
+    bool search(const TerminalModel &model,
+                const std::string &pattern,
+                bool forward) {
+        lastQuery_ = pattern;
+        lastForward_ = forward;
+        const auto first = model.firstRetainedRow();
+        const auto last = lastRowOf(model);
+        const auto total = last - first + 1;
+        // Rows in visiting order, starting with the cursor's own.
+        for (std::size_t step = 0; step <= total; ++step) {
+            const std::size_t offset =
+                forward ? (row_ - first + step) % total
+                        : (row_ - first + total - step % total) % total;
+            const std::size_t row = first + offset;
+            auto found = matchesIn(rowText(model, row), pattern);
+            if (found.empty()) {
+                continue;
+            }
+            std::optional<std::size_t> pick;
+            if (forward) {
+                for (const auto c : found) {
+                    if (step > 0 || c > column_ ||
+                        (step == total && c <= column_)) {
+                        pick = c;
+                        break;
+                    }
+                }
+            }
+            else {
+                for (auto it = found.rbegin(); it != found.rend(); ++it) {
+                    if (step > 0 || *it < column_) {
+                        pick = *it;
+                        break;
+                    }
+                }
+            }
+            if (pick) {
+                if (step == total || (forward ? row < row_ : row > row_)) {
+                    message_ = "search wrapped";
+                }
+                row_ = row;
+                column_ = *pick;
+                return true;
+            }
+        }
+        message_ = "not found: " + pattern;
+        return false;
+    }
+    Result searchKey(const KeyChord &chord,
+                     TerminalModel &model,
+                     std::optional<Selection> &selection) {
+        Result r;
+        r.changed = true;
+        if ((chord.ctrl && foldKey(chord.key) == 'c') ||
+            chord.key == keys::Escape) {
+            searching_ = false;
+            return r;
+        }
+        if (chord.key == keys::Enter) {
+            searching_ = false;
+            if (!query_.empty()) {
+                search(model, query_, searchForward_);
+            }
+            else if (!lastQuery_.empty()) {
+                search(model, lastQuery_, searchForward_);
+            }
+            clamp(model);
+            if (selecting_ && !rect_ && selection && selection->valid(model)) {
+                selection->extend(model, cursor());
+            }
+            ensureVisible(model);
+            return r;
+        }
+        if (chord.key == keys::Backspace) {
+            if (query_.empty()) {
+                searching_ = false;
+            }
+            else {
+                query_.pop_back();
+            }
+            return r;
+        }
+        if (!chord.ctrl && !chord.alt && chord.key >= 32 && chord.key < 127 &&
+            query_.size() < 200) {
+            query_.push_back(char(chord.key));
+        }
+        return r;
+    }
+    Result copyRect(const TerminalModel &model,
+                    std::optional<Selection> &selection) {
+        Result r;
+        r.changed = true;
+        selection.reset();
+        selecting_ = rect_ = false;
+        const auto r1 = std::min(rectRow_, row_), r2 = std::max(rectRow_, row_);
+        const auto c1 = std::min(rectColumn_, column_),
+                   c2 = std::max(rectColumn_, column_);
+        std::string text;
+        for (auto row = r1; row <= r2; ++row) {
+            auto line =
+                model.copyText({row, c1}, {row, c2}, Selection::copyLimit);
+            if (!line ||
+                text.size() + line->size() + 1 > Selection::copyLimit) {
+                r.action = Action::Leave;
+                r.tooLarge = true;
+                return r;
+            }
+            while (!line->empty() && line->back() == ' ') {
+                line->pop_back();
+            }
+            text += *line;
+            if (row != r2) {
+                text += '\n';
+            }
+        }
+        r.action = Action::Copy;
+        r.text = std::move(text);
+        return r;
+    }
+
     Result leave(std::optional<Selection> &selection) {
         selection.reset();
-        selecting_ = false;
+        selecting_ = rect_ = false;
+        searching_ = false;
         Result r;
         r.changed = true;
         r.action = Action::Leave;
@@ -402,6 +654,9 @@ private:
                 std::optional<Selection> &selection) {
         Result r;
         r.changed = true;
+        if (rect_ && selecting_) {
+            return copyRect(model, selection);
+        }
         std::optional<Selection> source = selection;
         if (!source || !source->valid(model)) {
             source =
@@ -436,6 +691,16 @@ private:
     std::size_t row_ = 0;
     std::size_t column_ = 0;
     bool selecting_ = false;
+    bool rect_ = false; // The selection is a block (Ctrl+V), anchored at
+                        // rectRow_/rectColumn_.
+    std::size_t rectRow_ = 0, rectColumn_ = 0, rectEpoch_ = 0;
+    bool searching_ = false; // Typing a search ("/" or "?").
+    bool searchForward_ = true;
+    std::string query_;     // Being typed.
+    std::string lastQuery_; // The last search that ran (n / N repeat it,
+                            // matches are marked).
+    bool lastForward_ = true;
+    std::string message_; // Shown in the badge until the next key.
 };
 
 } // namespace frontend

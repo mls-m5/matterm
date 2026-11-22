@@ -721,6 +721,15 @@ bool TerminalModel::textRowWrapped(std::size_t row) const noexcept {
            row - screen.firstRow < screen.memory.size() &&
            screen.softWrap[row - screen.firstRow];
 }
+std::vector<bool> TerminalModel::viewWrapMarks() const {
+    const auto &viewport = impl_->active().viewport;
+    const auto first = firstRetainedRow() + viewport.firstRow();
+    std::vector<bool> marks(viewport.rowCount());
+    for (std::size_t i = 0; i < marks.size(); ++i) {
+        marks[i] = textRowWrapped(first + i);
+    }
+    return marks;
+}
 std::optional<std::string> TerminalModel::copyText(
     TextCell first, TextCell last, std::size_t byteLimit) const {
     if (std::tie(last.row, last.column) < std::tie(first.row, first.column)) {
