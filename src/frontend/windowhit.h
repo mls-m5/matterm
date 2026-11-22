@@ -114,6 +114,43 @@ inline std::vector<DragSpan> dragSpans(const TabStrip &strip,
     return spans;
 }
 
+// A border of one pixel round the window, drawn by the app because the window has no frame of its
+// own (not when maximised). The four strips cover the outermost pixel ring exactly once.
+struct BorderRect {
+    int x = 0, y = 0, w = 0, h = 0;
+};
+
+inline std::vector<BorderRect> borderRects(int width, int height, bool maximized) {
+    if (maximized || width <= 0 || height <= 0) {
+        return {};
+    }
+    std::vector<BorderRect> rects;
+    rects.push_back({0, 0, width, 1}); // Top.
+    if (height > 1) {
+        rects.push_back({0, height - 1, width, 1}); // Bottom.
+    }
+    if (height > 2) {
+        rects.push_back({0, 1, 1, height - 2}); // Left, between them.
+        if (width > 1) {
+            rects.push_back({width - 1, 1, 1, height - 2}); // Right.
+        }
+    }
+    return rects;
+}
+
+// Discreet: a third of the way from the background to the text colour.
+inline Rgb8 borderColor(const Palette &palette) {
+    return tabstrip_detail::mix(palette.background, palette.foreground, 33);
+}
+
+// What --window-test says about a call. Most window calls return nothing; whether they worked can
+// only be seen in the window's flags, and Wayland reports no "minimised" at all. So only an error
+// return is FAILED; a call that went through without a visible state change is not a failure.
+inline const char *callVerdict(bool returnedOk, bool stateReached) {
+    if (!returnedOk) return "FAILED";
+    return stateReached ? "ok" : "called, state not reported";
+}
+
 enum class FrameMode { System, Own };
 
 struct FrameChoice {

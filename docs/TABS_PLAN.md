@@ -656,9 +656,11 @@ paste back. It never starts a terminal.
 **GNOME / Wayland.** On X11 (also GNOME on Xorg, XWayland) the hit test starts a window-manager
 move or resize, so edges and dragging behave like a normal window; SDL starts the drag itself, so
 a double click on the handle may not reach the app (the loop handles it if it does; otherwise use
-the maximise button). On native Wayland SDL 2.26 cannot set a hit test, so `--borderless`
-falls back to the system frame: GNOME draws it (libdecor) and `--window-test` shows the
-failing call. Forcing XWayland for a borderless window: `SDL_VIDEODRIVER=x11 matterm --borderless`.
+the maximise button). On native Wayland SDL 2.26 (the sandbox's) reports the hit test as unsupported, but **the owner's
+SDL 2.30 on GNOME Wayland accepts it** and moving works: the first assumption here was wrong for
+2.30. The fallback to the system frame now happens only when `SDL_SetWindowHitTest` itself fails.
+Wayland reports no "minimised" window state, so `--window-test` calls a call whose state it cannot
+see `called, state not reported`, and only an error return is `FAILED` (`callVerdict`). Forcing XWayland for a borderless window: `SDL_VIDEODRIVER=x11 matterm --borderless`.
 Mutter has no server-side decorations, so a borderless client-drawn window is the only
 option there; the fallback is the compromise. Not run on a real display in the sandbox; see the
 task's acceptance notes.

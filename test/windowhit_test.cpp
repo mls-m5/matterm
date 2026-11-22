@@ -2,6 +2,8 @@
 #include "tabstrip.h"
 #include "windowhit.h"
 
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -131,6 +133,64 @@ TEST_CASE(
     // Without regions nothing drags (a strip that is only gap would be all
     // handle).
     EXPECT(dragSpans(TabStrip{}, 8, 1.0).empty());
+}
+
+TEST_CASE("A 1 px border is drawn round a normal window and not round a maximised one") {
+    const auto rects = borderRects(1000, 600, false);
+    EXPECT_EQ(rects.size(), std::size_t(4));
+    // Together they cover exactly the outermost pixel ring: count covered pixels of a small window.
+    for (const auto &size : {std::pair{10, 7}, std::pair{1, 1}, std::pair{2, 2}, std::pair{3, 50}}) {
+        const auto ring = borderRects(size.first, size.second, false);
+        for (int y = 0; y < size.second; ++y) {
+            for (int x = 0; x < size.first; ++x) {
+                int covered = 0;
+                for (const auto &r : ring) {
+                    if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) ++covered;
+                }
+                const bool edge = x == 0 || y == 0 || x == size.first - 1 || y == size.second - 1;
+                EXPECT_EQ(covered, (edge ? 1 : 0)); // Every ring pixel once, nothing inside, no overlap.
+            }
+        }
+    }
+    EXPECT(borderRects(1000, 600, true).empty());
+    EXPECT(borderRects(0, 0, false).empty());
+    EXPECT(borderRects(-5, 10, false).empty());
+    // A colour from the theme: between the background and the foreground, discreet, not either.
+    const Palette palette;
+    const Rgb8 c = borderColor(palette);
+    const auto same = [](Rgb8 a, Rgb8 b) { return a.r == b.r && a.g == b.g && a.b == b.b; };
+    EXPECT(!same(c, palette.background) && !same(c, palette.foreground));
+    EXPECT(c.r >= std::min(palette.background.r, palette.foreground.r) &&
+           c.r <= std::max(palette.background.r, palette.foreground.r));
+    // The border is part of the window: the edge pixel it covers is still a resize zone.
+    WindowGeometry g = window();
+    EXPECT(classifyWindowPoint(g, 0, 300) == Zone::ResizeLeft);
+}
+
+TEST_CASE("Every pixel of the edge band outside the strip handle resizes, whatever the size") {
+    for (const auto &size : {std::pair{200, 100}, std::pair{1000, 600}, std::pair{1919, 1079}, std::pair{40, 40}}) {
+        WindowGeometry g;
+        g.width = size.first;
+        g.height = size.second;
+        g.stripHeight = 16;
+        g.drag = {{50, g.width - 50}};
+        for (int y = 0; y < g.height; ++y) {
+            for (int x = 0; x < g.width; ++x) {
+                const bool band = x < kResizeEdge || y < kResizeEdge || x >= g.width - kResizeEdge ||
+                                  y >= g.height - kResizeEdge;
+                const WindowZone z = classifyWindowPoint(g, x, y);
+                const bool resize = z != Zone::Normal && z != Zone::Drag;
+                EXPECT_EQ(resize, band);
+            }
+        }
+    }
+}
+
+TEST_CASE("A window call is only FAILED when it returned an error; a state that is not reported is its own word") {
+    EXPECT(std::string(callVerdict(true, true)) == "ok");
+    EXPECT(std::string(callVerdict(true, false)) == "called, state not reported");
+    EXPECT(std::string(callVerdict(false, true)) == "FAILED");
+    EXPECT(std::string(callVerdict(false, false)) == "FAILED");
 }
 
 TEST_CASE("The frame is the system frame unless borderless works") {

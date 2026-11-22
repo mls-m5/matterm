@@ -390,6 +390,7 @@ int windowTest() {
         return flagSet(flag) == wanted;
     };
     line("window has no frame (SDL_WINDOW_BORDERLESS kept)", flagSet(SDL_WINDOW_BORDERLESS));
+    line("window is resizable (SDL_WINDOW_RESIZABLE kept; edge resize needs it)", flagSet(SDL_WINDOW_RESIZABLE));
     borderless::HitState state;
     frontend::WindowGeometry geometry;
     geometry.width = 480;
@@ -400,18 +401,24 @@ int windowTest() {
     const bool hitTest = borderless::install(window.get(), state) == 0;
     const std::string hitError = hitTest ? std::string() : std::string(SDL_GetError());
     line("SDL_SetWindowHitTest (edges and drag)", hitTest, hitError);
+    // These calls return nothing: only the window's flags tell. "called, state not reported" is
+    // not a failure (Wayland reports no minimised state, for example).
+    const auto stateCall = [&](const char *name, Uint32 flag, bool wanted) {
+        const bool reached = settles(flag, wanted);
+        std::cout << "  " << name << ": " << frontend::callVerdict(true, reached) << '\n';
+    };
     SDL_SetWindowBordered(window.get(), SDL_TRUE);
-    line("SDL_SetWindowBordered(true) (the fallback)", settles(SDL_WINDOW_BORDERLESS, false));
+    stateCall("SDL_SetWindowBordered(true) (the fallback)", SDL_WINDOW_BORDERLESS, false);
     SDL_SetWindowBordered(window.get(), SDL_FALSE);
-    line("SDL_SetWindowBordered(false)", settles(SDL_WINDOW_BORDERLESS, true));
+    stateCall("SDL_SetWindowBordered(false)", SDL_WINDOW_BORDERLESS, true);
     SDL_MaximizeWindow(window.get());
-    line("SDL_MaximizeWindow", settles(SDL_WINDOW_MAXIMIZED, true));
+    stateCall("SDL_MaximizeWindow", SDL_WINDOW_MAXIMIZED, true);
     SDL_RestoreWindow(window.get());
-    line("SDL_RestoreWindow", settles(SDL_WINDOW_MAXIMIZED, false));
+    stateCall("SDL_RestoreWindow", SDL_WINDOW_MAXIMIZED, false);
     SDL_MinimizeWindow(window.get());
-    line("SDL_MinimizeWindow", settles(SDL_WINDOW_MINIMIZED, true));
+    stateCall("SDL_MinimizeWindow", SDL_WINDOW_MINIMIZED, true);
     SDL_RestoreWindow(window.get());
-    line("SDL_RestoreWindow", settles(SDL_WINDOW_MINIMIZED, false));
+    stateCall("SDL_RestoreWindow", SDL_WINDOW_MINIMIZED, false);
     failed = !hitTest;
     const frontend::FrameChoice choice = frontend::chooseFrame(true, hitTest, hitError);
     std::cout << (choice.mode == frontend::FrameMode::Own
