@@ -7,6 +7,9 @@
 
 #include <SDL.h>
 
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <utility>
 

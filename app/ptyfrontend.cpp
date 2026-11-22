@@ -608,6 +608,8 @@ int runPtyFrontend(const char *font,
     borderless::HitState hitState;
     bool ownFrame = false;
     if (daemonOptions.borderless) {
+        // Edge resizing through the hit test needs a resizable window (Wayland ignores it otherwise).
+        SDL_SetWindowResizable(window.get(), SDL_TRUE);
         const bool installed = borderless::install(window.get(), hitState) == 0;
         const frontend::FrameChoice frame =
             frontend::chooseFrame(true, installed, installed ? std::string() : std::string(SDL_GetError()));
@@ -2451,6 +2453,7 @@ int runPtyFrontend(const char *font,
             int w = 0, h = 0;
             SDL_GetRendererOutputSize(SDL_GetRenderer(window.get()), &w, &h);
             extra = extra * 31 + std::uint64_t(w) * 65537 + std::uint64_t(h);
+            extra = extra * 31 + (ownFrame && (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MAXIMIZED) ? 1u : 0u);
         }
         const auto signatures = frontend::windowSignatures(inputs, plan.dividers, extra);
         if (signatures.steady != lastSteadySignature) {
@@ -2491,6 +2494,14 @@ int runPtyFrontend(const char *font,
             for (std::size_t i = 0; i < layerFrames.size(); ++i) {
                 const auto &layer = plan.layers[i];
                 backend.render(layerFrames[i], PaneArea{{layer.rect.x, layer.rect.y, layer.rect.w, layer.rect.h}, {}});
+            }
+            if (ownFrame) { // The window has no frame: a discreet 1 px border shows where its edge is.
+                int w = 0, h = 0;
+                SDL_GetRendererOutputSize(SDL_GetRenderer(window.get()), &w, &h);
+                const bool maximized = (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MAXIMIZED) != 0;
+                for (const auto &edge : frontend::borderRects(w, h, maximized)) {
+                    backend.drawRect({edge.x, edge.y, edge.w, edge.h}, frontend::borderColor(stripPalette));
+                }
             }
             backend.present();
             ++framesDrawn;
