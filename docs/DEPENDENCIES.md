@@ -68,4 +68,7 @@ Use `build/src/server/matterm-server`, not `build/server` (stale). `e2e-local.js
 - `matterm-daemon` linked static needs nothing there (`matterm --daemon-host` copies it, see `docs/REMOTE_DAEMON.md`).
   A dynamic one needs `libsodium23`.
 - Native app at runtime: `libsdl2-2.0-0 libsdl2-ttf-2.0-0 libfontconfig1 libfreetype6 libharfbuzz0b`.
+- Window frame on GNOME Wayland: SDL draws the system frame through libdecor, which needs a plugin:
+  `libdecor-0-0 libdecor-0-plugin-1-gtk`. Without the plugin SDL prints "No plugins found, falling back on no
+  decorations" and the window has no frame at all (see `matterm --window-test`, docs/TABS_PLAN.md section 16).
 - A display is needed for the native app; agent sandboxes have none (only `SDL_VIDEODRIVER=dummy` runs).
