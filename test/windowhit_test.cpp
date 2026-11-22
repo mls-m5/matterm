@@ -1,5 +1,4 @@
 #include "mls-unit-test/unittest.h"
-#include "probelayout.h"
 #include "tabstrip.h"
 #include "windowhit.h"
 
@@ -279,20 +278,6 @@ TEST_CASE("A window call is only FAILED when it returned an error; a state that 
     EXPECT(std::string(callVerdict(false, false)) == "FAILED");
 }
 
-TEST_CASE("The transparency probe picture nests: transparent rim, red margin, solid box") {
-    const ProbeLayout layout = probeLayout(360, 240, 40);
-    EXPECT(!layout.red.empty() && !layout.box.empty());
-    EXPECT_EQ(layout.red.x, 20); // A 20 px rim outside the red stays transparent.
-    EXPECT_EQ(layout.box.x, 40);
-    EXPECT(layout.red.x + layout.red.w <= 360 && layout.red.y + layout.red.h <= 240);
-    EXPECT(layout.box.x >= layout.red.x && layout.box.y >= layout.red.y);
-    EXPECT(layout.box.x + layout.box.w <= layout.red.x + layout.red.w);
-    EXPECT(layout.box.y + layout.box.h <= layout.red.y + layout.red.h);
-    EXPECT(probeLayout(60, 60, 40).box.empty()); // Too small: nothing to show.
-    EXPECT(probeLayout(360, 240, 0).red.empty());
-    EXPECT(probeLayout(-1, -1, 10).box.empty());
-}
-
 TEST_CASE("The own frame is the default; --system-frame asks for the system's; both flags together are refused") {
     FrameRequest request = FrameRequest::System;
     EXPECT(combineFrameFlags(false, false, request));
@@ -324,7 +309,7 @@ TEST_CASE("The frame is the system frame unless borderless works") {
     const FrameChoice fell =
         chooseFrame(true, false, "that operation is not supported");
     EXPECT(fell.mode == FrameMode::System);
-    EXPECT(fell.note.find("--borderless") != std::string::npos);
+    EXPECT(fell.note.find("built-in window frame") != std::string::npos && fell.note.find("--system-frame") != std::string::npos);
     EXPECT(fell.note.find("that operation is not supported") !=
            std::string::npos);
     EXPECT(fell.note.find("system frame") != std::string::npos);

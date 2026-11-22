@@ -613,184 +613,69 @@ described above) or **off**. Flags until there is a config file: `--tab-activity
   over eight seconds of ticking every 50 ms, own input silences it, the wake-up, the mode names, off
   leaves no timer); the pulse tests set the mode with `setTabActivity`.
 
-## 16. Borderless native window (agent3)
+## 16. The native window's own frame (agent3; decided by the owner, 2026-11-22)
 
-`matterm --borderless` draws the window frame itself: the tab strip row is the window handle.
-The default stays the system frame (a `windowFrame` setting comes with the config file). The web
-client is unaffected (the browser has its own frame; the buttons are never offered there).
+The native window draws its own frame: the tab strip row is the title bar. This is the **default**;
+`--system-frame` asks for the desktop's frame instead, `--borderless` is still accepted (it is the
+default). The web client is unaffected (the browser has its own frame; the buttons are never offered).
+Where our frame cannot work, the system frame is used and a note says so (below).
 
-**Strip.** With `ViewConfig::windowButtons` the strip ends with `[ – ][ □ ][ ✕ ]` (three columns
-each, after Share and the palette button): minimise, maximise/restore (`□` when the window is
-normal, `◫` while maximised: the bundled font has no overlapping-squares glyph) and close. They are `StripHit` kinds
-(`Minimize`, `Maximize`, `CloseWindow`) like every other button; `WorkspaceView::mouse()` turns a click
-into `MouseResult::action` `window.minimize`, `window.maximize` (toggle) or `window.close`, which
-the native loop executes with SDL. **Close is `requestQuit()`**: the same close question as the
-window's own close button. A double click (`clicks == 2`) on a gap of the strip (a column with no
-region: between the last tab and Share, and between tabs) also gives `window.maximize`.
-Glyphs are in `kStripGlyphs`, so the font test covers them.
+**Strip.** The strip ends with `[ – ][ □ ][ ✕ ]` (three columns each, after the Share and palette
+buttons): minimise, maximise (`◫` while maximised: the bundled font has no overlapping-squares glyph)
+and close. They are `StripHit` kinds (`Minimize`, `Maximize`, `CloseWindow`);
+`WorkspaceView::mouse()` turns a click into `MouseResult::action` `window.minimize`,
+`window.maximize` (toggle) or `window.close`, which the native loop executes with SDL. Close is
+`requestQuit()`: the same close question as the window's own close button. A double click on a gap
+of the strip (a column with no region) also gives `window.maximize` (SDL may swallow that click on
+X11; the button always works). `ViewConfig::windowButtons` turns the buttons on. The glyphs are in
+`kStripGlyphs`, so the font test covers them.
 
-**Hit test.** `SDL_SetWindowHitTest` asks, for a point in *window* coordinates, whether it is
-a drag handle or a resize edge. The decision is pure and lives in `src/frontend/windowhit.h`
-(`classifyWindowPoint`): inputs are the point, the window size, the strip height, the edge width
-(`kResizeEdge` 6 px, corners `kResizeCorner` 12 px along the edge), whether the window is
-maximised, and a `DragMap` (the strip's gap columns in pixels). Order: (1) the edge or corner
-(none when maximised: the window manager owns a maximised window), (2) the strip row over a gap
-column is `Drag`, (3) everything else is `Normal`, so tabs and buttons get their clicks. SDL may
-call the hit test from another thread: the callback reads a mutex-guarded copy of the `DragMap`
-(and the size) that the main loop refreshes after each frame plan; it never touches the view.
-Window to drawable coordinates (high DPI) are scaled once when the map is stored.
+**Hit test.** `SDL_SetWindowHitTest` asks, for a point in window coordinates, whether it moves or
+resizes the window. The decision is pure (`src/frontend/windowhit.h`, `classifyWindowPoint`): the grip
+`kResizeEdge` 8 px, corners `kResizeCorner` 16 px along the edge, none when maximised; then the strip
+row over a gap column (`dragSpans`) is the drag handle; everything else is normal, so tabs and
+buttons get their clicks. SDL may ask from another thread: the callback reads a mutex-guarded copy of
+the geometry that the main loop refreshes each frame (`app/borderless.h`). `SDL_WINDOW_RESIZABLE` is
+set at creation and again after (Wayland ignores resize hits otherwise). The top 8 px of the window
+are grip too although nothing is drawn there.
 
-**Fallback: no half modes.** The window is created borderless; if `SDL_SetWindowHitTest` fails
-(Wayland/libdecor and the dummy driver say "not supported") the frame is given back
-(`SDL_SetWindowBordered(TRUE)`), `windowButtons` stays off, a line goes to stderr
-(`matterm: --borderless is not available (<reason>); using the system frame`) and a note is
-written to the first pane like the daemon fallback note. `chooseFrame()` (windowhit.h) is that
-decision as a function, tested. Without the hit test a borderless window could not be moved or
-resized, which is why it is never kept.
+**Border.** `kBorderWidth` 4 px on the left, right and bottom, none at the top (the strip is the top
+edge) and none when maximised (`windowInset`, `borderRects`). It is **outside** the content: the view
+(strip, panes, dividers, layers) is laid out in the window minus the inset, so nothing is covered.
+The 8 px grip is the 4 px border plus 4 px of content next to it; **those inner 4 px are grip, not
+border, and not drawn**. The colour is the strip's own background (`borderColor` =
+`tabstrip_detail::colors(palette).stripBg`, the fill of the part of the strip that is dragged).
 
-**`matterm --window-test`.** Opens a small window, prints the video driver and one line per call
-(`ok` or `FAILED: <SDL error>`): create borderless, set the hit test, toggle bordered, maximise,
-restore, minimise, restore, window flags. For the owner to run on GNOME, X11 and Wayland, and
-paste back. It never starts a terminal.
+**Pointer.** Over the grip the pointer shows the system resize shapes (`SIZEWE`, `SIZENS`, `SIZENWSE`,
+`SIZENESW`; `cursorShapeFor(zone)` maps the same classification as the hit test). Not in a maximised
+window; leaving the zone or the window restores the pointer the program used. Without a cursor theme
+SDL gives no system cursor: one stderr line, the pointer stays an arrow.
 
-**GNOME / Wayland.** On X11 (also GNOME on Xorg, XWayland) the hit test starts a window-manager
-move or resize, so edges and dragging behave like a normal window; SDL starts the drag itself, so
-a double click on the handle may not reach the app (the loop handles it if it does; otherwise use
-the maximise button). On native Wayland SDL 2.26 (the sandbox's) reports the hit test as unsupported, but **the owner's
-SDL 2.30 on GNOME Wayland accepts it** and moving works: the first assumption here was wrong for
-2.30. The fallback to the system frame now happens only when `SDL_SetWindowHitTest` itself fails.
-Wayland reports no "minimised" window state, so `--window-test` calls a call whose state it cannot
-see `called, state not reported`, and only an error return is `FAILED` (`callVerdict`). Forcing XWayland for a borderless window: `SDL_VIDEODRIVER=x11 matterm --borderless`.
-Mutter has no server-side decorations, so a borderless client-drawn window is the only
-option there; the fallback is the compromise. Not run on a real display in the sandbox; see the
-task's acceptance notes.
+**Fallback: no half modes.** The window is created borderless; if `SDL_SetWindowHitTest` fails (the
+dummy driver and old SDLs say "not supported") the frame is given back (`SDL_SetWindowBordered(TRUE)`),
+the buttons stay off, and the line `matterm: the built-in window frame is not available (<reason>);
+using the system frame (--system-frame hides this note)` goes to stderr and to the first terminal
+(`chooseFrame()`, tested). Without the hit test a borderless window could be neither moved nor
+resized. On GNOME Wayland with SDL 2.30 the hit test works (the owner's first test), which is why the
+own frame is the default there.
 
-**Tests.** `test/windowhit_test.cpp` (edges, corners, maximised, drag over gaps only, strip height,
-tiny windows, high-DPI scale, `chooseFrame`), `test/tabstrip_test.cpp` (the three buttons, their
-regions, narrow rows drop them), `test/workspaceview_test.cpp` (clicks give the actions, double
-click on a gap, no buttons without the option), `test/clioptions_test.cpp` (the new flags).
+**`matterm --window-test`.** Opens a small window and prints the SDL video driver, the session
+environment and one line per call: create borderless, resizable kept, hit test, bordered on and off,
+maximise, restore, minimise, restore. `ok`, `called, state not reported` (a call that returns nothing
+and whose state SDL cannot show: Wayland reports no minimised state; not a failure) or `FAILED: <SDL
+error>` (an error return). The last line says whether the own frame would be used here.
+`MATTERM_HITTEST_LOG=1` prints each change of the hit test's answer (`hit test (x, y): zone N`, 2..9
+resize, 1 drag) for desktops where resizing does not work. `MATTERM_ASSUME_HIT_TEST=1` is a test
+hook: it takes the own frame as if the hit test had worked (the dummy driver has none), used by the
+ctest `pty_frontend_tabs_smoke_borderless`.
 
-### 16.1 After the first test on GNOME Wayland (SDL 2.30, owner, 2026-11-22)
+**Decided against** (owner, 2026-11-22): SDL3; a transparent window with rounded corners or a shadow
+(the owner's own alpha test on GNOME Wayland showed no transparency, also with
+`wl_surface.set_opaque_region(NULL)`; SDL2 has no transparent-window flag and a client-side shadow
+would need libwayland-client / libX11); detecting a missing libdecor frame (the own frame being the
+default makes it moot). Nothing of these is in the code.
 
-Decisions: the system frame is used on Wayland unless `SDL_SetWindowHitTest` fails (as now); restore
-glyph `◫`; edge 6 px, corner 12 px. Moving worked; edge resizing and any visible edge did not.
-
-- **Edge resize.** `classifyWindowPoint` is tested for every pixel of a window: each pixel of the 6 px
-  band outside the strip handle gives a `Resize*` zone (`test/windowhit_test.cpp`), so the callback
-  answers correctly *if SDL asks*. `SDL_WINDOW_RESIZABLE` was already in the creation flags; it is now
-  also set with `SDL_SetWindowResizable` after creation (SDL on Wayland ignores resize hits otherwise).
-  Likely cause of "does not work at all": the edge zone is *inside* the window and nothing showed
-  where the window ended, so the pointer was never in it. The 1 px border below makes it visible.
-  Not proven: `MATTERM_HITTEST_LOG=1 matterm --borderless` prints each change of the answer to
-  stderr (`hit test (x, y): zone N`; 2..9 are the resize zones, 1 is the drag handle), which shows
-  whether SDL asks at the edges at all. If it asks and answers `Resize*` but nothing happens, SDL
-  or the compositor is at fault; then the fallback is resizing the right and bottom edges ourselves
-  with `SDL_SetWindowSize` while the button is down (Wayland lets a client set its own size but
-  not move it, so top and left edges cannot be done that way).
-- **Border.** `--borderless` draws a 1 px border (`borderRects`, `borderColor`: a third of the way
-  from the background to the text colour) after everything else, not when maximised. It sits on
-  the outermost pixel ring, which is also the resize band.
-
-### 16.2 Rounded corners and a shadow: feasibility only (nothing implemented; owner asked)
-
-A system frame brings both; our own frame has neither. What is possible with SDL2 (the project's
-SDL; none of this was tried, no display here, so "probably" means from SDL's documented API):
-
-1. **Nothing (now).** Square corners, 1 px border. Costs nothing, works everywhere.
-2. **Painted corners.** Draw the four corner pixels (radius 3-4 px) in the border colour and leave
-   the outside as it is: a window that looks rounded *against a dark background*, and has dark
-   corner squares against a light one. Cheap (a pure function like `borderRects`, tested), no SDL
-   feature needed, honest limits. Shadow: none.
-3. **A real transparent window** (alpha corners, a soft shadow in a transparent margin). SDL2 has
-   no "transparent window" flag (SDL3 has `SDL_WINDOW_TRANSPARENT`). `SDL_CreateShapedWindow` /
-   `SDL_SetWindowShape` exist but are for X11, Windows and macOS only (not Wayland), the shape is
-   1-bit (jagged corners), and a shaped window cannot use the hit test. A client-drawn shadow also
-   needs the window geometry and input region to exclude the margin (`xdg_surface` window geometry
-   on Wayland, `_GTK_FRAME_EXTENTS` on X11), which SDL2 does not expose; it would mean raw Wayland/X11
-   calls beside SDL. Risky, large, and different on each desktop.
-4. **Wait for SDL3**, which has transparent windows and per-pixel shapes, and do 3 then.
-
-Recommendation: 1 now, 2 if the owner finds the square corners ugly, 3 only together with an SDL3
-move. Question for the owner: is 2 wanted?
-
-### 16.3 Finding out that there is no system frame (variants to compare)
-
-On GNOME Wayland SDL draws the frame with libdecor. Without a libdecor plugin libdecor prints
-`No plugins found, falling back on no decorations` and the window has no frame at all (not even
-a title bar), which is worse than `--borderless`. The wish: then use the built-in frame
-automatically, with a line in the log and in the first terminal. Whether that can be known for
-sure is not settled, so three signals exist side by side, chosen with the environment variable
-`MATTERM_FRAME_DETECT` (default `off`: nothing changes):
-
-| value | signal | answers | weakness |
-|---|---|---|---|
-| `borders` | `SDL_GetWindowBordersSize` of a normal window: all zero (or no answer) | no frame / has one | only believed on Wayland; SDL may report "not supported" or zeros before the first configure (the app waits 200 ms for events) |
-| `plugins` | no `libdecor-*.so` in the libdecor plugin folders (`LIBDECOR_PLUGIN_DIR` and the usual `/usr/lib*/libdecor/plugins-1`) | no frame / has one | the folders differ by distribution: no folder found means "cannot tell", never "no frame" |
-| `message` | libdecor's `No plugins found` on stderr while SDL starts (the app captures stderr round `SDL_Init` and writes it back) | no frame | version-dependent wording; silence proves nothing |
-| `any` | has a frame if any signal says so, else no frame if any says so | | |
-
-The pure rules are `src/frontend/framedetect.h` (`test/framedetect_test.cpp`); the SDL and file
-side is `app/borderless.h` (`StderrCapture`, `libdecorPluginFiles`, `probeFrame`). When the chosen
-variant says "no frame", the window gets the hit test and goes borderless exactly like
-`--borderless`, with the line `matterm: the system draws no window frame here (found by '<variant>');
-using the built-in frame`. If the hit test then fails, a line says so and the window stays as it is.
-`matterm --window-test` prints all three signals and what each variant would conclude, in a normal
-window, with and without a plugin installed. Only the variant that proves right stays; the rest
-is removed. Alternative if none is reliable: a flag or setting (`windowFrame = system | own |
-auto`); the question for the owner is which of these he wants.
-
-### 16.4 Round 3 (owner, 2026-11-22): wider border and grip, transparency probe
-
-- **Border and grip.** The owner saw only 1 px and could not grab it. Now: a visible border of
-  `kBorderWidth` 4 px (the outermost pixel brighter, `borderEdgeColor`), a grip of `kResizeEdge` 8
-  px and corners of `kResizeCorner` 16 px, all inside the window (SDL's hit test never sees points
-  outside it; Wayland asks it on pointer motion and presses inside the window only). The border is
-  drawn over the content, so up to 4 px of the first and last cell column, the top of the strip and
-  the bottom row are covered; if that bothers, the next step is to inset the layout by the border
-  (touches `WindowMetrics` and every mouse coordinate), which is not done. `MATTERM_HITTEST_LOG=1`
-  still prints what SDL asks.
-- **Transparency probe** (`matterm --window-test`, `app/transparencyprobe.cpp`; step 1 of
-  `docs/tasks/csd-window.md`, nothing else of it is built). Three windows of about two seconds each
-  show a half-transparent red margin round a dark box and a fully transparent rim outside the red:
-  (1) `SDL_Renderer` software, (2) `SDL_Renderer` accelerated, both with `SDL_BLENDMODE_BLEND` and the
-  margin cleared to alpha 0 with blending off; (3) OpenGL with `SDL_GL_ALPHA_SIZE 8` (functions
-  through `SDL_GL_GetProcAddress`, no link). Each prints the renderer, the window pixel format and
-  whether it has alpha, the alpha bits granted. The owner answers: *is the desktop visible through
-  the red margin and the rim?* On X11 a compositor is needed; SDL2's X11 renderers use the default
-  (opaque) visual, so only the OpenGL variant is expected to see through there.
-- **Window geometry / `_GTK_FRAME_EXTENTS`.** `SDL_GetWindowWMInfo` (no new link) is queried and the
-  handles are printed (Wayland: display, surface, xdg_surface, xdg_toplevel; X11: display, window).
-  Setting the geometry needs `xdg_surface_set_window_geometry` (libwayland-client and the xdg-shell
-  protocol code) or `XChangeProperty` (libX11): a link dependency, so **stopped here, question for the
-  owner**: allow linking libwayland-client / libX11 for `--csd`, or drop `--csd` (fallback 2 in the task).
-- Tests: `test/windowhit_test.cpp` (widths, the ring of the border for 1 and 4 px at many sizes,
-  the probe's rectangles). The SDL drawing of the probe was run only with the dummy driver
-  (software variant ok, the others report why they are not available).
-
-### 16.5 Round 4 (owner, 2026-11-22): the border outside the content, strip colour, resize pointer
-
-Dragging to resize works now. Decided and done:
-
-- **The border does not cover content** (this replaces the overdraw of 16.4). `windowInset(own,
-  maximised)` is `{left 4, right 4, top 0, bottom 4}` px (`kBorderWidth`); the view (strip, panes,
-  dividers, layers) is laid out in the window minus the inset (`updateWindow` gives the view the
-  smaller size, drawing adds the left inset, mouse coordinates subtract it, `dragSpans` takes the
-  offset). No border at the top: the strip is the top edge. Border only left, right and bottom, not
-  when maximised, not with the system frame. A test checks that the pixels the border covers are
-  exactly the pixels the view does not (`borderRects` and `windowInset`).
-- **Grip.** The grip stays 8 px (`kResizeEdge`) and corners 16 px (`kResizeCorner`): the outer 4 px
-  are the visible border, **the inner 4 px are grip only (inside the content, not drawn)**. The top
-  8 px of the window are grip too although nothing is drawn there (the strip row's top).
-- **Colour.** `borderColor` is `tabstrip_detail::colors(palette).stripBg`, the very value the strip
-  fills its gaps with, where the window is dragged; no mixing, no brighter outer pixel (a test
-  compares it with the background of the strip's drag cells).
-- **Pointer.** Over the grip the pointer shows the system resize shapes (`SDL_SYSTEM_CURSOR_SIZEWE`,
-  `SIZENS`, `SIZENWSE`, `SIZENESW`), created once. `cursorShapeFor(zone)` (pure, tested) maps the
-  same `classifyWindowPoint` the hit test uses, so a resize shape shows exactly where a press
-  resizes; not in a maximised window (no resize zones there). Leaving the zone, or the window
-  (`SDL_WINDOWEVENT_LEAVE`), restores the cursor the program used (arrow or divider shape).
-  If SDL gives no system cursor (a Wayland session without a cursor theme) one line is written to
-  stderr and the pointer stays an arrow.
-- Test hook: `MATTERM_ASSUME_HIT_TEST=1` takes the own frame as if the hit test worked (the dummy
-  driver has none), so the ctest `pty_frontend_tabs_smoke_borderless` runs the whole tabs smoke
-  script with the inset layout.
+**Tests.** `test/windowhit_test.cpp` (zones for every pixel, drag spans, the inset equals what the
+border leaves, the border colour equals the strip's, cursor shapes, the frame request flags and the
+fallback), `test/tabstrip_test.cpp` (the buttons at every width), `test/workspaceview_test.cpp` (clicks,
+double click, restore mark), `test/clioptions_test.cpp` (the flags and the completion).

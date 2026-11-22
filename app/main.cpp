@@ -1,5 +1,4 @@
 #include "borderless.h"
-#include "transparencyprobe.h"
 #include "clioptions.h"
 #include "tabtypes.h"
 #include "fontpath.h"
@@ -351,14 +350,7 @@ int windowTest() {
         const char *value = std::getenv(name);
         return std::string(value && *value ? value : "(unset)");
     };
-    std::string startupMessages;
-    int initResult = 0;
-    {
-        borderless::StderrCapture capture; // libdecor reports a missing plugin while SDL starts.
-        initResult = SDL_Init(SDL_INIT_VIDEO);
-        startupMessages = capture.finish();
-    }
-    if (initResult != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         std::cout << "SDL_Init(VIDEO): FAILED: " << SDL_GetError() << '\n';
         return 1;
     }
@@ -430,46 +422,11 @@ int windowTest() {
     SDL_RestoreWindow(window.get());
     stateCall("SDL_RestoreWindow", SDL_WINDOW_MINIMIZED, false);
     failed = !hitTest;
-    // Does the system draw a frame? A second window, made the normal way, is asked; each variant
-    // of MATTERM_FRAME_DETECT says what it would conclude (docs/TABS_PLAN.md section 16).
-    {
-        std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> framed(
-            SDL_CreateWindow("matterm --window-test (frame)",
-                             SDL_WINDOWPOS_CENTERED,
-                             SDL_WINDOWPOS_CENTERED,
-                             480,
-                             120,
-                             SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI),
-            SDL_DestroyWindow);
-        if (framed) {
-            borderless::settleWindow(300);
-            const frontend::FrameProbe probe = borderless::probeFrame(framed.get(), startupMessages);
-            std::cout << "does the system draw a frame? (a window made the normal way)\n"
-                      << "  SDL_GetWindowBordersSize: "
-                      << (probe.bordersKnown ? "top " + std::to_string(probe.top) + ", left " + std::to_string(probe.left) +
-                                                   ", bottom " + std::to_string(probe.bottom) + ", right " +
-                                                   std::to_string(probe.right)
-                                             : std::string("not available"))
-                      << "\n  libdecor plugin libraries found: "
-                      << (probe.pluginFiles < 0 ? std::string("no plugin folder found") : std::to_string(probe.pluginFiles))
-                      << "\n  libdecor said \"No plugins found\" at start: " << (probe.libdecorSaidNoPlugins ? "yes" : "no")
-                      << '\n';
-            for (const auto variant : {frontend::DetectVariant::Borders, frontend::DetectVariant::Plugins,
-                                       frontend::DetectVariant::Message, frontend::DetectVariant::Any}) {
-                std::cout << "  MATTERM_FRAME_DETECT=" << frontend::detectVariantName(variant) << " would conclude: "
-                          << frontend::frameStateName(frontend::decide(variant, probe)) << '\n';
-            }
-        }
-        else {
-            std::cout << "does the system draw a frame? could not make a window: " << SDL_GetError() << '\n';
-        }
-    }
     const frontend::FrameChoice choice = frontend::chooseFrame(true, hitTest, hitError);
     std::cout << (choice.mode == frontend::FrameMode::Own
                       ? "--borderless would draw its own frame here.\n"
                       : choice.note + "\n");
     window.reset();
-    borderless::probeTransparency(std::cout);
     SDL_Quit();
     return failed ? 1 : 0;
 }

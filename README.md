@@ -77,6 +77,14 @@ It completes the options, the values of `--term` and `--trusted-proxy`, files an
 option wants one, `*.ttf` for the font argument, and for `--daemon-host` the `Host` names of
 `~/.ssh/config` (patterns left out; `known_hosts` is never read). Open a new shell afterwards.
 
+## The window frame
+
+The native window draws its own frame: the tab strip is the title bar (drag the empty part, minimise,
+maximise and close at the right) and the edges resize. `matterm --system-frame` uses the desktop's frame
+instead; where ours cannot work, the desktop's is used and a note says so. `matterm --window-test`
+prints which window calls work on this desktop. Details: [docs/TABS_PLAN.md](docs/TABS_PLAN.md)
+section 16.
+
 ## Keep terminals running: the local daemon
 
 `matterm-daemon` (built with `-DMATTERM_BUILD_SERVER=ON`, Linux) keeps terminals alive on a

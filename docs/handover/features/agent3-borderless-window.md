@@ -1,130 +1,58 @@
-# Borderless window (`--borderless`, `--window-test`)
+# The native window's own frame (default), `--system-frame`, `--window-test`
 
-Written by agent3, 2026-11-22. Design: `docs/TABS_PLAN.md` section 16. Contract: `docs/tasks/borderless-window.md`.
+Written by agent3, 2026-11-22, rewritten after the owner's decisions. Design: `docs/TABS_PLAN.md`
+section 16. History of the rounds is in git (`docs/handover/features/agent3-borderless-window.md`).
 
-## What changed
+## What it is now
 
-- `matterm --borderless`: the window has no system frame. The tab strip row is the title bar:
-  - drag the empty part of the strip (between the last tab and Share) to move the window;
-  - drag the window edges and corners to resize it;
-  - `–` minimise, `□` maximise (`◫` restore while maximised), `✕` close at the right end of the strip;
-  - `✕` asks the same close question as the window's normal close button;
-  - a double click on the empty part of the strip toggles maximise (see "not verified").
-- If the desktop cannot do this (SDL says "not supported", e.g. native Wayland), the system frame is
-  restored, one line goes to stderr and the same line is written in the first terminal:
-  `matterm: --borderless is not available (<reason>); using the system frame`. No half mode.
-- `matterm --window-test`: opens a small window for a moment and prints the SDL video driver, the
-  session environment variables and one `ok` / `FAILED` line per window call (borderless, hit test,
-  bordered on/off, maximise, restore, minimise). The last line says whether `--borderless` would work.
-- Default is unchanged (system frame). The web client is unchanged.
+- `matterm` draws its own window frame **by default**: the tab strip is the title bar.
+  - Drag the empty part of the strip to move the window; double click there toggles maximise.
+  - `–` minimise, `□` maximise (`◫` while maximised), `✕` close (asks the usual close question).
+  - Resize at the edges and corners (grip 8 px, corners 16 px). The pointer shows resize shapes there.
+  - A 4 px border in the strip's own colour on the left, right and bottom (none at the top, none when
+    maximised). It is outside the content: the layout is inset, nothing is covered. The inner 4 px of the
+    grip are grip only, not drawn.
+- `matterm --system-frame`: the desktop's frame instead. `--borderless`: still accepted, same as the default.
+- If SDL's hit test fails (no way to move or resize): the system frame comes back, and a note goes to
+  stderr and the first terminal. No half modes.
+- `matterm --window-test`: SDL driver, environment and one line per window call
+  (`ok` / `called, state not reported` / `FAILED: <error>`), last line says what would be used.
+- `MATTERM_HITTEST_LOG=1`: prints each change of the hit test's answer. `MATTERM_ASSUME_HIT_TEST=1`: test hook.
+- The Share button shows `⇧` (see `agent3-share-symbol.md`).
+- Removed (the owner decided against them): detecting a missing libdecor frame (`MATTERM_FRAME_DETECT`),
+  the transparency probe, anything about shadows, rounded corners or `--csd`.
 
-## How to check it (the owner, on GNOME)
+## How the owner checks it (GNOME Wayland, then X11 with `SDL_VIDEODRIVER=x11`)
 
-1. `matterm --window-test` and send me the output. On GNOME Wayland I expect `SDL_SetWindowHitTest ...
-   FAILED` and the fallback line. Try `SDL_VIDEODRIVER=x11 matterm --window-test` too (XWayland).
-2. `matterm --borderless`, or `SDL_VIDEODRIVER=x11 matterm --borderless`. Check: moving, each edge and
-   corner, the three buttons, double click on the strip, closing with a program running (the question),
-   maximised window (no resize edges), a high-DPI screen (the drag area should line up with the gaps).
+1. `matterm`: no system frame, the strip on top, the border on three sides; maximise removes the border and
+   the layout fills the screen; the first and last text columns and the bottom row are complete.
+2. Move by dragging the strip's gap; resize at each edge and each corner; check the pointer shapes (they
+   should change at the same pixels where a press starts a resize) and that it is the arrow again over the
+   text and on the strip.
+3. The three buttons; closing with a program running asks first.
+4. `matterm --system-frame`: the desktop's frame, nothing of ours.
+5. If resizing or the pointer shapes fail: `MATTERM_HITTEST_LOG=1 matterm 2> hit.log`, move to the edge and
+   into a corner, press and drag, and send `hit.log`; also the stderr line `no resize pointer shape from the
+   desktop (...)` if there is one. `matterm --window-test` output helps on a new desktop.
 
 ## Where the code is
 
-- `src/frontend/windowhit.h`: pure logic (`classifyWindowPoint`, `dragSpans`, `chooseFrame`), tested in
-  `test/windowhit_test.cpp`.
-- `src/frontend/tabstrip.h`: the buttons (`WindowButtons`, `StripHit::Minimize/Maximize/CloseWindow`).
-- `src/frontend/workspaceview.h`: `ViewConfig::windowButtons`, actions `window.minimize|maximize|close`.
-- `app/borderless.h`: the SDL hit-test callback and a mutex-guarded copy of the geometry.
-- `app/ptyfrontend.cpp`, `app/main.cpp`: window flag, fallback, actions, `--window-test`.
+- `src/frontend/windowhit.h`: pure logic (zones, drag spans, inset, border, colour, cursor shapes, frame
+  request flags, fallback choice), tested in `test/windowhit_test.cpp`.
+- `src/frontend/tabstrip.h` / `workspaceview.h`: the buttons, actions `window.minimize|maximize|close`.
+- `app/borderless.h`: SDL hit test callback and the geometry copy. `app/ptyfrontend.cpp`, `app/main.cpp`: the
+  window flags, fallback, inset layout, pointer shapes, `--window-test`.
 
 ## Verified
 
-- Build without warnings; ctest 85 of 85 green (soak included), with new tests for hit logic, strip
-  buttons at every width 0..200, view clicks and double click, the font having the new glyphs.
-- `--window-test` and the tabs smoke test with `--borderless` under the SDL dummy driver: the hit test
-  is "not supported" there, and the fallback path (frame given back, line on stderr) works.
+Build without warnings; ctest 88/88 (soak included). New tests for the zones (every pixel), the inset against
+the border, the colour against the strip, cursor shapes, the flags and the fallback; the whole tabs smoke
+script runs under the dummy driver both with the fallback (default there) and with the own frame and the
+inset layout (`pty_frontend_tabs_smoke_borderless`).
 
 ## NOT verified (no display here)
 
-- Everything with a real window manager: dragging, edge resize, cursor shapes at the edges, the buttons
-  against a real frame, maximise/restore state, high-DPI scaling of the drag area.
-- Whether SDL delivers a double click on a draggable area at all. On X11 SDL starts the move itself and
-  may swallow the click, so the double click may not work there; the maximise button always does.
-- Behaviour on Wayland beyond "SDL 2.26 reports the hit test as unsupported" (assumed from the SDL source).
-- `--borderless` with `--daemon-host` / the daemon (the window code does not depend on it).
-- clang-format: the new files are formatted; `app/main.cpp` and `app/ptyfrontend.cpp` were not
-  reformatted (shared files, not clean before), my lines follow the local style.
-
-## Update 2026-11-22 (after the owner's test on GNOME Wayland, SDL 2.30)
-
-Decided by the owner: system frame only when the hit test fails; restore glyph `◫`; edge 6 / 12 px.
-
-- **Probe wording.** `--window-test` says `called, state not reported` (not FAILED) for a call that
-  returned and whose state SDL cannot show; Wayland reports no minimised state. The owner's output
-  was: SDL 2.30, hit test ok, `SDL_MinimizeWindow` FAILED (that is this case). I did not receive his
-  full text, so it is not copied here. My Wayland assumption (hit test unsupported) was wrong for 2.30.
-- **Edge resize.** Logic checked for every pixel; `SDL_WINDOW_RESIZABLE` also set explicitly. Probable
-  cause was that no edge was visible. Check again with the border; if it still fails, run
-  `MATTERM_HITTEST_LOG=1 matterm --borderless` and move the pointer over the edges and report the
-  `hit test (x, y): zone N` lines (2..9 resize, 1 drag) and what happens when you press and drag.
-- **1 px border** in a theme colour, not when maximised. Check: it should be visible all round.
-- **Rounded corners / shadow:** only investigated, three options and a recommendation in TABS_PLAN 16.2.
-- **No system frame (libdecor without a plugin):** three ways of detecting it, chosen with
-  `MATTERM_FRAME_DETECT=off|borders|plugins|message|any` (default `off`, nothing changes). To try:
-  1. `matterm --window-test` in the setup *without* the libdecor plugin and again *with* it (a
-     session where the window has a frame). Report the block "does the system draw a frame?": the
-     borders SDL gives, the number of plugin libraries, whether libdecor complained, and what each
-     variant concludes.
-  2. For each of `borders`, `plugins`, `message`, `any`: `MATTERM_FRAME_DETECT=<v> matterm` with no
-     plugin. Expected: the window gets the built-in frame and a line in the first terminal. With the
-     plugin: it must keep the system frame. Report which variants did the right thing in both setups.
-  Then I keep the one that works and delete the others.
-- Also fixed: clang-tidy `bugprone-misplaced-widening-cast` in `ui/commandpalette.h` and `ui/shortcuts.h`
-  (not run: no clang-tidy here; the casts now widen each operand before the arithmetic).
-- Not verified: all of the above on a real display; `StderrCapture` was checked with a small program only.
-
-## Update 3 (owner's third round)
-
-- **Border / grip:** visible border 4 px (outermost pixel brighter), grip 8 px, corners 16 px (inside
-  the window). It is drawn over the content (up to 4 px of the edge cells and the strip's top row are
-  covered); insetting the layout instead is not done. If resize still fails, run
-  `MATTERM_HITTEST_LOG=1 matterm --borderless 2> hit.log`, move the pointer slowly to the edge and
-  into the corner, press and drag, and send `hit.log`. Lines look like `hit test (x, y): zone N`
-  (N = 2..9 resize, 1 drag, 0 none). No lines at the edge at all means SDL does not ask there.
-- **Transparency probe** in `matterm --window-test` (after the existing lines): three windows of
-  about two seconds each (software renderer, accelerated renderer, OpenGL with alpha). Please run it
-  on GNOME Wayland and, with `SDL_VIDEODRIVER=x11 matterm --window-test`, on X11, and report for
-  each of the three windows whether you see the desktop through the red margin (and through the
-  outer rim), plus the printed lines. Details: TABS_PLAN 16.4.
-- **Window geometry / `_GTK_FRAME_EXTENTS`:** only the handles from `SDL_GetWindowWMInfo` are
-  printed. Setting them would need libwayland-client or libX11 (a link dependency), so I stopped:
-  question below.
-- **cert-err33-c** in `app/borderless.h` (5 places): the results are now cast to `(void)`.
-- Not verified: everything on a real display; the OpenGL and accelerated variants (the sandbox has
-  neither); clang-tidy.
-
-## Update 4 (owner's fourth round)
-
-- **The border no longer covers content.** The window's content is laid out inside a 4 px border on
-  the left, right and bottom (none at the top, where the strip is the edge; none when maximised). The
-  grip is still 8 px: the outer 4 px are the visible border, the inner 4 px are grip but not drawn.
-  Check: the first and last text columns and the bottom row are complete; the strip's top row is
-  complete; maximise removes the border and the layout fills the screen again.
-- **Colour:** exactly the strip's own background (the part you drag). Check: border and drag area look
-  the same. (The "brighter outermost pixel" is gone.)
-- **Pointer:** resize shapes over the grip (left/right: horizontal arrows, top/bottom: vertical, corners:
-  diagonal), the arrow or divider shape again when the pointer leaves. Check on GNOME Wayland: do
-  the shapes show at all? If not, the desktop may have no cursor theme SDL can load: look for the stderr
-  line `no resize pointer shape from the desktop (...)` and send it. Check that the shape changes at
-  the same pixels where a press starts a resize, in all four corners, and that it returns to the
-  arrow over the terminal text and on the strip.
-- Not verified: everything with a real display. Run headless: the whole tabs smoke script with the
-  inset layout (`MATTERM_ASSUME_HIT_TEST=1`, ctest `pty_frontend_tabs_smoke_borderless`).
-- Shadow / `--csd`: stopped, nothing built (the owner's alpha test showed no transparency).
-
-## Open design questions (the owner decides)
-
-(1-3 of the first round are decided, see above.)
-1. Rounded corners: nothing / painted corners / wait for SDL3 (TABS_PLAN 16.2; recommended: nothing, painted corners if wanted).
-3. May `--csd` link libwayland-client / libX11 to set the window geometry and `_GTK_FRAME_EXTENTS`? Without it no
-   compositor-correct shadow is possible (TABS_PLAN 16.4). Alternatives: yes / no, drop `--csd` and keep the plain
-   border (recommended unless the probe shows transparency works and you want the shadow).
-2. Detecting a missing frame: which variant, or a `windowFrame = system | own | auto` setting (TABS_PLAN 16.3).
+Everything with a real window manager and real pointer: moving, resizing, the buttons against a real desktop,
+pointer shapes on Wayland, high-DPI scaling, double click on the handle (SDL may swallow it on X11),
+X11. clang-tidy (not installed here). clang-format was not run on the shared files `app/main.cpp` and
+`app/ptyfrontend.cpp` (not clean before); the new files are formatted.

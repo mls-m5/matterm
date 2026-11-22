@@ -240,9 +240,9 @@ inline FrameChoice chooseFrame(bool borderlessRequested,
     if (clean.size() > 160) {
         clean.resize(160);
     }
-    choice.note = "matterm: --borderless is not available (" +
+    choice.note = "matterm: the built-in window frame is not available (" +
                   (clean.empty() ? std::string("unknown reason") : clean) +
-                  "); using the system frame";
+                  "); using the system frame (--system-frame hides this note)";
     return choice;
 }
 
