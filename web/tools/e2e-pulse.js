@@ -21,12 +21,13 @@ async function open(browser, url, pw) {
 }
 // Prints every 200 ms in the first tab, then opens a second tab (the first is hidden and works).
 async function setup(page) {
-  await page.keyboard.type('clear; for i in $(seq 1 40); do echo working $i; sleep 0.2; done\n', { delay: 10 });
+  await page.keyboard.type('clear; for i in $(seq 1 70); do echo working $i; sleep 0.2; done\n', { delay: 10 });
   await page.waitForTimeout(500);
   await page.keyboard.press('Control+b');
   await page.waitForTimeout(150);
   await page.keyboard.press('c');
   await page.waitForTimeout(800);
+  await page.waitForTimeout(5500); // output within 5 s of our own typing is ignored; the loop prints for 14 s
 }
 // The strip, a picture a little apart in time; hashes of the first tab's label area.
 const strip = { x: 43, y: 44, width: 260, height: 24 }; // the page frames the terminal: the strip starts at (43, 44)
@@ -46,7 +47,7 @@ async function samples(page, n, gap, out, name) {
   await setup(page);
   const working = await samples(page, 4, 1000, out, 'pulse-working'); // ~3 s apart: both phases
   check('a working tab alternates its colour', new Set(working).size >= 2, JSON.stringify(working));
-  await page.waitForTimeout(9000); // the loop ended after 8 s; 3 s later nothing works
+  await page.waitForTimeout(9000); // the loop ends 14 s after typing; 3 s later nothing works
   const calm = await samples(page, 3, 1100, out, 'pulse-calm');
   check('after silence the strip rests', new Set(calm).size === 1, JSON.stringify(calm));
   const off = await open(browser, url + '?pulse=0', pw);
