@@ -49,6 +49,7 @@ NODE_PATH=$HOME/pw/node_modules MATTERM_DAEMON=$PWD/build/matterm-daemon \
   sh web/tools/run-e2e.sh $PWD/build/src/server/matterm-server build-web/site /tmp/e2eout
 ```
 
+Parallel run (one server per script, 18 scripts in about 75 s with 8 jobs): `sh web/tools/run-e2e-parallel.sh <server> build-web/site /tmp/e2eout 8`.
 Use `build/src/server/matterm-server`, not `build/server` (stale). `e2e-local.js` is skipped without
 `MATTERM_DAEMON`.
 
