@@ -390,3 +390,41 @@ Design:
 
 Open: the framing format; whether the ring size should be larger for a local daemon (it is
 a local resource, 256 KB is the browser default); idle exit time; Windows/macOS later.
+
+## 11. Taking over terminals from the laptop in the browser (goal, owner 2026-11-22)
+
+Goal: from a phone (browser) take over the terminals that run on the laptop (in the local
+daemon of section 10), control them, and take them back later. Nothing here is built.
+
+- **The server is a client of the daemon.** `matterm-server` can attach to the local
+  daemon's sessions and offer them to browsers that logged in (password, as today). The
+  wiring is explicit: an option such as `--expose-local-sessions` (name to be chosen
+  clearly). Without it the server never talks to the daemon, and the daemon never
+  listens on the network (its socket stays owner-only, section 10).
+- **Private by default, shared on purpose.** A terminal is visible to the server only
+  when it is marked shared ("Share this terminal" / "Stop sharing" in the palette, a mark
+  in the tab while shared). The daemon enforces it; the server cannot list or attach to
+  the others even with the right password. Least privilege beats one switch for everything.
+- **No accidental exposure.** The server listens on loopback unless told otherwise; a
+  non-loopback address needs its own explicit option and a warning at start; the plan of
+  the owner is the local network or an SSH port forward. A terminal is a shell as the
+  user: sharing it is remote code execution, so the password (Argon2id, rate limited),
+  Origin check, session leases and the cookie rules stay as they are, and every take-over
+  is logged (without screen contents).
+- **Take-over is exclusive** (as the sessions of phase 1 already are): the new window
+  becomes the one that writes and sets the size. The pane that lost the session shows
+  that plainly (`TerminalView` already knows "taken over by another window" as a state):
+  a one-line notice in the pane such as "This terminal is controlled from another window.
+  Press Enter to take it back", the screen kept as it was, input paused, no resize. Enter
+  attaches again from the replay offset and takes it back; the other window then shows the
+  same notice. Nothing takes a terminal back by itself.
+- **Size:** the window that has control sets the terminal size (a phone is narrow); on
+  take-back the laptop resizes it again. Programs redraw on the size change.
+- **Later:** a read-only attach (watch without typing, useful on a phone), and several
+  windows viewing at once (mirroring, last input wins), with a visible "also open in N
+  places" mark. Both are separate decisions.
+- **GUI feedback:** the owner's window shows a mark in the strip for a terminal that is
+  shared, and a notice when someone from outside took it over.
+
+Open: the option names; whether sharing is per terminal or per tab; read-only first or
+exclusive take-over first; idle expiry of a shared terminal.
