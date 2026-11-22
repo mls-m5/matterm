@@ -111,6 +111,25 @@ void TerminalMemory::append(std::u32string_view text,
     commitAppend();
 }
 
+bool TerminalMemory::prepend(FStringView text, FChar fill) {
+    if (size_ == capacity_) {
+        return false;
+    }
+    const auto slotIndex = head_ == 0 ? capacity_ - 1 : head_ - 1;
+    const auto count = std::min(columns_, text.size());
+    FChar *destination = slot(slotIndex);
+    if (count != 0) {
+        std::memmove(destination, text.data(), count * sizeof(FChar));
+    }
+    if (columns_ != 0) {
+        std::fill(destination + count, destination + columns_, fill);
+    }
+    head_ = slotIndex;
+    ++size_;
+    visibleRows_.clear();
+    return true;
+}
+
 void TerminalMemory::clear() noexcept {
     head_ = 0;
     size_ = 0;

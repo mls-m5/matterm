@@ -1,5 +1,6 @@
 #include "terminalmodel.h"
 
+#include "reflow.h"
 #include "terminalmemory.h"
 
 #include <algorithm>
@@ -42,6 +43,15 @@ struct TerminalModel::Impl {
                 softWrap.pop_front();
                 ++firstRow;
             }
+        }
+        // Adds an older row above the oldest one (lazy reflow). False when full.
+        bool prepend(FStringView row, FChar fill, bool wraps) {
+            if (firstRow == 0 || !memory.prepend(row, fill)) {
+                return false;
+            }
+            softWrap.push_front(wraps);
+            --firstRow;
+            return true;
         }
         // Never-written cells use the default colors, like cleared ones, so a
         // theme change recolors both the same way.
@@ -87,6 +97,20 @@ struct TerminalModel::Impl {
     std::size_t scrollback;
     std::unique_ptr<Screen> primary;
     std::unique_ptr<Screen> alternate;
+    // Lazy reflow (docs/SCROLLING_AND_REFLOW.md): after a width change the newest saved rows are
+    // laid out at once; the older ones wait here, untouched and at their old width, and are
+    // laid out in slices once the size has been quiet for a moment. The newest segment is last.
+    struct Segment {
+        std::unique_ptr<Screen> screen; // Its rows [0, count) are the ones still waiting.
+        std::size_t count;
+    };
+    static constexpr std::size_t kImmediateRows = 1000;  // Saved rows laid out at once.
+    static constexpr std::size_t kMinSegmentRows = 2000; // Not worth deferring less than this.
+    static constexpr std::size_t kMaxSegments = 2;       // Each keeps its old screen memory alive.
+    static constexpr std::size_t kSliceRows = 1000;
+    static constexpr double kQuietSeconds = 0.1;
+    std::vector<Segment> segments;
+    double quiet = 0; // Seconds since the last resize.
     bool useAlternate = false;
     std::size_t selectionEpoch = 0;
     std::vector<bool> tabStops;
@@ -210,11 +234,30 @@ struct TerminalModel::Impl {
         return true;
     }
 
-    std::unique_ptr<Screen> resized(const Screen &old,
-                                    std::size_t width,
-                                    std::size_t height,
-                                    std::size_t history,
-                                    bool discardHistory = false) const {
+    // The padding rule of reflow: a cell that looks the same as one never written (a space or NUL,
+    // nothing drawn but the erase or the default background) at the end of a logical line is padding.
+    bool paddingCell(const FChar &cell, const FChar &empty) const {
+        constexpr auto visibleStyle = CellAttribute::Underline | CellAttribute::Strike | CellAttribute::Inverse;
+        const auto sameBackground = [](const FChar &a, const FChar &b) {
+            return a.backgroundColor().kind == b.backgroundColor().kind && a.background.r == b.background.r &&
+                   a.background.g == b.background.g && a.background.b == b.background.b;
+        };
+        static const FChar pristine = Screen::defaultCell();
+        return (cell.codePoint == U' ' || cell.codePoint == 0) && !hasAttribute(cell.attributes, visibleStyle) &&
+               (sameBackground(cell, empty) || sameBackground(cell, pristine));
+    }
+
+    struct Resized {
+        std::unique_ptr<Screen> screen;
+        std::size_t segmentRows = 0; // Old rows [0, segmentRows) were left unreflowed (see segments).
+    };
+
+    Resized resized(const Screen &old,
+                    std::size_t width,
+                    std::size_t height,
+                    std::size_t history,
+                    bool discardHistory = false,
+                    bool reflowHistory = false) const {
         auto result =
             std::make_unique<Screen>(width, height, history, blank(old));
         result->memory.clear();
@@ -235,15 +278,66 @@ struct TerminalModel::Impl {
         const auto pulled = height > rows && history > 0 && !discardHistory
                                 ? std::min(height - rows, start(old))
                                 : 0;
-        for (std::size_t y = discardHistory ? start(old) : 0;
-             y < old.memory.size() - dropped;
-             ++y) {
-            result->append(old.memory.row(y),
-                           blank(old),
-                           width == columns && old.softWrap[y]);
+        // Wrap flags describe how a line was written: they survive a width change on the primary
+        // screen (reflowHistory), the alternate screen clips and forgets them as before.
+        const bool keepFlags = width == columns || reflowHistory;
+        const std::size_t firstOld = discardHistory ? start(old) : 0;
+        const std::size_t endOld = old.memory.size() - dropped;
+        const std::size_t extra = height > rows + pulled ? height - rows - pulled : 0;
+        const std::size_t resultRows = endOld - firstOld + extra;
+        const std::size_t historyRows = resultRows > height ? resultRows - height : 0;
+        const bool reflowing = reflowHistory && width != columns && historyRows > 0 && !discardHistory;
+        const bool reading = !old.viewport.atTail();
+        const std::size_t readerRow = old.viewport.firstRow();
+        std::size_t appended = 0; // Rows appended to the result, evicted ones included.
+        std::size_t segmentRows = 0;
+        bool anchorFound = false;
+        std::size_t anchorIndex = 0;
+        std::size_t liveFirst = firstOld; // First old row that is copied (clipped or padded) as it is.
+        if (reflowing) {
+            std::size_t cut = firstOld;
+            if (segments.size() < kMaxSegments && historyRows > kImmediateRows + kMinSegmentRows) {
+                cut = firstOld + historyRows - kImmediateRows;
+                if (reading) {
+                    cut = std::min(cut, readerRow); // The rows being read are laid out at once.
+                }
+                // A segment ends where a logical line ends.
+                std::size_t steps = 0;
+                while (cut > firstOld && old.softWrap[cut - 1] && steps++ < 100000) {
+                    --cut;
+                }
+                if (cut > firstOld && old.softWrap[cut - 1]) {
+                    cut = firstOld;
+                }
+                if (cut - firstOld < kMinSegmentRows) {
+                    cut = firstOld;
+                }
+            }
+            segmentRows = cut - firstOld;
+            const auto empty = blank(old);
+            const auto laid = reflow::layout(
+                cut,
+                firstOld + historyRows,
+                width,
+                [&](std::size_t y) { return old.memory.row(y); },
+                [&](std::size_t y) { return old.softWrap[y]; },
+                [&](const FChar *cells, std::size_t count, bool wraps) {
+                    result->append(FStringView(cells, count), empty, wraps);
+                    ++appended;
+                },
+                [&](const FChar &cell) { return paddingCell(cell, empty); },
+                reading ? readerRow : static_cast<std::size_t>(-1));
+            anchorFound = laid.anchorFound;
+            anchorIndex = laid.anchorRow;
+            liveFirst = firstOld + historyRows;
+        }
+        for (std::size_t y = liveFirst; y < endOld; ++y) {
+            result->append(old.memory.row(y), blank(old), keepFlags && old.softWrap[y]);
+            ++appended;
         }
         for (std::size_t y = rows + pulled; y < height; ++y) {
             result->append(FStringView{}, blank(old));
+            ++appended;
         }
         result->style = old.style;
         result->savedCursor = old.savedCursor;
@@ -279,7 +373,77 @@ struct TerminalModel::Impl {
         }
         result->viewport = old.viewport;
         result->viewport.rowsRevealed(pulled, result->memory.size(), height);
-        return result;
+        if (reflowing && reading) {
+            // Keep reading the same text: the first visible row is found again by its place in its line.
+            const std::size_t evicted = appended - result->memory.size();
+            const std::size_t liveStart = result->memory.size() - height;
+            std::size_t first = 0;
+            if (readerRow >= liveFirst) {
+                first = liveStart + (readerRow - liveFirst);
+            }
+            else if (anchorFound && anchorIndex >= evicted) {
+                first = anchorIndex - evicted;
+            }
+            result->viewport.reanchor(first, result->memory.size(), height);
+        }
+        return {std::move(result), segmentRows};
+    }
+
+    // Lays out the next slice of the waiting rows (newest first) above the saved rows.
+    void reflowSlice(std::size_t maxRows) {
+        if (segments.empty()) {
+            return;
+        }
+        Screen &destination = *primary;
+        if (destination.memory.size() >= destination.memory.capacity() || destination.firstRow == 0) {
+            segments.clear(); // The ring is full: what is left would be evicted at once.
+            return;
+        }
+        auto &segment = segments.back();
+        const Screen &source = *segment.screen;
+        const std::size_t hi = segment.count;
+        std::size_t lo = hi > maxRows ? hi - maxRows : 0;
+        std::size_t steps = 0;
+        while (lo > 0 && source.softWrap[lo - 1] && steps++ < 100000) {
+            --lo;
+        }
+        if (lo > 0 && source.softWrap[lo - 1]) {
+            lo = 0;
+        }
+        const auto fill = blank(destination);
+        std::vector<FChar> cells;
+        std::vector<char> wraps;
+        reflow::layout(
+            lo,
+            hi,
+            columns,
+            [&](std::size_t y) { return source.memory.row(y); },
+            [&](std::size_t y) { return source.softWrap[y]; },
+            [&](const FChar *row, std::size_t count, bool wrapped) {
+                cells.insert(cells.end(), row, row + count);
+                cells.insert(cells.end(), columns - count, fill);
+                wraps.push_back(wrapped ? 1 : 0);
+            },
+            [&](const FChar &cell) { return paddingCell(cell, fill); });
+        // Nothing below can throw: the rows are ready.
+        const std::size_t room = destination.memory.capacity() - destination.memory.size();
+        const std::size_t take = std::min(room, wraps.size());
+        for (std::size_t k = wraps.size(); k > wraps.size() - take; --k) {
+            if (!destination.prepend(FStringView(cells.data() + (k - 1) * columns, columns), fill, wraps[k - 1] != 0)) {
+                segments.clear();
+                break;
+            }
+        }
+        destination.viewport.rowsPrepended(destination.memory.size());
+        if (take < wraps.size()) {
+            segments.clear(); // The oldest rows of this slice did not fit: nothing older will.
+        }
+        else if (lo == 0) {
+            segments.pop_back();
+        }
+        else {
+            segment.count = lo;
+        }
     }
 };
 
@@ -650,7 +814,8 @@ void TerminalModel::eraseScrollback() {
     // Rebuild before replacing: allocation failure leaves cells and view
     // intact.
     impl_->primary = impl_->resized(
-        *impl_->primary, columns(), rows(), impl_->scrollback, true);
+        *impl_->primary, columns(), rows(), impl_->scrollback, true).screen;
+    impl_->segments.clear(); // The history is gone, the rows waiting to join it too.
     ++impl_->selectionEpoch;
 }
 
@@ -684,14 +849,24 @@ void TerminalModel::resize(std::size_t columns, std::size_t rows) {
     if (columns == this->columns() && rows == this->rows()) {
         return;
     }
-    auto primary =
-        impl_->resized(*impl_->primary, columns, rows, impl_->scrollback);
-    auto alternate = impl_->resized(*impl_->alternate, columns, rows, 0);
+    auto primary = impl_->resized(
+        *impl_->primary, columns, rows, impl_->scrollback, false, true);
+    auto alternate = impl_->resized(*impl_->alternate, columns, rows, 0).screen;
     auto tabs = Impl::defaultTabs(columns);
     for (std::size_t x = 0; x < std::min(columns, this->columns()); ++x) {
         tabs[x] = impl_->tabStops[x];
     }
-    impl_->primary = std::move(primary);
+    impl_->segments.reserve(impl_->segments.size() + 1); // The last step that can throw.
+    if (primary.segmentRows > 0) {
+        // The old screen keeps the older rows as they are; the new one has the rest.
+        impl_->segments.push_back({std::move(impl_->primary), primary.segmentRows});
+    }
+    impl_->primary = std::move(primary.screen);
+    if (!impl_->segments.empty()) {
+        // Room in the row numbers for the older rows that will be added above the oldest one.
+        impl_->primary->firstRow += impl_->primary->memory.capacity();
+    }
+    impl_->quiet = 0;
     impl_->alternate = std::move(alternate);
     impl_->tabStops.swap(tabs);
     impl_->columns = columns;
@@ -794,6 +969,25 @@ void TerminalModel::followTail() {
 }
 void TerminalModel::advanceViewport(double seconds) {
     impl_->active().viewport.advance(seconds);
+    if (!impl_->segments.empty()) {
+        impl_->quiet += seconds;
+        if (impl_->quiet >= Impl::kQuietSeconds) {
+            try {
+                impl_->reflowSlice(Impl::kSliceRows);
+            }
+            catch (const std::bad_alloc &) {
+                impl_->segments.clear(); // Out of memory: the oldest history is given up.
+            }
+        }
+    }
+}
+bool TerminalModel::reflowPending() const noexcept {
+    return !impl_->segments.empty();
+}
+void TerminalModel::finishReflow() {
+    while (!impl_->segments.empty()) {
+        impl_->reflowSlice(std::numeric_limits<std::size_t>::max());
+    }
 }
 const ScrollViewport &TerminalModel::viewport() const noexcept {
     return impl_->active().viewport;

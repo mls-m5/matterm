@@ -43,6 +43,10 @@ public:
     void append(std::u32string_view text,
                 Rgb8 foreground = {255, 255, 255},
                 Rgb8 background = {0, 0, 0});
+    // Adds a row before the oldest one (the same clip/fill as append). False and nothing
+    // changed when the memory is full: the oldest row would have to go. Row indices of
+    // every retained row grow by one. For rebuilding history lazily (docs/SCROLLING_AND_REFLOW.md).
+    bool prepend(FStringView text, FChar fill = {});
     void clear() noexcept;
 
     // Explicit O(retained cells) operation. Preserve rows, clip/fill columns,

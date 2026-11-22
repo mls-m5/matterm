@@ -85,13 +85,21 @@ public:
     // variants.
     void setAlternateScreen(bool enabled);
 
-    // Positive dimensions only. No reflow: width clips/pads. Height shrink
+    // Positive dimensions only. On a width change the primary screen's saved rows are laid out
+    // again (soft-wrapped lines are joined and wrapped at the new width, see
+    // docs/SCROLLING_AND_REFLOW.md); the live screen rows and the alternate screen clip/pad, programs
+    // redraw them. The newest saved rows are laid out at once, older ones in slices (reflowPending,
+    // advanceViewport) so a drag stays cheap. Height shrink
     // first drops blank rows below the cursor, then keeps the bottom screen
     // rows (primary top rows become history). Growth reveals primary saved
     // rows first, then adds blanks; alternate growth only adds blanks.
     // Preserves both buffers; resets margins/origin to full screen. Allocation
     // failure leaves both unchanged.
     void resize(std::size_t columns, std::size_t rows);
+    // Older saved rows still wait to be laid out after a width change; advanceViewport() works through
+    // them once the size has been quiet for a moment. finishReflow() does all of it now.
+    bool reflowPending() const noexcept;
+    void finishReflow();
 
     struct TextCell {
         std::size_t row, column;

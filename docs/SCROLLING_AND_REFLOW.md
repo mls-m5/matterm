@@ -404,3 +404,82 @@ rollback measured (the new history is built beside the old, so peak memory is 2x
 `TerminalModel::viewWrapMarks()` (the flags of the current frame's rows, from `softWrap`) exist and
 are tested. No backend draws the mark yet: that waits for the reflow work to land, since without
 reflow the mark would promise something that does not happen.
+
+## Implemented: history-only reflow (2026-11-22, agent2)
+
+The owner chose reflow of the saved rows (the recommendation above). The live screen and the
+alternate screen are clipped and padded as before. Code: `src/terminal/reflow.h` (the layout),
+`TerminalModel::Impl::resized` / `reflowSlice` (`terminalmodel.cpp`), `TerminalMemory::prepend`,
+`ScrollViewport::rowsPrepended` / `reanchor`. Tests: `test/terminalreflow_test.cpp` (27 cases).
+Benchmark: `bench/modelbench.cpp` (`matterm-model-bench`).
+
+### What a width change does
+
+* The saved rows are joined into logical lines along the soft-wrap flags that the model already
+  keeps (set by autowrap when the deferred wrap fires, cleared when the row is erased to its end,
+  scrolled out of a region, or replaced) and cut again at the new width. A new row carries the flag
+  when the line goes on in the next row. Cell styles move with the cells.
+* **Boundary-line rule.** The last row of a logical line never carries the flag, even when the
+  input row did: the flag of the newest saved row means "goes on in the live screen" and the live
+  rows are not reflowed, so the line ends there (it is cut, as on a narrow clip).
+* **Growth** reveals nothing new in the live rows: they are padded with blank cells; the history
+  that had been cut is not restored, the lines are simply laid out again.
+* **Operations that blank the end of a row** (DCH, EL/ECH reaching the right edge) clear the flag:
+  the line ends there. This is conservative: at most a line breaks at a different place.
+* Eviction: the ring keeps its capacity in physical rows. If the new layout has more rows than fit,
+  the oldest go. A line is cut at its start, never in the middle.
+
+### Padding rule
+
+At the end of a logical line, trailing cells that look never written are padding and are dropped,
+so a line that filled 80 columns with 20 characters does not become 4 rows of blanks at 20 columns.
+A cell is padding when it is a space or NUL, has no Underline/Strike/Inverse, and its background is
+the erase background at that moment or the pristine default (`Screen::defaultCell()`). A typed
+space in a coloured background, or an underlined space, is text and stays. Blanks inside a line
+always stay. A bounded run (`kMaxPendingPadding`, 8192 cells) is held back while deciding.
+
+### Lazy reflow and drag
+
+Reflowing every saved row on every step of a drag is what cost 30 ms per step at 10000 rows. So:
+
+* The newest 1000 saved rows (`kImmediateRows`) are laid out in the `resize()` call, always cut at
+  a logical-line start. The older rows stay as a **segment**: the old Screen is kept untouched, at
+  the old width (at most `kMaxSegments`, merged when it is cheaper to drop; segments under
+  `kMinSegmentRows` are laid out at once).
+* A new resize while a segment waits does not touch the segment: it is cut again from the
+  rows already laid out, the segment keeps its old width.
+* `advanceViewport(dt)` (called every frame by all frontends) counts quiet time since the last
+  resize; after `kQuietSeconds` (0.1 s) it lays out one slice of `kSliceRows` (1000) older rows and
+  **prepends** them above the oldest row. Row ids of existing rows do not change (new rows get
+  smaller ids; `firstRetainedRow()` decreases), the selection epoch is not bumped by a slice.
+* The reader never sees a gap: rows the reader's view covers are laid out at once, and
+  `ScrollViewport::reanchor` keeps the first visible row on the same logical position (a reader at
+  the tail stays at the tail). Positions are measured from the live bottom, so prepending older
+  rows does not move the view.
+* `reflowPending()` says if rows wait; `finishReflow()` does all of it now (tests, shutdown).
+  `eraseScrollback()`, a full ring (nothing can be prepended) or `bad_alloc` drop the segments.
+* Cost: while a segment waits the old rows exist twice (old width and the laid-out part), at most
+  the ring capacity again. Writing while a segment waits works as usual.
+
+### Measured (Release, `matterm-model-bench`, 1 column per step; main 78b5a9e = "base")
+
+Steady state (24000 lines of ~75 characters through a 10000-row history, best of 5):
+
+| | base | reflow |
+|---|---|---|
+| write, 80 columns | 29.6 / 30.6 ms | 28.7 / 29.0 ms |
+| write, 200 columns | 31.9 / 32.6 ms | 31.1 / 31.2 ms |
+
+No difference beyond noise: the write path, scrolling and memory per row are unchanged (the flags
+were already kept; nothing was added per row).
+
+Drag (history of N lines, capacity 20000 rows; mean per `resize()`+`advanceViewport` step):
+
+| lines | narrow 200→80 base / reflow | widen 80→200 base / reflow | settle (rest of the rows) |
+|---|---|---|---|
+| 1000 | 11.8 / 12.7 ms | 4.0 / 4.7 ms | none |
+| 5000 | 10.0 / 13.0 ms | 5.4 / 4.4 ms | 14 ms narrow, 20 ms widen |
+| 10000 | 6.2 / 8.8 ms | 7.4 / 4.4 ms | 15 ms narrow, 43 ms widen |
+
+The cost per step is the allocation of the new ring (as before) plus about 1000 rows of layout;
+the rest (settle) is spread over frames after the drag, 1000 rows per frame.

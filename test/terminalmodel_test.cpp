@@ -143,8 +143,8 @@ TEST_CASE("Alternate screen isolates text history style cursor and viewport") {
     EXPECT(model.cell(0, 0).codePoint == U' ');
 }
 
-TEST_CASE("Resize preserves both buffers clips width and keeps bottom rows on "
-          "shrink") {
+TEST_CASE("Resize preserves both buffers, clips the live screen, lays saved rows out again and "
+          "keeps bottom rows on shrink") {
     TerminalModel model(4, 3, 5);
     model.write(U"aaaa\r\nbbbb\r\ncccc");
     model.setAlternateScreen(true);
@@ -156,13 +156,17 @@ TEST_CASE("Resize preserves both buffers clips width and keeps bottom rows on "
     model.setAlternateScreen(false);
     EXPECT(model.cell(0, 0).codePoint == U'b');
     EXPECT(model.cell(2, 1).codePoint == U'c');
-    EXPECT_EQ(model.historySize(), std::size_t(1));
+    // The saved line "aaaa" is laid out again at width 3: "aaa" and "a".
+    EXPECT_EQ(model.historySize(), std::size_t(2));
     EXPECT_EQ(model.cursor().row, 1);
     EXPECT_EQ(model.cursor().column, 2);
     model.resize(5, 4);
+    // Growth reveals the two saved rows as they are (clipped or padded, not joined again).
     EXPECT(model.cell(0, 0).codePoint == U'a');
     EXPECT(model.cell(3, 0).codePoint == U' ');
-    EXPECT(model.cell(0, 3).codePoint == U' ');
+    EXPECT(model.cell(0, 1).codePoint == U'a');
+    EXPECT(model.cell(0, 2).codePoint == U'b');
+    EXPECT(model.cell(0, 3).codePoint == U'c');
     EXPECT_EQ(model.historySize(), std::size_t(0));
 }
 

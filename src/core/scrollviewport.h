@@ -28,6 +28,13 @@ public:
                       std::size_t retainedRows,
                       std::size_t visibleRows);
 
+    // Older rows were added above the oldest one: positions are measured from the bottom, so
+    // the view stays where it is; only the room above grows.
+    void rowsPrepended(std::size_t retainedRows);
+    // The rows were laid out again: show `firstRow` (an index into the new retained rows) at the
+    // top, or stay at the tail when the view was following it.
+    void reanchor(std::size_t firstRow, std::size_t retainedRows, std::size_t visibleRows);
+
     double offset() const noexcept {
         return displayed_;
     }

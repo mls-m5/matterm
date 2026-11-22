@@ -32,6 +32,14 @@ if(BUILD_TESTING)
     target_link_libraries(terminalmodel_test PRIVATE matterm::terminal)
     add_test(NAME terminal_model COMMAND terminalmodel_test)
 
+    add_executable(terminalreflow_test
+        terminalreflow_test.cpp
+        mls-unit-test/test_main.cpp
+    )
+    target_link_libraries(terminalreflow_test PRIVATE matterm::terminal)
+    target_include_directories(terminalreflow_test PRIVATE ${PROJECT_SOURCE_DIR}/src/terminal)
+    add_test(NAME terminal_reflow COMMAND terminalreflow_test)
+
     add_executable(utf8decoder_test
         utf8decoder_test.cpp
         mls-unit-test/test_main.cpp

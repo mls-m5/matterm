@@ -91,6 +91,22 @@ void ScrollViewport::rowsRevealed(std::size_t count,
     setGeometry(retainedRows, visibleRows);
 }
 
+void ScrollViewport::rowsPrepended(std::size_t retainedRows) {
+    retained_ = retainedRows;
+    clamp();
+}
+
+void ScrollViewport::reanchor(std::size_t firstRow, std::size_t retainedRows, std::size_t visibleRows) {
+    const bool tail = atTail();
+    setGeometry(retainedRows, visibleRows);
+    if (tail) {
+        return;
+    }
+    const double position = std::max(0.0, maxOffset() - double(firstRow));
+    target_ = displayed_ = std::clamp(position, 0.0, maxOffset());
+    quiet_ = 0;
+}
+
 bool ScrollViewport::atTail() const noexcept {
     return target_ == 0 && displayed_ == 0;
 }
