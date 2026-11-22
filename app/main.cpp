@@ -80,12 +80,14 @@ void printUsage(std::ostream &out, const char *program) {
            "  --snap-scroll        Let scrolling come to rest on whole rows (default: "
            "smooth\n"
            "                       pixel scrolling, which may stop inside a row).\n"
-           "  --borderless         Draw the window frame in the tab strip: drag the empty part,\n"
-           "                       resize at the edges, minimise / maximise / close at the right\n"
-           "                       (the system frame comes back where SDL cannot do that, e.g.\n"
-           "                       Wayland; see docs/TABS_PLAN.md section 16).\n"
+           "  --system-frame       Use the desktop's window frame instead of our own. By default the\n"
+           "                       window has no system frame: the tab strip is the title bar (drag\n"
+           "                       the empty part, minimise / maximise / close at the right) and the\n"
+           "                       edges resize. Where SDL cannot do that (no hit test) the system\n"
+           "                       frame is used, with a note (docs/TABS_PLAN.md section 16).\n"
+           "  --borderless         The default; accepted for old command lines.\n"
            "  --window-test        Print the video driver and which window calls work here, for\n"
-           "                       trying --borderless on a new desktop. Opens a window briefly.\n"
+           "                       trying the own frame on a new desktop. Opens a window briefly.\n"
            "  --smooth-cursor      Animate cursor movement (native PTY only; "
            "default: off).\n"
            "  --record-output FILE Record raw PTY output to a new file (max 64 "
@@ -483,7 +485,8 @@ int main(int argc, char **argv) {
     bool useDaemon = true; // Default; --no-daemon turns it off.
     bool daemonExplicit = false;
     bool snapScroll = false;
-    bool useBorderless = false;
+    bool borderlessFlag = false;
+    bool systemFrameFlag = false;
     bool windowTestOnly = false;
     std::string tabActivity = "icon";
     std::string daemonSocket;
@@ -543,7 +546,10 @@ int main(int argc, char **argv) {
             return 0;
         }
         else if (arg == "--borderless") {
-            useBorderless = true;
+            borderlessFlag = true; // The default now; still accepted.
+        }
+        else if (arg == "--system-frame") {
+            systemFrameFlag = true;
         }
         else if (arg == "--window-test") {
             windowTestOnly = true;
@@ -638,10 +644,6 @@ int main(int argc, char **argv) {
         return 1;
     }
 #ifndef MATTERM_HAS_PTY
-    if (useBorderless) {
-        std::cerr << "--borderless requires a build with native PTY support\n";
-        return 1;
-    }
     if (smoothCursor) {
         std::cerr
             << "--smooth-cursor requires a build with native PTY support\n";
@@ -655,9 +657,9 @@ int main(int argc, char **argv) {
         }
         return windowTest();
     }
-    if (useBorderless && (inputPath || smokeTest || showcase)) {
-        std::cerr << "--borderless is for the native terminal window: do not combine it with --input, "
-                     "--showcase or --smoke-test\n";
+    frontend::FrameRequest frameRequest = frontend::FrameRequest::Default;
+    if (!frontend::combineFrameFlags(borderlessFlag, systemFrameFlag, frameRequest)) {
+        std::cerr << "--borderless and --system-frame contradict each other\n";
         return 1;
     }
     if (!valid || (inputPath && smokeTest) ||
@@ -686,7 +688,7 @@ int main(int argc, char **argv) {
                                   recordPath,
                                   smoothCursor,
                                   ptyTabsSmokeTest,
-                                  DaemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll, daemonHost, sshArguments, daemonInstall, assumeYes, tabActivity, useBorderless});
+                                  DaemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll, daemonHost, sshArguments, daemonInstall, assumeYes, tabActivity, frontend::wantsOwnFrame(frameRequest)});
         }
         catch (const std::exception &error) {
             std::cerr << error.what() << '\n';

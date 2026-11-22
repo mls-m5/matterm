@@ -193,6 +193,23 @@ inline const char *callVerdict(bool returnedOk, bool stateReached) {
     return stateReached ? "ok" : "called, state not reported";
 }
 
+// What the command line asks for: nothing (the default is our own frame), --borderless (the same,
+// still accepted) or --system-frame.
+enum class FrameRequest { Default, Own, System };
+
+inline bool wantsOwnFrame(FrameRequest request) {
+    return request != FrameRequest::System;
+}
+
+// False when the two flags contradict each other.
+inline bool combineFrameFlags(bool borderlessFlag, bool systemFrameFlag, FrameRequest &out) {
+    if (borderlessFlag && systemFrameFlag) {
+        return false;
+    }
+    out = systemFrameFlag ? FrameRequest::System : borderlessFlag ? FrameRequest::Own : FrameRequest::Default;
+    return true;
+}
+
 enum class FrameMode { System, Own };
 
 struct FrameChoice {

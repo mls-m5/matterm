@@ -293,6 +293,27 @@ TEST_CASE("The transparency probe picture nests: transparent rim, red margin, so
     EXPECT(probeLayout(-1, -1, 10).box.empty());
 }
 
+TEST_CASE("The own frame is the default; --system-frame asks for the system's; both flags together are refused") {
+    FrameRequest request = FrameRequest::System;
+    EXPECT(combineFrameFlags(false, false, request));
+    EXPECT(request == FrameRequest::Default);
+    EXPECT(wantsOwnFrame(request)); // Nothing said: our own frame.
+    EXPECT(combineFrameFlags(true, false, request)); // --borderless: accepted, the same as the default.
+    EXPECT(request == FrameRequest::Own);
+    EXPECT(wantsOwnFrame(request));
+    EXPECT(combineFrameFlags(false, true, request)); // --system-frame.
+    EXPECT(request == FrameRequest::System);
+    EXPECT(!wantsOwnFrame(request));
+    EXPECT(!combineFrameFlags(true, true, request));
+    // The three ways through chooseFrame: default with a working hit test, --system-frame, and the fallback.
+    EXPECT(chooseFrame(wantsOwnFrame(FrameRequest::Default), true, "").mode == FrameMode::Own);
+    EXPECT(chooseFrame(wantsOwnFrame(FrameRequest::System), true, "").mode == FrameMode::System);
+    EXPECT(chooseFrame(wantsOwnFrame(FrameRequest::System), true, "").note.empty());
+    const FrameChoice fell = chooseFrame(wantsOwnFrame(FrameRequest::Default), false, "not supported");
+    EXPECT(fell.mode == FrameMode::System);
+    EXPECT(!fell.note.empty()); // The fallback says so, also when nobody asked for the own frame.
+}
+
 TEST_CASE("The frame is the system frame unless borderless works") {
     EXPECT(chooseFrame(false, false, "").mode == FrameMode::System);
     EXPECT(chooseFrame(false, false, "").note.empty());
