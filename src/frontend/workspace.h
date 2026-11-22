@@ -204,6 +204,8 @@ public:
             return focusToward(FocusDirection::Up);
         case Command::FocusDown:
             return focusToward(FocusDirection::Down);
+        case Command::OpenPalette:
+            return Outcome::Ignored; // The owner of the view handles it.
         case Command::EvenOut:
             if (tabs_.empty()) return Outcome::Ignored;
             tabs_[active_].tree.evenOut(spec_);

@@ -67,6 +67,7 @@ enum class Command {
     FocusUp,
     FocusDown,
     EvenOut, // snap every split to whole cells
+    OpenPalette, // the command palette (an overlay the owner of the view creates)
 };
 
 } // namespace frontend

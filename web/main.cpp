@@ -17,6 +17,7 @@
 #include "sdlinput.h"
 #include "terminalview.h"
 #include "touchgesture.h"
+#include "ui/commandpalette.h"
 #include "websocketchannel.h"
 #include "workspaceview.h"
 
@@ -395,6 +396,14 @@ std::string prefixBytes(const App &app) {
     return InputEncoder::control(char(prefix.key), prefix.alt);
 }
 
+// The command palette (Ctrl+B ':', the strip's button): an overlay over the
+// panes.
+void openPalette(App &app) {
+    app.layout->pushLayer(std::make_unique<ui::CommandPalette>(
+        buildCommandRegistry(app.layout->config().prefix)));
+    layoutChanged(app, false);
+}
+
 // A new tab or split could not be made: say so in the focused terminal.
 void refusedNotice(App &app) {
     if (auto *pane = app.focused()) {
@@ -427,6 +436,9 @@ bool layoutKey(App &app, const KeyChord &chord) {
     }
     if (!result.refused.empty()) {
         refusedNotice(app);
+    }
+    if (result.openPalette) {
+        openPalette(app);
     }
     if (result.forwardPrefix) {
         send(app, prefixBytes(app));
@@ -608,6 +620,9 @@ void handleText(App &app, const char *text, bool alt) {
             else if (shift && cp == U'\'') {
                 cp = U'"';
             }
+            else if (shift && cp == U';') {
+                cp = U':';
+            }
             if (layoutKey(app, KeyChord{int(cp), false, false, alt})) {
                 return;
             }
@@ -693,6 +708,9 @@ Under paneAtWindow(App &app, int wx, int wy) {
 // reporting gets wheel presses at the finger, the alternate screen gets arrow
 // keys, as the wheel does; the primary screen scrolls smoothly.
 void touchScroll(App &app, double rows, int wx, int wy) {
+    if (app.layout->hasLayer()) {
+        return; // An overlay is open: the panes below do not scroll.
+    }
     const auto under = paneAtWindow(app, wx, wy);
     if (!under.pane) {
         return;
@@ -893,6 +911,9 @@ void handleMouse(App &app, const SDL_Event &event) {
     }
     if (result.changed) {
         layoutChanged(app, result.empty);
+    }
+    if (result.openPalette) {
+        openPalette(app);
     }
     if (result.consumed || !result.pane) {
         return;
@@ -1291,6 +1312,11 @@ std::unique_ptr<WebPane> makePane(App &app) {
 // to the same terminals again. Ids only (docs: layoutsnapshot.h); the stored
 // text is untrusted and parsed strictly.
 
+// The gutter between panes: darker than the scrollbar thumb (110,122,142) so
+// the left pane's scrollbar, drawn in the near half, stands out; the track is
+// darker still.
+constexpr Rgb8 kDividerColor{48, 53, 62};
+
 constexpr const char *kLayoutKey = "matterm.layout";
 
 // The id the server keeps a pane's terminal under; else the one it was asked
@@ -1586,7 +1612,8 @@ void frame(void *data) {
             "tabs=" + std::to_string(app.workspace->tabCount()) +
             " panes=" + std::to_string(app.workspace->paneCount()) +
             " strip=" + std::to_string(plan.stripRect.h) +
-            " focus=" + std::to_string(plan.focus);
+            " focus=" + std::to_string(plan.focus) +
+            " layers=" + std::to_string(plan.layers.size());
         for (const auto &p : plan.panes) {
             text += " [pane " + std::to_string(p.id) + " " +
                     std::to_string(p.rect.x) + "," + std::to_string(p.rect.y) +
@@ -1688,6 +1715,18 @@ void frame(void *data) {
         stripFrame = strip;
     }
 
+    // Overlays (the command palette): cell grids over the panes.
+    std::vector<RenderFrame> layerFrames;
+    layerFrames.reserve(plan.layers.size());
+    for (const auto &layer : plan.layers) {
+        RenderFrame f;
+        f.cells = layer.cells->view();
+        f.cursor = layer.cursor;
+        f.cursor.focused = true;
+        f.palette = &app.chromePalette;
+        layerFrames.push_back(f);
+    }
+
     // An unchanged window leaves the canvas as it is; the window size is part
     // of the signature because a resized canvas must be redrawn.
     std::vector<PaneSignatureInput> inputs;
@@ -1700,6 +1739,12 @@ void frame(void *data) {
                           &d.pane->view().palette(),
                           d.plan.rect,
                           d.plan.scrollbar});
+    }
+    for (std::size_t i = 0; i < layerFrames.size(); ++i) {
+        inputs.push_back({&layerFrames[i],
+                          &app.chromePalette,
+                          plan.layers[i].rect,
+                          PixelRect{}});
     }
     FrameSignature signature;
     signature.add(
@@ -1734,6 +1779,12 @@ void frame(void *data) {
                                     drawn[i].plan.rect,
                                     drawn[i].plan.scrollbar});
         }
+        for (std::size_t i = 0; i < layerFrames.size(); ++i) {
+            steadyInputs.push_back({&layerFrames[i],
+                                    &app.chromePalette,
+                                    plan.layers[i].rect,
+                                    PixelRect{}});
+        }
         const auto stable = windowSignature(
             steadyInputs, plan.dividers, windowWidth, windowHeight);
         if (stable != app.lastStable) {
@@ -1744,7 +1795,7 @@ void frame(void *data) {
     app.backend->beginFrame(app.chromePalette.background);
     // Gutters first: a pane draws its scrollbar in the half next to it.
     for (const auto &divider : plan.dividers) {
-        app.backend->drawRect(box(divider.rect), app.chromePalette.colors[8]);
+        app.backend->drawRect(box(divider.rect), kDividerColor);
     }
     if (stripFrame) {
         app.backend->render(*stripFrame, PaneArea{box(plan.stripRect), {}});
@@ -1752,6 +1803,10 @@ void frame(void *data) {
     for (const auto &d : drawn) {
         app.backend->render(d.frame,
                             PaneArea{box(d.plan.rect), box(d.plan.scrollbar)});
+    }
+    for (std::size_t i = 0; i < layerFrames.size(); ++i) {
+        app.backend->render(layerFrames[i],
+                            PaneArea{box(plan.layers[i].rect), {}});
     }
     app.backend->present();
 }
@@ -1934,12 +1989,16 @@ int main() {
         LayoutSnapshot::kMaxPanes); // 16: the login's leases.
     ViewConfig layoutConfig;
     layoutConfig.palette = app.chromePalette;
+    layoutConfig.paletteButton =
+        !app.url.empty(); // A way in without remembering keys.
     layoutConfig.showStripWithOneTab = false; // Hidden until there is a choice.
     layoutConfig.compactBelowColumns = 60;    // A phone: one pane at a time.
     layoutConfig.prefix.timeoutMs = 4000;     // Time to reach for the keyboard.
     layoutConfig.desktopShortcuts = false;    // The browser keeps Ctrl+T/N/W.
     layoutConfig.prefixKeys = !app.url.empty(); // Off in the static demo.
     layoutConfig.scrollbarStrip = SdlBackend::scrollbarStrip();
+    layoutConfig.dividerThickness =
+        16; // Half of it holds the left pane's scrollbar.
     app.layout =
         std::make_unique<WorkspaceView<WebPane>>(*app.workspace, layoutConfig);
     if (app.layoutKeys()) {

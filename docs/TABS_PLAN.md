@@ -235,10 +235,25 @@ The owner finds the key bindings hard to remember. Nothing here is decided or bu
 - **Suggested order:** command registry, which-key hint, layer stack, palette and help
   view (this forces text input, list and scroll), mouse menu, settings model, settings view.
 
+Built so far (2026-11-22, browser): `WorkspaceView` has a layer stack (`pushLayer`,
+`ui::Layer` in `src/frontend/ui/layer.h`; the top layer takes keys, clicks and the wheel,
+a click outside closes it; `FramePlan::layers` carries each overlay as a `CellBuffer`
+and a pixel rectangle, which the owner draws after the panes and includes in the frame
+signature). `ui::TextInput`, `ui::ListView` and `ui::CommandPalette` (filtered by
+`searchCommands`, keys from the registry) are SDL-free and tested (`test/ui_test.cpp`).
+`Command::OpenPalette` (prefix `:`, desktop Ctrl+Shift+P) and the strip's button (glyph
+U+2261, `ViewConfig::paletteButton`) make `KeyResult/MouseResult::openPalette` true; the
+owner creates the palette and pushes it. Wired in `web/main.cpp` only; the native app
+still ignores `openPalette`. The button is part of the strip, so it shows with two or
+more tabs; with one tab the prefix `:` is the way in. U+2261 is not yet checked
+against the bundled font (needs `CHAT_TEST_FONT`).
+
 Open items noted by the owner:
 - The scrollbar of the left pane (in the divider gutter) is hard to see: in the browser
   run of 2026-11-22 it is a thin sliver (about 3 px) next to the divider and takes
   the divider's grey, while the pane at the window edge has the full 12 px bar.
+  (Browser: the gutter is now 16 px in a dark colour, so the bar half is 8 px and the
+  thumb stands out; to be checked on a screenshot.)
 
 ### Naming a tab (owner request, 2026-11-22)
 

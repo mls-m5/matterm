@@ -75,6 +75,8 @@ inline const std::vector<Info> &layoutInfo() {
         {Command::FocusDown, 0, "pane.focus-down", "Focus down", "Move focus to the terminal below"},
         {Command::EvenOut, 0, "pane.even-out", "Even out splits",
          "Give the terminals of the tab equal shares, snapped to whole cells"},
+        {Command::OpenPalette, 0, "app.palette", "Command palette",
+         "Search all commands and run one"},
     };
     return table;
 }

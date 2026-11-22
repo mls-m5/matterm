@@ -39,6 +39,7 @@ url2="http://localhost:$port2/"
 node "$here/e2e-tabs.js" "$url2" "$password" "$out"
 node "$here/e2e-tabs-layout.js" "$url2" "$password" "$out"
 node "$here/e2e-tabs-touch.js" "$url2" "$password" "$out"
+node "$here/e2e-tabs-palette.js" "$url2" "$password" "$out"
 # The sessions of the scripts above are still kept (up to the server's session
 # cap), so the limit check gets a fresh server of its own.
 kill "$pid2" 2>/dev/null || true

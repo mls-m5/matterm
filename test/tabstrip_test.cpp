@@ -331,4 +331,24 @@ TEST_CASE("Every width from 0 to 200 columns, many tab counts, stays sound") {
     }
 }
 
+TEST_CASE("A palette button closes the row when asked, at any width") {
+    for (int columns = 0; columns <= 200; ++columns) {
+        for (const int tabs : {0, 1, 3, 50}) {
+            const auto strip = buildTabStrip(makeTabs(tabs, 0), columns, Palette(), 0, true);
+            EXPECT(sound(strip, columns, std::size_t(tabs)));
+            const bool button = !strip.regions.empty() &&
+                                strip.regions.back().hit.kind == Kind::Palette;
+            EXPECT(button == (columns >= 15));
+            if (button) {
+                EXPECT_EQ(strip.regions.back().end, columns);
+                EXPECT_EQ(strip.regions.back().begin, columns - 3);
+                EXPECT(strip.cells[std::size_t(columns - 2)].codePoint == U'\x2261');
+                EXPECT(strip.hit(columns - 1).kind == Kind::Palette);
+            }
+        }
+    }
+    // Off by default: nothing changes.
+    EXPECT(buildTabStrip(makeTabs(3, 0), 80).regions.back().hit.kind != Kind::Palette);
+}
+
 TEST_SUIT_END

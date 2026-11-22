@@ -24,11 +24,13 @@
 #include "tabstrip.h"
 #include "tabtypes.h"
 #include "terminalview.h"
+#include "ui/layer.h"
 #include "workspace.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -46,6 +48,7 @@ struct ViewConfig {
     int dividerThickness = 12;   // gutter strip in pixels (its near half holds a scrollbar)
     int scrollbarStrip = 12;     // reserved at the right edge of panes touching it
     bool showStripWithOneTab = true;
+    bool paletteButton = false;  // a button at the end of the strip that opens the command palette
     bool prefixKeys = true;      // Ctrl+B ... (browser)
     bool desktopShortcuts = true; // Ctrl+Shift+T ... (native)
     PrefixKeys::Config prefix;
@@ -68,11 +71,19 @@ struct PanePlan {
     bool focused = false;
 };
 
+// An overlay as it should be drawn: a cell grid at a pixel place (whole cells).
+struct LayerPlan {
+    PixelRect rect;
+    std::shared_ptr<CellBuffer> cells;
+    CursorState cursor;
+};
+
 struct FramePlan {
     PixelRect stripRect; // empty (h == 0) when the strip is hidden
     TabStrip strip;      // cells of the strip row, columns = stripRect.w / cellWidth
     std::vector<PanePlan> panes;
     std::vector<DividerBox> dividers;
+    std::vector<LayerPlan> layers; // bottom first; drawn after the panes
     PaneId focus = 0;
 };
 
@@ -107,6 +118,8 @@ struct MouseResult {
     enum class Cursor { Default, ResizeColumns, ResizeRows } cursor = Cursor::Default;
     bool empty = false;                  // the last tab was closed
     bool refused = false;                // the "+" of the strip could not make a tab
+    bool openPalette = false;            // the strip's palette button, or a layer asked for it
+    std::string action;                  // an application action chosen in a layer
 };
 
 struct WheelResult {
@@ -124,6 +137,8 @@ struct KeyResult {
     bool forwardKey = false;             // then this key
     bool changed = false;                // layout changed: redraw
     bool empty = false;                  // the last tab was closed
+    bool openPalette = false;            // create the command palette layer and pushLayer() it
+    std::string action;                  // an application action chosen in a layer (CommandEntry id)
 };
 
 struct FocusChange {
@@ -152,13 +167,14 @@ public:
     const WindowMetrics &window() const { return metrics_; }
 
     // The frame to draw now (applies nothing; call sync() first).
-    FramePlan plan() const {
+    FramePlan plan(bool withLayers = true) const {
         refreshSpec();
         FramePlan out;
         const int stripH = stripHeight();
         if (stripH > 0) {
             out.stripRect = {0, 0, metrics_.width, stripH};
-            out.strip = buildTabStrip(workspace_.tabInfos(titleOf), stripColumns(), config_.palette, stripFirst_);
+            out.strip = buildTabStrip(workspace_.tabInfos(titleOf), stripColumns(), config_.palette, stripFirst_,
+                                  config_.paletteButton);
         }
         const Layout layout = activeLayout();
         out.dividers = layout.dividers;
@@ -189,14 +205,34 @@ public:
             p.rows = std::max(p.rows, 1);
             out.panes.push_back(p);
         }
+        if (withLayers) {
+            for (const auto &layer : layers_) {
+                const Placed placed = place(*layer);
+                auto cells = std::make_shared<CellBuffer>(static_cast<std::size_t>(placed.columns),
+                                                          static_cast<std::size_t>(placed.rows));
+                LayerPlan lp;
+                lp.rect = placed.rect;
+                lp.cursor.visible = false;
+                layer->render(*cells, lp.cursor);
+                lp.cells = std::move(cells);
+                out.layers.push_back(std::move(lp));
+            }
+        }
         return out;
     }
+
+    // ---- layers (overlays) ----
+    // The top layer takes keys, clicks and the wheel before anything else; a click
+    // outside it closes it. The owner builds the layer (see ui::CommandPalette).
+    void pushLayer(std::unique_ptr<ui::Layer> layer) { layers_.push_back(std::move(layer)); }
+    bool hasLayer() const { return !layers_.empty(); }
+    void closeLayers() { layers_.clear(); }
 
     // Resize the views of the active tab's panes to their planned cell size. During a
     // divider drag it is throttled by resizeIntervalMs; the last size always arrives
     // when the drag ends or `force` is set. Returns true if any pane was resized.
     bool sync(std::int64_t nowMs, bool force = false) {
-        const FramePlan p = plan();
+        const FramePlan p = plan(false);
         const bool throttled = !force && !flush_ && drag_ == Drag::Divider &&
                                nowMs - lastSyncMs_ < config_.resizeIntervalMs;
         bool any = false;
@@ -230,6 +266,10 @@ public:
     KeyResult key(const KeyChord &chord, std::int64_t nowMs, bool repeat = false) {
         refreshSpec();
         KeyResult r;
+        if (!layers_.empty()) {
+            applyOutcome(layers_.back()->key(chord), r);
+            return r;
+        }
         if (repeat && !prefix_.waiting()) {
             if (!(config_.desktopShortcuts && findDesktopShortcut(chord))) r.forwardKey = true;
             return r;
@@ -278,7 +318,8 @@ public:
         (void)nowMs;
         refreshSpec();
         MouseResult r;
-        const FramePlan p = plan();
+        if (!layers_.empty()) return layerMouse(in);
+        const FramePlan p = plan(false);
 
         // An owned drag continues wherever the pointer is.
         if (drag_ == Drag::Divider) {
@@ -335,6 +376,10 @@ public:
                 r.refused = made == Outcome::Ignored;
                 finish(made, r);
             }
+                break;
+            case StripHit::Kind::Palette:
+                r.openPalette = true;
+                r.changed = true;
                 break;
             case StripHit::Kind::ScrollLeft:
                 stripFirst_ = std::max(0, std::max(stripFirst_, p.strip.firstVisible) - 1);
@@ -404,6 +449,13 @@ public:
     WheelResult wheel(int x, int y, double amount) {
         refreshSpec();
         WheelResult r;
+        if (!layers_.empty()) {
+            place(*layers_.back()); // Sized before use.
+            layers_.back()->wheel(amount);
+            r.consumed = true;
+            r.changed = true;
+            return r;
+        }
         const int stripH = stripHeight();
         if (stripH > 0 && y >= 0 && y < stripH) {
             r.consumed = true;
@@ -457,6 +509,63 @@ public:
 
 private:
     enum class Drag { None, Divider, Scrollbar, Selecting };
+
+    struct Placed {
+        PixelRect rect;
+        int columns = 0;
+        int rows = 0;
+    };
+    // Sizes a layer for the window and says where it goes: centred, just below the
+    // strip row.
+    Placed place(ui::Layer &layer) const {
+        const int windowColumns = std::max(metrics_.width / metrics_.cellWidth, 1);
+        const int windowRows = std::max(metrics_.height / metrics_.cellHeight, 1);
+        const ui::CellSize size = layer.wanted(windowColumns, windowRows);
+        Placed p;
+        p.columns = std::clamp(size.columns, 1, windowColumns);
+        p.rows = std::clamp(size.rows, 1, windowRows);
+        layer.resize(p.columns, p.rows);
+        const int column = (windowColumns - p.columns) / 2;
+        const int row = std::min(1, windowRows - p.rows);
+        p.rect = {column * metrics_.cellWidth, row * metrics_.cellHeight, p.columns * metrics_.cellWidth,
+                  p.rows * metrics_.cellHeight};
+        return p;
+    }
+
+    // What a layer answered: closing it, a layout command, an application action.
+    template <class Result>
+    void applyOutcome(const ui::LayerOutcome &o, Result &r) {
+        r.changed = true;
+        if (o.close && !layers_.empty()) layers_.pop_back();
+        if (!o.action.empty()) r.action = o.action;
+        if (!o.call) return;
+        if (o.call->command == Command::OpenPalette) {
+            r.openPalette = true;
+            return;
+        }
+        applyCall(*o.call, r);
+    }
+    void applyCall(const CommandCall &call, KeyResult &r) { run(call, r); }
+    void applyCall(const CommandCall &call, MouseResult &r) {
+        finish(workspace_.apply(call.command, call.argument), r);
+    }
+
+    MouseResult layerMouse(const MouseInput &in) {
+        MouseResult r;
+        r.consumed = true;
+        const Placed placed = place(*layers_.back());
+        if (in.type != MouseInput::Type::Down || in.button != MouseInput::Button::Left) return r;
+        if (Layout::contains(placed.rect, in.x, in.y)) {
+            const int column = (in.x - placed.rect.x) / metrics_.cellWidth;
+            const int row = (in.y - placed.rect.y) / metrics_.cellHeight;
+            applyOutcome(layers_.back()->click(column, row), r);
+        }
+        else {
+            layers_.pop_back(); // A click outside dismisses the overlay.
+            r.changed = true;
+        }
+        return r;
+    }
 
     // The layout that is shown: the active tab's, or only its focused pane in a
     // window narrower than compactBelowColumns.
@@ -527,6 +636,12 @@ private:
     }
 
     void run(const CommandCall &call, KeyResult &r) {
+        if (call.command == Command::OpenPalette) {
+            r.openPalette = true;
+            r.changed = true;
+            r.commands.push_back(call);
+            return;
+        }
         const Outcome o = workspace_.apply(call.command, call.argument);
         if (o == Outcome::Ignored) {
             if (call.command == Command::NewTab || call.command == Command::SplitSideBySide ||
@@ -622,6 +737,7 @@ private:
 
     Workspace<Pane> &workspace_;
     ViewConfig config_;
+    mutable std::vector<std::unique_ptr<ui::Layer>> layers_; // bottom first; resized by place()
     PrefixKeys prefix_;
     WindowMetrics metrics_;
     Drag drag_ = Drag::None;

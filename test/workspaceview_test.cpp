@@ -1,4 +1,5 @@
 #include "mls-unit-test/unittest.h"
+#include "ui/commandpalette.h"
 #include "workspaceview.h"
 
 #include <string>
@@ -538,6 +539,107 @@ TEST_CASE("A finger grabs a divider from a distance and the strip from below") {
     two.view.mouse(two.at(8, below, MouseInput::Type::Up));
     tap.touch = true;
     EXPECT(two.view.mouse(tap).consumed);
+}
+
+TEST_CASE("The prefix colon and the desktop shortcut ask for the palette") {
+    Rig r;
+    r.view.key(kPrefix, 0);
+    KeyResult k = r.view.key({':', false, false, false}, 1);
+    EXPECT(k.openPalette && !k.forwardKey && !k.forwardPrefix);
+    EXPECT_EQ(r.space.tabCount(), std::size_t(1));
+    k = r.view.key({'p', true, true, false}, 2);
+    EXPECT(k.openPalette);
+}
+
+TEST_CASE("A layer takes keys first, is drawn over the panes and closes on Escape") {
+    Rig r;
+    r.view.pushLayer(std::make_unique<ui::CommandPalette>(buildCommandRegistry()));
+    EXPECT(r.view.hasLayer());
+    FramePlan plan = r.view.plan();
+    EXPECT_EQ(plan.layers.size(), std::size_t(1));
+    const PixelRect box = plan.layers[0].rect;
+    EXPECT(box.x >= 0 && box.y >= 0 && box.x + box.w <= 1200 && box.y + box.h <= 800);
+    EXPECT(box.x % 8 == 0 && box.y % 16 == 0 && box.w % 8 == 0 && box.h % 16 == 0);
+    EXPECT(plan.layers[0].cells != nullptr);
+    EXPECT_EQ(plan.layers[0].cells->columns() * 8, std::size_t(box.w));
+    EXPECT(plan.layers[0].cursor.visible);
+    // Typing goes to the layer, not the program.
+    const KeyResult typed = r.view.key({'n', false, false, false}, 0);
+    EXPECT(typed.changed && !typed.forwardKey && !typed.forwardPrefix);
+    EXPECT(r.view.key(kPrefix, 1).commands.empty()); // Not the prefix either.
+    EXPECT(r.view.hasLayer());
+    const KeyResult esc = r.view.key({keys::Escape, false, false, false}, 2);
+    EXPECT(esc.changed);
+    EXPECT(!r.view.hasLayer());
+    EXPECT(r.view.plan().layers.empty());
+    EXPECT(r.view.key({'a', false, false, false}, 3).forwardKey); // Normal again.
+}
+
+TEST_CASE("Enter in the palette runs the command and closes it") {
+    Rig r;
+    r.view.pushLayer(std::make_unique<ui::CommandPalette>(buildCommandRegistry()));
+    for (const char c : std::string("new tab")) r.view.key({c, false, false, false}, 0);
+    const KeyResult k = r.view.key({keys::Enter, false, false, false}, 1);
+    EXPECT(!r.view.hasLayer());
+    EXPECT_EQ(r.space.tabCount(), std::size_t(2));
+    EXPECT_EQ(k.commands.size(), std::size_t(1));
+    // The palette entry of the palette asks the owner to open it again.
+    r.view.pushLayer(std::make_unique<ui::CommandPalette>(buildCommandRegistry()));
+    for (const char c : std::string("command palette")) r.view.key({c, false, false, false}, 2);
+    EXPECT(r.view.key({keys::Enter, false, false, false}, 3).openPalette);
+}
+
+TEST_CASE("Mouse: a click on an entry runs it, outside closes, the rest is swallowed") {
+    Rig r;
+    r.view.pushLayer(std::make_unique<ui::CommandPalette>(buildCommandRegistry()));
+    for (const char c : std::string("new tab")) r.view.key({c, false, false, false}, 0);
+    const PixelRect box = r.view.plan().layers[0].rect;
+    MouseInput move = r.at(box.x + 20, box.y + 40, MouseInput::Type::Move, MouseInput::Button::None);
+    EXPECT(r.view.mouse(move).consumed);
+    EXPECT(r.view.mouse(r.at(box.x + 20, box.y + 40, MouseInput::Type::Up)).consumed);
+    EXPECT(r.view.wheel(box.x + 20, box.y + 40, -1).consumed);
+    EXPECT(r.view.hasLayer());
+    // Second text row of the layer = first entry.
+    const MouseResult hit = r.view.mouse(r.at(box.x + 8 * 4, box.y + 2 * 16 + 4));
+    EXPECT(hit.consumed && hit.changed);
+    EXPECT(!r.view.hasLayer());
+    EXPECT_EQ(r.space.tabCount(), std::size_t(2));
+    r.view.pushLayer(std::make_unique<ui::CommandPalette>(buildCommandRegistry()));
+    const MouseResult outside = r.view.mouse(r.at(1190, 790));
+    EXPECT(outside.consumed && outside.changed);
+    EXPECT(!r.view.hasLayer());
+    EXPECT_EQ(r.space.tabCount(), std::size_t(2)); // Nothing ran.
+    EXPECT(r.view.mouse(r.at(500, 400, MouseInput::Type::Up)).pane.has_value() ||
+           !r.view.hasLayer()); // Mouse works for the panes again.
+}
+
+TEST_CASE("The strip can end in a button that asks for the palette") {
+    int made = 0;
+    Space space{[&made]() { return std::make_unique<Pane>("t" + std::to_string(++made)); }};
+    ViewConfig config;
+    config.paletteButton = true;
+    View view(space, config);
+    view.setWindow({1200, 800, 8, 16});
+    view.key({'t', true, true, false}, 0);
+    view.key({'t', true, true, false}, 1); // Two tabs: the strip shows.
+    const FramePlan plan = view.plan();
+    EXPECT_NE(plan.stripRect.h, 0);
+    EXPECT_NE(plan.strip.regions.size(), std::size_t(0));
+    EXPECT(plan.strip.regions.back().hit.kind == StripHit::Kind::Palette);
+    const int last = int(plan.strip.cells.size()) - 1;
+    EXPECT(plan.strip.cells[std::size_t(last - 1)].codePoint == U'\x2261');
+    MouseInput click;
+    click.x = last * 8 + 2;
+    click.y = 4;
+    click.type = MouseInput::Type::Down;
+    click.button = MouseInput::Button::Left;
+    const MouseResult r = view.mouse(click);
+    EXPECT(r.consumed && r.openPalette);
+    // Without the option there is no button.
+    View plain(space, ViewConfig{});
+    plain.setWindow({1200, 800, 8, 16});
+    EXPECT(plain.plan().strip.regions.empty() ||
+           plain.plan().strip.regions.back().hit.kind != StripHit::Kind::Palette);
 }
 
 TEST_SUIT_END
