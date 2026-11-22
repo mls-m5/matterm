@@ -151,6 +151,12 @@ if(BUILD_TESTING)
     target_link_libraries(clientsession_test PRIVATE matterm::transport)
     add_test(NAME client_session COMMAND clientsession_test)
 
+    if(UNIX)
+        add_executable(unixchannel_test unixchannel_test.cpp mls-unit-test/test_main.cpp)
+        target_link_libraries(unixchannel_test PRIVATE matterm::unixchannel matterm::transport)
+        add_test(NAME unix_channel COMMAND unixchannel_test)
+    endif()
+
     add_executable(ui_test ui_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(ui_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
     target_link_libraries(ui_test PRIVATE cellbuffer)

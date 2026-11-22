@@ -61,6 +61,12 @@ add_library(matterm::transport ALIAS ttytransport)
 target_compile_features(ttytransport PUBLIC cxx_std_17)
 target_include_directories(ttytransport PUBLIC src/transport)
 target_link_libraries(ttytransport PUBLIC matterm::protocol)
+if(UNIX)
+    add_library(ttyunix src/transport/unixchannel.cpp)
+    add_library(matterm::unixchannel ALIAS ttyunix)
+    target_compile_features(ttyunix PUBLIC cxx_std_17)
+    target_include_directories(ttyunix PUBLIC src/transport)
+endif()
 
 # chat: the pure core of the chat (text rules, room, client). No I/O, clock or
 # process access (enforced by test/check_fakeos_includes.cmake pointed at it).
