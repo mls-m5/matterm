@@ -53,8 +53,36 @@ Written by agent3, 2026-11-22. Design: `docs/TABS_PLAN.md` section 16. Contract:
 - clang-format: the new files are formatted; `app/main.cpp` and `app/ptyfrontend.cpp` were not
   reformatted (shared files, not clean before), my lines follow the local style.
 
+## Update 2026-11-22 (after the owner's test on GNOME Wayland, SDL 2.30)
+
+Decided by the owner: system frame only when the hit test fails; restore glyph `◫`; edge 6 / 12 px.
+
+- **Probe wording.** `--window-test` says `called, state not reported` (not FAILED) for a call that
+  returned and whose state SDL cannot show; Wayland reports no minimised state. The owner's output
+  was: SDL 2.30, hit test ok, `SDL_MinimizeWindow` FAILED (that is this case). I did not receive his
+  full text, so it is not copied here. My Wayland assumption (hit test unsupported) was wrong for 2.30.
+- **Edge resize.** Logic checked for every pixel; `SDL_WINDOW_RESIZABLE` also set explicitly. Probable
+  cause was that no edge was visible. Check again with the border; if it still fails, run
+  `MATTERM_HITTEST_LOG=1 matterm --borderless` and move the pointer over the edges and report the
+  `hit test (x, y): zone N` lines (2..9 resize, 1 drag) and what happens when you press and drag.
+- **1 px border** in a theme colour, not when maximised. Check: it should be visible all round.
+- **Rounded corners / shadow:** only investigated, three options and a recommendation in TABS_PLAN 16.2.
+- **No system frame (libdecor without a plugin):** three ways of detecting it, chosen with
+  `MATTERM_FRAME_DETECT=off|borders|plugins|message|any` (default `off`, nothing changes). To try:
+  1. `matterm --window-test` in the setup *without* the libdecor plugin and again *with* it (a
+     session where the window has a frame). Report the block "does the system draw a frame?": the
+     borders SDL gives, the number of plugin libraries, whether libdecor complained, and what each
+     variant concludes.
+  2. For each of `borders`, `plugins`, `message`, `any`: `MATTERM_FRAME_DETECT=<v> matterm` with no
+     plugin. Expected: the window gets the built-in frame and a line in the first terminal. With the
+     plugin: it must keep the system frame. Report which variants did the right thing in both setups.
+  Then I keep the one that works and delete the others.
+- Also fixed: clang-tidy `bugprone-misplaced-widening-cast` in `ui/commandpalette.h` and `ui/shortcuts.h`
+  (not run: no clang-tidy here; the casts now widen each operand before the arithmetic).
+- Not verified: all of the above on a real display; `StderrCapture` was checked with a small program only.
+
 ## Open design questions (the owner decides)
 
-1. Wayland: fall back to the system frame (done; recommended) / try XWayland automatically / refuse to start.
-2. Restore glyph: `◫` (the font has no overlapping squares) / `▫` / draw with ASCII `[]`.
-3. Resize edge 6 px, corner 12 px: enough on GNOME, or wider?
+(1-3 of the first round are decided, see above.)
+1. Rounded corners: nothing / painted corners / wait for SDL3 (TABS_PLAN 16.2; recommended: nothing, painted corners if wanted).
+2. Detecting a missing frame: which variant, or a `windowFrame = system | own | auto` setting (TABS_PLAN 16.3).

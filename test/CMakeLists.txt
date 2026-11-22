@@ -115,6 +115,10 @@ if(BUILD_TESTING)
     target_link_libraries(windowhit_test PRIVATE palette)
     add_test(NAME window_hit COMMAND windowhit_test)
 
+    add_executable(framedetect_test framedetect_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(framedetect_test PRIVATE ../src/frontend)
+    add_test(NAME frame_detect COMMAND framedetect_test)
+
     add_executable(layoutsnapshot_test layoutsnapshot_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(layoutsnapshot_test PRIVATE ../src/frontend)
     add_test(NAME layout_snapshot COMMAND layoutsnapshot_test)

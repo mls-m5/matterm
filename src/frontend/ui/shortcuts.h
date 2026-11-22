@@ -188,7 +188,7 @@ private:
         for (int i = 0; i < int(text.size()) && i < maxColumns; ++i) {
             FChar c{char32_t(static_cast<unsigned char>(text[std::size_t(i)])), fg, kBackground};
             c.attributes = attributes;
-            if (x + i >= 0 && x + i < int(cells.columns())) cells.at(std::size_t(x + i), std::size_t(y)) = c;
+            if (x + i >= 0 && x + i < int(cells.columns())) cells.at(std::size_t(x) + std::size_t(i), std::size_t(y)) = c;
         }
     }
 
@@ -279,7 +279,7 @@ private:
     void put(CellBuffer &cells, int x, int y, const std::string &text, Rgb8 fg) const {
         for (int i = 0; i < int(text.size()); ++i) {
             if (x + i >= columns_ - 1 || y >= rows_ - 1) return;
-            cells.at(std::size_t(x + i), std::size_t(y)) =
+            cells.at(std::size_t(x) + std::size_t(i), std::size_t(y)) =
                 FChar{char32_t(static_cast<unsigned char>(text[std::size_t(i)])), fg, kBackground};
         }
     }

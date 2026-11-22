@@ -71,7 +71,7 @@ public:
         const auto &text = input_.text();
         const auto first = input_.firstVisible(std::size_t(fieldWidth));
         for (int i = 0; i < fieldWidth && first + std::size_t(i) < text.size(); ++i) {
-            cells.at(std::size_t(3 + i), 1) =
+            cells.at(std::size_t(3) + std::size_t(i), 1) =
                 FChar{text[first + std::size_t(i)], kFg, kBackground};
         }
         cursor.visible = true;
@@ -94,7 +94,7 @@ public:
             const bool selected = index == list_.selected();
             const Rgb8 bg = selected ? kSelected : kBackground;
             for (int x = 1; x < columns_ - 1; ++x) {
-                cells.at(std::size_t(x), std::size_t(2 + row)) = FChar{U' ', kFg, bg};
+                cells.at(std::size_t(x), std::size_t(2) + std::size_t(row)) = FChar{U' ', kFg, bg};
             }
             const auto &r = results_[index];
             const auto keysText = keyString(*r.entry);
@@ -115,12 +115,12 @@ public:
                 if (hit) {
                     c.attributes = CellAttribute::Bold;
                 }
-                cells.at(std::size_t(2 + int(i)), std::size_t(2 + row)) = c;
+                cells.at(std::size_t(2) + i, std::size_t(2) + std::size_t(row)) = c;
             }
             if (showKeys) {
                 const int at = columns_ - 2 - keyWidth;
                 for (int i = 0; i < keyWidth; ++i) {
-                    cells.at(std::size_t(at + i), std::size_t(2 + row)) =
+                    cells.at(std::size_t(at) + std::size_t(i), std::size_t(2) + std::size_t(row)) =
                         FChar{char32_t(static_cast<unsigned char>(keysText[std::size_t(i)])), kDim, bg};
                 }
             }

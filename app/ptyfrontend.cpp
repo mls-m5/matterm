@@ -578,7 +578,13 @@ int runPtyFrontend(const char *font,
             first->v.model().write(daemonFallbackNote(*daemonFallbackReason));
         }
     }
-    SdlRuntime runtime;
+    std::string sdlStartupMessages;
+    std::optional<SdlRuntime> sdlRuntime;
+    {
+        borderless::StderrCapture capture; // libdecor reports a missing plugin while SDL starts.
+        sdlRuntime.emplace();
+        sdlStartupMessages = capture.finish();
+    }
     {
         // After SDL_Init, which installs its own SIGTERM handler (a plain quit): ours saves first.
         struct sigaction action {};
@@ -623,6 +629,35 @@ int runPtyFrontend(const char *font,
                     text += static_cast<char32_t>(static_cast<unsigned char>(c));
                 }
                 first->v.model().write(text);
+            }
+        }
+    }
+
+    // No --borderless, but the system draws no frame (libdecor without a plugin): use our own, with a
+    // line in the log and the first terminal. How that is found out is chosen by MATTERM_FRAME_DETECT
+    // while the variants are compared (docs/TABS_PLAN.md section 16).
+    const frontend::DetectVariant detectVariant = borderless::detectVariantFromEnvironment();
+    if (!daemonOptions.borderless && !tabsSmoke && detectVariant != frontend::DetectVariant::Off) {
+        borderless::settleWindow(200);
+        const frontend::FrameProbe probe = borderless::probeFrame(window.get(), sdlStartupMessages);
+        if (frontend::decide(detectVariant, probe) == frontend::FrameState::NoFrame) {
+            SDL_SetWindowResizable(window.get(), SDL_TRUE);
+            if (borderless::install(window.get(), hitState) == 0) {
+                SDL_SetWindowBordered(window.get(), SDL_FALSE);
+                ownFrame = true;
+                const std::string note = frontend::noFrameNote(frontend::detectVariantName(detectVariant));
+                std::cerr << note << '\n';
+                if (NativePane *first = workspace.focusedPane()) {
+                    std::u32string text;
+                    for (const char c : note + "\r\n") {
+                        text += static_cast<char32_t>(static_cast<unsigned char>(c));
+                    }
+                    first->v.model().write(text);
+                }
+            }
+            else {
+                std::cerr << "matterm: the system draws no window frame here, and the hit test is not available "
+                             "either (" << SDL_GetError() << "); the window stays as it is\n";
             }
         }
     }

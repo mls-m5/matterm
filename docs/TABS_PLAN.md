@@ -669,3 +669,72 @@ task's acceptance notes.
 tiny windows, high-DPI scale, `chooseFrame`), `test/tabstrip_test.cpp` (the three buttons, their
 regions, narrow rows drop them), `test/workspaceview_test.cpp` (clicks give the actions, double
 click on a gap, no buttons without the option), `test/clioptions_test.cpp` (the new flags).
+
+### 16.1 After the first test on GNOME Wayland (SDL 2.30, owner, 2026-11-22)
+
+Decisions: the system frame is used on Wayland unless `SDL_SetWindowHitTest` fails (as now); restore
+glyph `◫`; edge 6 px, corner 12 px. Moving worked; edge resizing and any visible edge did not.
+
+- **Edge resize.** `classifyWindowPoint` is tested for every pixel of a window: each pixel of the 6 px
+  band outside the strip handle gives a `Resize*` zone (`test/windowhit_test.cpp`), so the callback
+  answers correctly *if SDL asks*. `SDL_WINDOW_RESIZABLE` was already in the creation flags; it is now
+  also set with `SDL_SetWindowResizable` after creation (SDL on Wayland ignores resize hits otherwise).
+  Likely cause of "does not work at all": the edge zone is *inside* the window and nothing showed
+  where the window ended, so the pointer was never in it. The 1 px border below makes it visible.
+  Not proven: `MATTERM_HITTEST_LOG=1 matterm --borderless` prints each change of the answer to
+  stderr (`hit test (x, y): zone N`; 2..9 are the resize zones, 1 is the drag handle), which shows
+  whether SDL asks at the edges at all. If it asks and answers `Resize*` but nothing happens, SDL
+  or the compositor is at fault; then the fallback is resizing the right and bottom edges ourselves
+  with `SDL_SetWindowSize` while the button is down (Wayland lets a client set its own size but
+  not move it, so top and left edges cannot be done that way).
+- **Border.** `--borderless` draws a 1 px border (`borderRects`, `borderColor`: a third of the way
+  from the background to the text colour) after everything else, not when maximised. It sits on
+  the outermost pixel ring, which is also the resize band.
+
+### 16.2 Rounded corners and a shadow: feasibility only (nothing implemented; owner asked)
+
+A system frame brings both; our own frame has neither. What is possible with SDL2 (the project's
+SDL; none of this was tried, no display here, so "probably" means from SDL's documented API):
+
+1. **Nothing (now).** Square corners, 1 px border. Costs nothing, works everywhere.
+2. **Painted corners.** Draw the four corner pixels (radius 3-4 px) in the border colour and leave
+   the outside as it is: a window that looks rounded *against a dark background*, and has dark
+   corner squares against a light one. Cheap (a pure function like `borderRects`, tested), no SDL
+   feature needed, honest limits. Shadow: none.
+3. **A real transparent window** (alpha corners, a soft shadow in a transparent margin). SDL2 has
+   no "transparent window" flag (SDL3 has `SDL_WINDOW_TRANSPARENT`). `SDL_CreateShapedWindow` /
+   `SDL_SetWindowShape` exist but are for X11, Windows and macOS only (not Wayland), the shape is
+   1-bit (jagged corners), and a shaped window cannot use the hit test. A client-drawn shadow also
+   needs the window geometry and input region to exclude the margin (`xdg_surface` window geometry
+   on Wayland, `_GTK_FRAME_EXTENTS` on X11), which SDL2 does not expose; it would mean raw Wayland/X11
+   calls beside SDL. Risky, large, and different on each desktop.
+4. **Wait for SDL3**, which has transparent windows and per-pixel shapes, and do 3 then.
+
+Recommendation: 1 now, 2 if the owner finds the square corners ugly, 3 only together with an SDL3
+move. Question for the owner: is 2 wanted?
+
+### 16.3 Finding out that there is no system frame (variants to compare)
+
+On GNOME Wayland SDL draws the frame with libdecor. Without a libdecor plugin libdecor prints
+`No plugins found, falling back on no decorations` and the window has no frame at all (not even
+a title bar), which is worse than `--borderless`. The wish: then use the built-in frame
+automatically, with a line in the log and in the first terminal. Whether that can be known for
+sure is not settled, so three signals exist side by side, chosen with the environment variable
+`MATTERM_FRAME_DETECT` (default `off`: nothing changes):
+
+| value | signal | answers | weakness |
+|---|---|---|---|
+| `borders` | `SDL_GetWindowBordersSize` of a normal window: all zero (or no answer) | no frame / has one | only believed on Wayland; SDL may report "not supported" or zeros before the first configure (the app waits 200 ms for events) |
+| `plugins` | no `libdecor-*.so` in the libdecor plugin folders (`LIBDECOR_PLUGIN_DIR` and the usual `/usr/lib*/libdecor/plugins-1`) | no frame / has one | the folders differ by distribution: no folder found means "cannot tell", never "no frame" |
+| `message` | libdecor's `No plugins found` on stderr while SDL starts (the app captures stderr round `SDL_Init` and writes it back) | no frame | version-dependent wording; silence proves nothing |
+| `any` | has a frame if any signal says so, else no frame if any says so | | |
+
+The pure rules are `src/frontend/framedetect.h` (`test/framedetect_test.cpp`); the SDL and file
+side is `app/borderless.h` (`StderrCapture`, `libdecorPluginFiles`, `probeFrame`). When the chosen
+variant says "no frame", the window gets the hit test and goes borderless exactly like
+`--borderless`, with the line `matterm: the system draws no window frame here (found by '<variant>');
+using the built-in frame`. If the hit test then fails, a line says so and the window stays as it is.
+`matterm --window-test` prints all three signals and what each variant would conclude, in a normal
+window, with and without a plugin installed. Only the variant that proves right stays; the rest
+is removed. Alternative if none is reliable: a flag or setting (`windowFrame = system | own |
+auto`); the question for the owner is which of these he wants.
