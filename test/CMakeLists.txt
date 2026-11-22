@@ -162,6 +162,11 @@ if(BUILD_TESTING)
     target_link_libraries(ui_test PRIVATE cellbuffer)
     add_test(NAME ui COMMAND ui_test)
 
+    add_executable(copymode_test copymode_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(copymode_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+    target_link_libraries(copymode_test PRIVATE matterm::terminal)
+    add_test(NAME copy_mode COMMAND copymode_test)
+
     add_executable(daemoncommands_test daemoncommands_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(daemoncommands_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
     target_link_libraries(daemoncommands_test PRIVATE cellbuffer)

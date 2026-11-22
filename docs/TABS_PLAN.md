@@ -460,3 +460,32 @@ a thin line border in cells with box-drawing or half-block glyphs (needs a cmap 
 a soft shadow under overlays, rounded corners with a small set of corner glyphs, a
 different divider look for the focused pane (accent color), a subtle title row in popups.
 Decide together with the theme/palette setting, not before.
+
+## 12. Copy / scroll mode (owner request 2026-11-22; implemented as described)
+
+A keyboard-only way to scroll back and select text, like tmux's copy mode. A **virtual cursor**
+(never the program's real cursor, which is hidden while the mode is on) moves through the
+retained text; the program gets no keys while the mode is on, and keeps running.
+
+- **Enter:** prefix `[` (browser), palette "Copy / scroll mode", `Ctrl+Shift+Space` (desktop).
+  Command `Command::CopyMode`, registry id `pane.copy-mode`. The layout reports it as
+  `KeyResult/MouseResult::copyMode`; the owner of the view starts it in the focused pane.
+- **Where the cursor starts:** on the real cursor when that is on screen, else the middle row of
+  what is shown.
+- **Keys (all consumed):** `h j k l` and the arrows; `0`/Home line start, `^` first non-blank,
+  `$`/End last non-blank; `w b e` words; PgUp/PgDn and `Ctrl+B/F` a page, `Ctrl+U/D` half a page;
+  `g`/`G` (or Ctrl+Home/End) oldest line / last line; `v` starts or ends a selection, Space starts
+  one, `V` selects the whole (wrapped) line; moving extends it. `Enter` or `y` copies the selection
+  (no selection: the line under the cursor) and leaves; `Esc`, `q` or `Ctrl+C` leave without
+  copying. The view scrolls to keep the cursor in sight; the selection uses the same
+  `Selection` as the mouse, so highlight and the 1 MiB copy limit are the same.
+- **Shown:** the virtual cursor is a block at its cell, the selection is highlighted as usual, and
+  a small badge `COPY` (with `SELECT` while selecting and `row/total`) sits in the pane's top right
+  corner. The window or page title is not used.
+- **Not in it (yet):** search (`/`), rectangular selection, marks. Mouse still works as usual; a
+  mouse selection made while the mode is on is simply the current selection.
+- **Code:** `src/frontend/copymode.h` (no SDL; tests in `test/copymode_test.cpp`) holds the state
+  and key handling; `TerminalView::copyMode` is the per-pane `std::optional`; both front ends
+  feed it the keys that would have gone to the program and draw `apply()` + the badge.
+- **Scrolling feel:** the wheel and touch scroll in pixels (a view may rest inside a row);
+  `--snap-scroll` / `?snap=1` make it settle on whole rows after the input pauses.

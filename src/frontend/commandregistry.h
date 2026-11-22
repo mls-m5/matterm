@@ -33,6 +33,9 @@ inline std::string formatChord(const KeyChord &k) {
     case keys::Enter: return s + "Enter";
     case keys::Tab: return s + "Tab";
     case keys::Backspace: return s + "Backspace";
+    case keys::Home: return s + "Home";
+    case keys::End: return s + "End";
+    case ' ': return s + "Space";
     default: break;
     }
     const int c = foldKey(k.key);
@@ -77,6 +80,8 @@ inline const std::vector<Info> &layoutInfo() {
          "Give the terminals of the tab equal shares, snapped to whole cells"},
         {Command::OpenPalette, 0, "app.palette", "Command palette",
          "Search all commands and run one"},
+        {Command::CopyMode, 0, "pane.copy-mode", "Copy / scroll mode",
+         "Move a cursor through the text with the keyboard, select and copy it"},
     };
     return table;
 }

@@ -122,4 +122,21 @@ TEST_CASE("Search: forgiving, ranked, and the extra actions are included") {
     if (!r.empty()) EXPECT_EQ(r.front().entry->id, std::string("tab.new"));
 }
 
+TEST_CASE("Copy / scroll mode is in the registry with its prefix and desktop keys") {
+    const auto registry = buildCommandRegistry(PrefixKeys::Config{});
+    bool found = false;
+    for (const auto &e : registry) {
+        if (e.id == "pane.copy-mode") {
+            found = true;
+            EXPECT_EQ(e.name, "Copy / scroll mode");
+            EXPECT(e.call && e.call->command == Command::CopyMode);
+            EXPECT_EQ(e.prefixKeys.size(), std::size_t(1));
+            EXPECT_EQ(e.prefixKeys[0], "Ctrl+B [");
+            EXPECT_EQ(e.desktopKeys.size(), std::size_t(1));
+            EXPECT_EQ(e.desktopKeys[0], "Ctrl+Shift+Space");
+        }
+    }
+    EXPECT(found);
+}
+
 TEST_SUIT_END

@@ -791,4 +791,30 @@ TEST_CASE("The Share button shows the shared panes of the active tab and asks fo
     EXPECT(marked);
 }
 
+TEST_CASE("The prefix and [ ask the owner to enter copy mode; so does the desktop shortcut and a palette choice") {
+    int made = 0;
+    Space space{[&made]() { return std::make_unique<Pane>("t" + std::to_string(++made)); }};
+    View view(space, ViewConfig{});
+    view.setWindow({1200, 800, 8, 16});
+    view.key({'t', true, true, false}, 0); // A tab.
+    auto r = view.key({'b', true, false, false}, 1);
+    EXPECT(!r.copyMode);
+    r = view.key({'[', false, false, false}, 2);
+    EXPECT(r.copyMode);
+    EXPECT(!r.forwardKey && !r.forwardPrefix);
+    ViewConfig desktop;
+    desktop.prefixKeys = false;
+    View other(space, desktop);
+    other.setWindow({1200, 800, 8, 16});
+    r = other.key({' ', true, true, false}, 3);
+    EXPECT(r.copyMode);
+    // Chosen in the palette.
+    view.pushLayer(std::make_unique<ui::CommandPalette>(buildCommandRegistry(ViewConfig{}.prefix)));
+    for (const char c : std::string("copy / scroll")) {
+        view.key({c, false, false, false}, 4);
+    }
+    r = view.key({keys::Enter, false, false, false}, 5);
+    EXPECT(r.copyMode);
+}
+
 TEST_SUIT_END

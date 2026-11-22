@@ -427,6 +427,10 @@ int keyCodeOf(SDL_Keycode key) {
         return keys::Tab;
     case SDLK_BACKSPACE:
         return keys::Backspace;
+    case SDLK_HOME:
+        return keys::Home;
+    case SDLK_END:
+        return keys::End;
     default:
         return key >= 32 && key < 127 ? int(key) : 0;
     }
@@ -585,8 +589,8 @@ int runPtyFrontend(const char *font,
     Uint64 lastFrame = SDL_GetTicks64();
 
     const auto send = [&](NativePane &pane, std::string_view bytes) {
-        if (bytes.empty() || pane.v.ended()) {
-            return;
+        if (bytes.empty() || pane.v.ended() || pane.v.copyMode) {
+            return; // Copy mode: the program gets no input.
         }
         rejectedInput = !pane.v.sendInput(bytes);
         if (!rejectedInput) {
@@ -643,6 +647,25 @@ int runPtyFrontend(const char *font,
                                      ? ""
                                      : "clipboard copy failed";
             }
+        }
+    };
+    // Copy / scroll mode (docs/TABS_PLAN.md section 12).
+    const auto enterCopyMode = [&] {
+        if (auto *pane = workspace.focusedPane(); pane && !pane->v.ended() && !pane->v.copyMode) {
+            pane->v.selection.reset();
+            pane->v.copyMode.emplace(pane->v.model());
+        }
+    };
+    const auto copyKey = [&](NativePane &pane, const KeyChord &chord) {
+        const auto r = pane.v.copyMode->key(chord, pane.v.model(), pane.v.selection);
+        if (r.action == CopyMode::Action::Copy) {
+            clipboardError = SDL_SetClipboardText(r.text.c_str()) == 0 ? "" : "clipboard copy failed";
+        }
+        else if (r.tooLarge) {
+            clipboardError = "copy failed: selection exceeds 1 MiB";
+        }
+        if (r.action != CopyMode::Action::None) {
+            pane.v.copyMode.reset();
         }
     };
     const auto pasteInto = [&](NativePane &pane) {
@@ -994,6 +1017,9 @@ int runPtyFrontend(const char *font,
         if (r.openPalette) {
             openPalette();
         }
+        if (r.copyMode) {
+            enterCopyMode();
+        }
         if (r.confirm) {
             showCloseDialog(*r.confirm);
         }
@@ -1280,6 +1306,14 @@ int runPtyFrontend(const char *font,
                 else if (skipText) {
                     skipText = false;
                 }
+                else if (auto *copying = workspace.focusedPane(); copying && copying->v.copyMode) {
+                    // One chord per ASCII character; anything else is ignored.
+                    for (const char c : std::string_view(event.text.text)) {
+                        if (copying->v.copyMode && c >= 32 && c < 127) {
+                            copyKey(*copying, {int(c), false, false, false});
+                        }
+                    }
+                }
                 else if (!mod.control) {
                     sendFocused(InputEncoder::text(event.text.text, mod.alt));
                 }
@@ -1522,6 +1556,14 @@ int runPtyFrontend(const char *font,
                     continue;
                 }
                 NativePane &np = *focused;
+                if (np.v.copyMode) {
+                    // The program gets nothing. Printable keys arrive as text (below); named keys
+                    // and Ctrl+letter are fed here.
+                    if (code != 0 && (!printable || mod.control)) {
+                        copyKey(np, {code, mod.control, mod.shift, mod.alt});
+                    }
+                    continue;
+                }
                 if (key == SDLK_RETURN && !mod.control && !mod.alt && !mod.shift && np.inDaemon() &&
                     np.reattach()) {
                     continue; // Enter in a pane that lost its terminal: attach again.
@@ -1711,12 +1753,34 @@ int runPtyFrontend(const char *font,
                                    (!frame.cursor.focused ||
                                     !frame.cursor.blink ||
                                     (now / 500) % 2 == 0);
+            if (pane->v.copyMode) {
+                pane->v.copyMode->apply(model, frame); // The virtual cursor replaces the real one.
+            }
             backend.render(frame,
                            PaneArea{{pp.rect.x, pp.rect.y, pp.rect.w, pp.rect.h},
                                     {pp.scrollbar.x,
                                      pp.scrollbar.y,
                                      pp.scrollbar.w,
                                      pp.scrollbar.h}});
+            if (pane->v.copyMode) {
+                // The badge in the top right corner: COPY / SELECT and where the cursor is.
+                const std::string text = pane->v.copyMode->badge(model);
+                CellBuffer badge(text.size(), 1);
+                for (std::size_t i = 0; i < text.size(); ++i) {
+                    badge.at(i, 0) = FChar{char32_t(text[i]), Rgb8{20, 20, 20}, Rgb8{255, 190, 60}};
+                }
+                RenderFrame badgeFrame;
+                badgeFrame.cells = badge.view();
+                badgeFrame.cursor.visible = false;
+                const Palette badgePalette;
+                badgeFrame.palette = &badgePalette;
+                const int width = int(text.size()) * backend.cellWidth();
+                const int x = pp.rect.x + pp.rect.w - width - SdlBackend::scrollbarStrip();
+                if (x >= pp.rect.x) {
+                    backend.render(badgeFrame,
+                                   PaneArea{{x, pp.rect.y, width, backend.cellHeight()}, {}});
+                }
+            }
             if (pp.shared) {
                 // Shared with browsers: a small red square in the pane's corner.
                 const int side = std::max(4, backend.cellHeight() / 3);

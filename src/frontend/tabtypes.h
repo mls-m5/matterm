@@ -68,6 +68,7 @@ enum class Command {
     FocusDown,
     EvenOut, // snap every split to whole cells
     OpenPalette, // the command palette (an overlay the owner of the view creates)
+    CopyMode,    // copy / scroll mode in the focused pane (the owner of the view enters it)
 };
 
 } // namespace frontend

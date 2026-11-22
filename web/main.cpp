@@ -266,8 +266,8 @@ protocol::Time clockNow() {
 }
 
 void sendTo(WebPane &pane, std::string_view bytes) {
-    if (bytes.empty()) {
-        return;
+    if (bytes.empty() || pane.view().copyMode) {
+        return; // Copy mode: the program gets no input.
     }
     if (pane.view().sendInput(bytes)) {
         pane.view().model().followTail();
@@ -587,6 +587,35 @@ void handleAction(App &app, const std::string &action) {
     }
 }
 
+// Copy / scroll mode (docs/TABS_PLAN.md section 12): the focused pane's keys go to the virtual
+// cursor instead of the program.
+void enterCopyMode(App &app) {
+    if (auto *pane = app.focused(); pane && !pane->view().ended() && !pane->view().copyMode) {
+        pane->view().selection.reset();
+        pane->view().copyMode.emplace(pane->view().model());
+        app.lastSignature.reset();
+    }
+}
+
+void copyModeKey(App &app, WebPane &pane, const KeyChord &chord) {
+    auto &view = pane.view();
+    if (!view.copyMode) {
+        return;
+    }
+    const auto r = view.copyMode->key(chord, view.model(), view.selection);
+    if (r.action == CopyMode::Action::Copy) {
+        copyToClipboard(r.text);
+    }
+    else if (r.tooLarge) {
+        setTitle("matterm | copy failed: selection exceeds 1 MiB");
+    }
+    if (r.action != CopyMode::Action::None) {
+        view.copyMode.reset();
+    }
+    app.lastSignature.reset();
+    app.activeUntil = SDL_GetTicks64() + 500;
+}
+
 // Feeds a key to the layout. True when the layout took it (a command, the
 // prefix itself, or a literal prefix that was sent); false: the key goes on to
 // the program (after the prefix, if the layout says so).
@@ -613,6 +642,9 @@ bool layoutKey(App &app, const KeyChord &chord) {
     }
     if (result.openPalette) {
         openPalette(app);
+    }
+    if (result.copyMode) {
+        enterCopyMode(app);
     }
     if (!result.action.empty()) {
         handleAction(app, result.action);
@@ -681,6 +713,12 @@ std::optional<KeyChord> chordFor(SDL_Keycode sym,
     case SDLK_BACKSPACE:
         key = keys::Backspace;
         break;
+    case SDLK_HOME:
+        key = keys::Home;
+        break;
+    case SDLK_END:
+        key = keys::End;
+        break;
     default:
         if (mod.control && sym > 0 && sym < 128) {
             key = int(sym);
@@ -724,6 +762,14 @@ void handleKey(App &app, const SDL_KeyboardEvent &key) {
     }
     auto &view = pane->view();
     const auto &modes = view.modes();
+    if (view.copyMode) {
+        // Named keys and Ctrl+letter here; printable keys arrive as text. Nothing reaches the
+        // program.
+        if (const auto chord = chordFor(sym, mod)) {
+            copyModeKey(app, *pane, *chord);
+        }
+        return;
+    }
     if (mod.control && mod.shift && sym == SDLK_c) {
         // Ctrl+Shift+V (paste) is handled by the page's paste event.
         if (!key.repeat && view.selection &&
@@ -804,6 +850,14 @@ void handleText(App &app, const char *text, bool alt) {
                 return;
             }
         }
+    }
+    if (auto *pane = app.focused(); pane && pane->view().copyMode && text) {
+        for (const char *c = text; *c; ++c) {
+            if (*c >= 32 && *c < 127 && pane->view().copyMode) {
+                copyModeKey(app, *pane, KeyChord{int(*c), false, false, false});
+            }
+        }
+        return;
     }
     send(app, InputEncoder::text(text, alt));
 }
@@ -1091,6 +1145,9 @@ void handleMouse(App &app, const SDL_Event &event) {
     }
     if (result.openPalette) {
         openPalette(app);
+    }
+    if (result.copyMode) {
+        enterCopyMode(app);
     }
     if (!result.action.empty()) {
         handleAction(app, result.action);
@@ -1887,6 +1944,9 @@ void frame(void *data) {
                             rendered.cursor.visible,
                             double(now) / 1000);
         view.glide().apply(rendered.cursor);
+        if (view.copyMode) {
+            view.copyMode->apply(model, rendered); // The virtual cursor replaces the real one.
+        }
         rendered.cursor.focused = windowFocus && placed.focused;
         Drawn d;
         d.pane = pane;
@@ -1934,6 +1994,37 @@ void frame(void *data) {
         layerFrames.push_back(f);
     }
 
+    // Copy mode badges (COPY / SELECT and the line), top right of each pane in the mode.
+    struct Badge {
+        std::unique_ptr<CellBuffer> cells;
+        RenderFrame frame;
+        PixelRect rect;
+    };
+    std::vector<Badge> badges;
+    badges.reserve(drawn.size());
+    for (const auto &d : drawn) {
+        auto &view = d.pane->view();
+        if (!view.copyMode) {
+            continue;
+        }
+        const std::string text = view.copyMode->badge(view.model());
+        const int width = int(text.size()) * app.backend->cellWidth();
+        const int x = d.plan.rect.x + d.plan.rect.w - width - app.layout->config().scrollbarStrip;
+        if (x < d.plan.rect.x) {
+            continue;
+        }
+        Badge b;
+        b.cells = std::make_unique<CellBuffer>(text.size(), 1);
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            b.cells->at(i, 0) = FChar{char32_t(text[i]), Rgb8{20, 20, 20}, Rgb8{255, 190, 60}};
+        }
+        b.frame.cells = b.cells->view();
+        b.frame.cursor.visible = false;
+        b.frame.palette = &app.chromePalette;
+        b.rect = {x, d.plan.rect.y, width, app.backend->cellHeight()};
+        badges.push_back(std::move(b));
+    }
+
     // An unchanged window leaves the canvas as it is; the window size is part
     // of the signature because a resized canvas must be redrawn.
     std::vector<PaneSignatureInput> inputs;
@@ -1946,6 +2037,9 @@ void frame(void *data) {
                           &d.pane->view().palette(),
                           d.plan.rect,
                           d.plan.scrollbar});
+    }
+    for (auto &b : badges) {
+        inputs.push_back({&b.frame, &app.chromePalette, b.rect, PixelRect{}});
     }
     for (std::size_t i = 0; i < layerFrames.size(); ++i) {
         inputs.push_back({&layerFrames[i],
@@ -1986,6 +2080,9 @@ void frame(void *data) {
                                     drawn[i].plan.rect,
                                     drawn[i].plan.scrollbar});
         }
+        for (auto &b : badges) {
+            steadyInputs.push_back({&b.frame, &app.chromePalette, b.rect, PixelRect{}});
+        }
         for (std::size_t i = 0; i < layerFrames.size(); ++i) {
             steadyInputs.push_back({&layerFrames[i],
                                     &app.chromePalette,
@@ -2010,6 +2107,9 @@ void frame(void *data) {
     for (const auto &d : drawn) {
         app.backend->render(d.frame,
                             PaneArea{box(d.plan.rect), box(d.plan.scrollbar)});
+    }
+    for (auto &b : badges) {
+        app.backend->render(b.frame, PaneArea{box(b.rect), {}});
     }
     for (std::size_t i = 0; i < layerFrames.size(); ++i) {
         app.backend->render(layerFrames[i],

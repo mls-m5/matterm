@@ -5,6 +5,7 @@
 #include "palette.h"
 #include "terminallink.h"
 #include "terminalmodel.h"
+#include "copymode.h"
 #include "textselection.h"
 #include "vtparser.h"
 
@@ -133,6 +134,7 @@ public:
         const auto columns = model_->columns();
         const auto rows = model_->rows();
         selection.reset();
+        copyMode.reset();
         palette_ = defaultPalette_;
         title_.clear();
         glide_ = CursorGlide(config_.glide);
@@ -184,6 +186,9 @@ public:
     }
 
     std::optional<Selection> selection;
+    // Copy / scroll mode (docs/TABS_PLAN.md section 12): while set, the owner feeds it the keys and
+    // the program gets none.
+    std::optional<CopyMode> copyMode;
 
 private:
     void build(std::size_t columns, std::size_t rows) {

@@ -123,6 +123,7 @@ struct MouseResult {
     bool empty = false;                  // the last tab was closed
     bool refused = false;                // the "+" of the strip could not make a tab
     bool openPalette = false;            // the strip's palette button, or a layer asked for it
+    bool copyMode = false;               // a layer chose "Copy / scroll mode": enter it in the focused pane
     std::string action;                  // an application action chosen in a layer
     std::optional<CloseRequest> confirm; // not closed: a program runs there, ask first (answerClose)
 };
@@ -143,6 +144,7 @@ struct KeyResult {
     bool changed = false;                // layout changed: redraw
     bool empty = false;                  // the last tab was closed
     bool openPalette = false;            // create the command palette layer and pushLayer() it
+    bool copyMode = false;               // enter copy / scroll mode in the focused pane
     std::string action;                  // an application action chosen in a layer (CommandEntry id)
     std::optional<CloseRequest> confirm; // not closed: a program runs there, ask first (answerClose)
 };
@@ -616,6 +618,10 @@ private:
             r.openPalette = true;
             return;
         }
+        if (o.call->command == Command::CopyMode) {
+            r.copyMode = true;
+            return;
+        }
         applyCall(*o.call, r);
     }
     void applyCall(const CommandCall &call, KeyResult &r) { run(call, r); }
@@ -739,6 +745,12 @@ private:
     void run(const CommandCall &call, KeyResult &r) {
         if (call.command == Command::OpenPalette) {
             r.openPalette = true;
+            r.changed = true;
+            r.commands.push_back(call);
+            return;
+        }
+        if (call.command == Command::CopyMode) {
+            r.copyMode = true;
             r.changed = true;
             r.commands.push_back(call);
             return;
