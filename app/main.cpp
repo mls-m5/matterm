@@ -63,6 +63,7 @@ void printUsage(std::ostream &out, const char *program) {
            "                       this it is copied only if the other computer has none on PATH).\n"
            "  --yes                Copy without asking.\n"
            "  --ssh-arg ARG        An extra argument for ssh (repeatable), e.g. -p / 2222.\n"
+           "  --no-tab-pulse       Tabs with recent output do not alternate their colour.\n"
            "  --snap-scroll        Let scrolling come to rest on whole rows (default: "
            "smooth\n"
            "                       pixel scrolling, which may stop inside a row).\n"
@@ -333,6 +334,7 @@ int main(int argc, char **argv) {
     bool useDaemon = true; // Default; --no-daemon turns it off.
     bool daemonExplicit = false;
     bool snapScroll = false;
+    bool tabPulse = true;
     std::string daemonSocket;
     std::string daemonHost;
     std::vector<std::string> sshArguments;
@@ -380,6 +382,9 @@ int main(int argc, char **argv) {
         }
         else if (arg == "--snap-scroll") {
             snapScroll = true;
+        }
+        else if (arg == "--no-tab-pulse") {
+            tabPulse = false;
         }
         else if (arg == "--no-daemon") {
             useDaemon = false;
@@ -487,7 +492,7 @@ int main(int argc, char **argv) {
                                   recordPath,
                                   smoothCursor,
                                   ptyTabsSmokeTest,
-                                  DaemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll, daemonHost, sshArguments, daemonInstall, assumeYes});
+                                  DaemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll, daemonHost, sshArguments, daemonInstall, assumeYes, tabPulse});
         }
         catch (const std::exception &error) {
             std::cerr << error.what() << '\n';

@@ -872,4 +872,63 @@ TEST_CASE("Which-key: the box appears half a second after the prefix and goes wi
     EXPECT(!v.whichKeyShown());
 }
 
+TEST_CASE("Tab pulse: a tab with recent output alternates its colour once a second, in step, and calms down") {
+    Rig r;
+    r.view.key({'t', true, true, false}, 0); // second tab, in focus
+    r.view.sync(0);
+    auto bgOf = [&](std::int64_t now, std::size_t cell) {
+        r.view.tick(now);
+        return r.view.plan().strip.cells[cell].background;
+    };
+    auto same = [](Rgb8 a, Rgb8 b) { return a.r == b.r && a.g == b.g && a.b == b.b; };
+    const Rgb8 quiet0 = bgOf(0, 1), quiet1 = bgOf(0, 1);
+    EXPECT(same(quiet0, quiet1));
+    // Output in the first tab's pane (hidden) at t = 100.
+    PaneId first = r.space.tab(0)->tree.ids().front();
+    r.space.pane(first)->link.push("hello");
+    EXPECT(!r.view.tick(100).changed); // phase 0 (light): nothing to redraw yet
+    const Rgb8 light = bgOf(500, 1);
+    EXPECT(same(light, quiet0)); // Light half: the usual colour.
+    const auto flipped = r.view.tick(1000);
+    EXPECT(flipped.changed);     // The dark half begins: one change.
+    const Rgb8 dark = bgOf(1000, 1);
+    EXPECT(!same(dark, light));
+    EXPECT(dark.r <= light.r && dark.g <= light.g && dark.b <= light.b);
+    EXPECT(!r.view.tick(1500).changed); // No change within the half period.
+    EXPECT(same(bgOf(2000, 1), light));  // Light again.
+    EXPECT(!same(bgOf(3000, 1), light)); // 2.9 s after the output: still working, odd second: dark.
+    EXPECT(same(bgOf(5000, 1), light));  // Odd second again, but 4.9 s of silence: the usual colour.
+    EXPECT(!r.view.nextWakeMs().has_value() || *r.view.nextWakeMs() > 5000);
+}
+
+TEST_CASE("Tab pulse: also the tab in focus, all working tabs in step, and it can be switched off") {
+    Rig r;
+    r.view.key({'t', true, true, false}, 0); // second tab in focus
+    r.view.sync(0);
+    r.view.tick(0);
+    const PaneId a = r.space.tab(0)->tree.ids().front();
+    const PaneId b = r.space.tab(1)->tree.ids().front();
+    r.space.pane(a)->link.push("x");
+    r.space.pane(b)->link.push("y");
+    r.view.tick(1100);
+    EXPECT(r.view.nextWakeMs().has_value()); // Something works: the next phase is a wake-up.
+    EXPECT_EQ(*r.view.nextWakeMs(), std::int64_t(2000));
+    const auto infos = r.space.tabInfos([](const Pane &) { return std::string("t"); });
+    EXPECT_EQ(infos.size(), std::size_t(2));
+    // Quiet again after 3 s of silence: no wake-up at all, no timer.
+    r.view.tick(4200);
+    EXPECT(!r.view.nextWakeMs().has_value());
+    // Off.
+    Space space([] { return std::make_unique<Pane>(); });
+    ViewConfig c;
+    c.tabPulse = false;
+    View v(space, c);
+    v.setWindow({800, 480, 8, 16});
+    v.key({'t', true, true, false}, 0);
+    v.tick(0);
+    space.pane(space.tab(0)->tree.ids().front())->link.push("x");
+    v.tick(1100);
+    EXPECT(!v.nextWakeMs().has_value());
+}
+
 TEST_SUIT_END

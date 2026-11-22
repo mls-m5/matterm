@@ -565,3 +565,23 @@ Native with the daemon. Design in short:
   makes a new one.
 - Code: `daemoncommands.h` (entries, dialogs, `planLayoutAttach`), `sessionsnapshot.h`
   (`SavedPane::terminal`), glue in `app/ptyfrontend.cpp` (no test: needs a window).
+
+## 15. Work indicator on the tabs (agent3)
+
+- A tab is **working** when any pane of it had output in the last 3 s (`TabPulse::kWorkingMs`),
+  also the tab in focus. "Output" is the growth of `TerminalView::outputBytes()`, polled by
+  `WorkspaceView::tick(nowMs)` (`OutputWatch`, `src/frontend/tabpulse.h`): no hooks in the
+  frontends, the same code natively and in the browser, exact in tests (the caller gives the time).
+- A working tab's background is its usual colour in the even seconds and 16 % darker (towards
+  black, `kDarkenPercent`) in the odd ones: `TabPulse::dark(nowMs)` is one **global** phase, so all
+  working tabs flip together. This holds for the active tab too (its light colour to a slightly
+  darker one). The ● mark for "something happened while you were away" is unchanged.
+- Cost: the strip's cells change at most once a second and only while a tab works;
+  `tick()` reports `changed` only when the pulse state flips, `nextWakeMs()` names the next phase
+  boundary only while a tab works (nothing else is scheduled), and the frame hash decides about
+  drawing as before (docs/CPU.md). Measured with `MATTERM_LOOP_STATS=1`, a window with one tab and
+  a program printing every 0.4 s draws the same number of frames with and without the pulse (36 and
+  35 in 8 s): the strip is hidden with one tab, so this shows only that nothing else was added.
+- Off: `--no-tab-pulse` (native), `?pulse=0` (browser), `ViewConfig::tabPulse = false`.
+- Tests: `test/workspaceview_test.cpp` (working or not, phase, the time limit, in step, off, the
+  wake-up), `web/tools/e2e-pulse.js` (pictures of the strip; not run here: no browser).

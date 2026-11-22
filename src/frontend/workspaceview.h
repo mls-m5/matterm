@@ -22,6 +22,7 @@
 #include "palette.h"
 #include "panetree.h"
 #include "prefixkeys.h"
+#include "tabpulse.h"
 #include "tabstrip.h"
 #include "tabtypes.h"
 #include "terminalview.h"
@@ -56,6 +57,7 @@ struct ViewConfig {
     bool prefixKeys = true;      // Ctrl+B ... (browser)
     bool desktopShortcuts = true; // Ctrl+Shift+T ... (native)
     PrefixKeys::Config prefix;
+    bool tabPulse = true;               // working tabs alternate their colour once a second (--no-tab-pulse: off)
     std::int64_t whichKeyDelayMs = 500; // after the prefix key, a box lists what can follow (0: never)
     int touchSlop = 16;          // extra pixels around dividers and below the strip for a finger
     // Windows narrower than this many columns show only the focused pane of a
@@ -183,7 +185,7 @@ public:
         const int stripH = stripHeight();
         if (stripH > 0) {
             out.stripRect = {0, 0, metrics_.width, stripH};
-            out.strip = buildTabStrip(workspace_.tabInfos(titleOf), stripColumns(), config_.palette, stripFirst_,
+            out.strip = buildTabStrip(pulsed(workspace_.tabInfos(titleOf)), stripColumns(), config_.palette, stripFirst_,
                                   config_.paletteButton, ShareButton{config_.shareButton && probeShared_, sharedInActiveTab()});
         }
         const Layout layout = activeLayout();
@@ -318,6 +320,7 @@ public:
     KeyResult tick(std::int64_t nowMs) {
         KeyResult r;
         r.forwardPrefix = prefix_.tick(nowMs).forwardPrefix;
+        if (config_.tabPulse && pollOutput(nowMs)) r.changed = true;
         const bool show = prefix_.waiting() && config_.whichKeyDelayMs > 0 && nowMs >= whichKeyAt();
         if (show != whichKey_) {
             whichKey_ = show;
@@ -329,6 +332,7 @@ public:
     std::optional<std::int64_t> nextWakeMs() const {
         std::optional<std::int64_t> t = prefix_.deadline();
         if (t && !whichKey_ && config_.whichKeyDelayMs > 0) t = std::min(*t, whichKeyAt());
+        if (const auto pulse = pulseWakeMs()) t = t ? std::min(*t, *pulse) : *pulse;
         if (pending_ && drag_ == Drag::Divider) {
             const std::int64_t due = lastSyncMs_ + config_.resizeIntervalMs;
             t = t ? std::min(*t, due) : due;
@@ -598,6 +602,52 @@ public:
 
 private:
     enum class Drag { None, Divider, Scrollbar, Selecting };
+
+    // Looks at every pane's output counter; true when the pulse of the strip changed since the last
+    // look (a tab began or stopped working, or the phase turned while one works).
+    bool pollOutput(std::int64_t nowMs) {
+        nowMs_ = nowMs;
+        workspace_.forEachPane([&](PaneId id, Pane &pane, bool) {
+            output_.update(id, pane.view().outputBytes(), nowMs);
+        });
+        const std::uint64_t now = pulseState(nowMs);
+        const bool changed = now != lastPulse_;
+        lastPulse_ = now;
+        return changed;
+    }
+    // Bit i: tab i works and is in the dark half. Zero when nothing works.
+    std::uint64_t pulseState(std::int64_t nowMs) const {
+        std::uint64_t bits = 0;
+        if (!TabPulse::dark(nowMs)) return bits;
+        for (std::size_t i = 0; i < workspace_.tabCount() && i < 64; ++i) {
+            if (tabWorking(i, nowMs)) bits |= std::uint64_t(1) << i;
+        }
+        return bits;
+    }
+    bool tabWorking(std::size_t index, std::int64_t nowMs) const {
+        const auto *tab = workspace_.tab(index);
+        if (!tab) return false;
+        for (const PaneId id : tab->tree.ids()) {
+            if (output_.recent(id, nowMs)) return true;
+        }
+        return false;
+    }
+    // The strip's tabs with the pulse applied for the time of the last tick.
+    std::vector<TabInfo> pulsed(std::vector<TabInfo> infos) const {
+        if (!config_.tabPulse) return infos;
+        for (std::size_t i = 0; i < infos.size(); ++i) {
+            infos[i].pulseDark = TabPulse::dark(nowMs_) && tabWorking(i, nowMs_);
+        }
+        return infos;
+    }
+    // When the pulse next needs a look: a working tab flips at the next period boundary.
+    std::optional<std::int64_t> pulseWakeMs() const {
+        if (!config_.tabPulse) return std::nullopt;
+        for (std::size_t i = 0; i < workspace_.tabCount(); ++i) {
+            if (tabWorking(i, nowMs_)) return TabPulse::nextChange(nowMs_);
+        }
+        return std::nullopt;
+    }
 
     // When the which-key box appears for the prefix now waiting.
     std::int64_t whichKeyAt() const {
@@ -926,6 +976,9 @@ private:
     std::optional<CloseRequest> pendingClose_;
     ViewConfig config_;
     bool whichKey_ = false; // the which-key box is showing
+    OutputWatch output_;
+    std::int64_t nowMs_ = 0;
+    std::uint64_t lastPulse_ = 0;
     mutable std::vector<std::unique_ptr<ui::Layer>> layers_; // bottom first; resized by place()
     PrefixKeys prefix_;
     WindowMetrics metrics_;

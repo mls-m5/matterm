@@ -14,6 +14,7 @@ struct DaemonOptions {
     std::vector<std::string> sshArguments; // --ssh-arg, before the ones the tunnel adds.
     bool installAlways = false; // --daemon-install: use our own copy of matterm-daemon there.
     bool assumeYes = false;     // --yes: copy it without asking.
+    bool tabPulse = true;       // --no-tab-pulse switches the working tabs' colour pulse off.
 };
 
 // Native entry-point adapter; owns SDL lifecycle after starting the PTY.

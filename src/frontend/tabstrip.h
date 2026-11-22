@@ -15,6 +15,7 @@
 // numbers with `<` and `>` scroll buttons that always shows the active tab.
 #include "fchar.h"
 #include "palette.h"
+#include "tabpulse.h"
 #include "tabtypes.h"
 
 #include <algorithm>
@@ -333,7 +334,8 @@ inline TabStrip buildTabStrip(const std::vector<TabInfo> &tabs,
     // Draws tab i; `label` is what is written between the marks.
     auto drawTab = [&](int i, const std::u32string &label, bool closeButton) {
         const auto &info = tabs[std::size_t(i)];
-        const Rgb8 bg = info.active ? col.activeBg : col.tabBg;
+        Rgb8 bg = info.active ? col.activeBg : col.tabBg;
+        if (info.pulseDark) bg = mix(bg, Rgb8{0, 0, 0}, TabPulse::kDarkenPercent);
         const Rgb8 fg = info.active ? col.activeFg : col.tabFg;
         const int begin = row.column();
         row.put(U' ', fg, bg);

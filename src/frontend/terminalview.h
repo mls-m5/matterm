@@ -76,6 +76,7 @@ public:
         exitCode_ = exitSignal_ = 0;
         TerminalLink::Events events;
         events.output = [this](std::string_view bytes) {
+            outputBytes_ += bytes.size();
             parser_->feed(bytes);
             changed();
         };
@@ -140,6 +141,11 @@ public:
         glide_ = CursorGlide(config_.glide);
         build(columns, rows);
         changed();
+    }
+
+    // Everything the program has written to this view so far (for "did it output lately").
+    std::uint64_t outputBytes() const {
+        return outputBytes_;
     }
 
     TerminalModel &model() {
@@ -268,6 +274,7 @@ private:
     std::unique_ptr<VtParser> parser_;
     TerminalLink *link_ = nullptr;
     ErrorSource errorCode_;
+    std::uint64_t outputBytes_ = 0;
     State state_ = State::Live;
     int exitCode_ = 0;
     int exitSignal_ = 0;

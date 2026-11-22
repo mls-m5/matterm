@@ -49,6 +49,7 @@ struct TabInfo {
     std::string title; // plain short text, already sanitized by the owner
     bool active = false;
     bool activity = false; // output or a bell in a hidden pane
+    bool pulseDark = false; // working tab, in the darker half of the pulse (docs/TABS_PLAN.md section 15)
 };
 
 // Everything the user can do to the layout. Key bindings, the prefix state machine
