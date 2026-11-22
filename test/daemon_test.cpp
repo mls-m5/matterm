@@ -393,6 +393,87 @@ TEST_CASE("Control codec: the session messages round trip") {
     EXPECT_EQ(std::get<mtd::SessionCreated>(*mtd::decodeReply(b)).id, std::string("id1"));
 }
 
+TEST_CASE("Names: SetName round trips, bad names are refused, old peers get the old types without names") {
+    std::string b;
+    EXPECT(mtd::encode(mtd::ControlRequest(mtd::SetName{"abc", "build box \xc3\xa5"}), b));
+    const auto q = mtd::decodeRequest(b);
+    EXPECT(q.has_value());
+    EXPECT_EQ(std::get<mtd::SetName>(*q).name, std::string("build box \xc3\xa5"));
+    for (const std::string &bad : {std::string("a\nb"), std::string("a\x1b" "b"), std::string("a\x7f"), std::string("\xc2\x85"),
+                                  std::string("\xff"), std::string(65, 'x')}) {
+        b.clear();
+        EXPECT(!mtd::encode(mtd::ControlRequest(mtd::SetName{"abc", bad}), b)); // never written
+    }
+    EXPECT(mtd::validTerminalName(""));
+    EXPECT(mtd::validTerminalName(std::string(64, 'x')));
+    // A named list: the new type for a peer of version 3, the old one for version 2.
+    mtd::SessionList list;
+    list.sessions.push_back({"s1", true, false, 7, "my name"});
+    b.clear();
+    EXPECT(mtd::encode(mtd::ControlReply(list), b, 3));
+    EXPECT_EQ(int(std::uint8_t(b[0])), 0xc7);
+    EXPECT_EQ(std::get<mtd::SessionList>(*mtd::decodeReply(b)).sessions[0].name, std::string("my name"));
+    b.clear();
+    EXPECT(mtd::encode(mtd::ControlReply(list), b, 2));
+    EXPECT_EQ(int(std::uint8_t(b[0])), 0xc1);
+    const auto old = std::get<mtd::SessionList>(*mtd::decodeReply(b));
+    EXPECT(old.sessions[0].name.empty() && old.sessions[0].attached && old.sessions[0].outputEnd == 7);
+    mtd::SessionInfo info{"abc", "/x", false, {}, "named"};
+    b.clear();
+    EXPECT(mtd::encode(mtd::ControlReply(info), b, 3));
+    EXPECT_EQ(std::get<mtd::SessionInfo>(*mtd::decodeReply(b)).name, std::string("named"));
+    b.clear();
+    EXPECT(mtd::encode(mtd::ControlReply(info), b, 2));
+    EXPECT(std::get<mtd::SessionInfo>(*mtd::decodeReply(b)).name.empty());
+    // A truncated or trailing-byte named reply is refused.
+    b.clear();
+    mtd::encode(mtd::ControlReply(list), b, 3);
+    EXPECT(!mtd::decodeReply(b.substr(0, b.size() - 1)).has_value());
+    EXPECT(!mtd::decodeReply(b + "x").has_value());
+}
+
+TEST_CASE("The daemon stores a name, lists it to its owner and to the web server for shared terminals only") {
+    Running r;
+    EXPECT(r.started);
+    auto owner = controlClient(r.path);
+    const auto shared = createSession(*owner, "");
+    const auto priv = createSession(*owner, "");
+    EXPECT(shared.has_value() && priv.has_value());
+    EXPECT(owner->sendControl(mtd::SetName{*shared, "laptop build"}));
+    auto reply = owner->controlReply();
+    EXPECT(reply.has_value() && std::holds_alternative<mtd::SessionList>(*reply));
+    EXPECT(owner->sendControl(mtd::SetName{*priv, "secret"}));
+    EXPECT(owner->controlReply().has_value());
+    EXPECT(owner->sendControl(mtd::SetName{"nonexistent", "x"}));
+    reply = owner->controlReply();
+    EXPECT(reply.has_value() && std::holds_alternative<mtd::ControlError>(*reply));
+    EXPECT(owner->sendControl(mtd::SetShared{*shared, true}));
+    EXPECT(owner->controlReply().has_value());
+    EXPECT(owner->sendControl(mtd::GetSessionInfo{*shared}));
+    reply = owner->controlReply();
+    EXPECT(reply.has_value());
+    EXPECT_EQ(std::get<mtd::SessionInfo>(*reply).name, std::string("laptop build"));
+    EXPECT(owner->sendControl(mtd::ListSessions{}));
+    reply = owner->controlReply();
+    EXPECT_EQ(std::get<mtd::SessionList>(*reply).sessions.size(), std::size_t(2));
+    // The web server sees the shared one with its name, and nothing of the private one.
+    auto web = exposedClient(r.path);
+    EXPECT(web->sendControl(mtd::ListSessions{}));
+    const auto seen = std::get<mtd::SessionList>(*web->controlReply()).sessions;
+    EXPECT_EQ(seen.size(), std::size_t(1));
+    EXPECT_EQ(seen[0].name, std::string("laptop build"));
+    // It cannot name anything.
+    auto web2 = exposedClient(r.path);
+    EXPECT(web2->sendControl(mtd::SetName{*shared, "hijack"}));
+    const auto refused = web2->controlReply();
+    EXPECT(refused.has_value() && std::holds_alternative<mtd::ControlError>(*refused));
+    // The name can be removed again.
+    EXPECT(owner->sendControl(mtd::SetName{*shared, ""}));
+    EXPECT(owner->controlReply().has_value());
+    EXPECT(owner->sendControl(mtd::GetSessionInfo{*shared}));
+    EXPECT(std::get<mtd::SessionInfo>(*owner->controlReply()).name.empty());
+}
+
 TEST_CASE("An exposed connection sees and attaches to shared sessions only") {
     Running r;
     EXPECT(r.started);

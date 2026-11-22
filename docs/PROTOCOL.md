@@ -532,6 +532,24 @@ size, and answers `SessionCreated`; the client then attaches with `Hello{session
 `busy` is true when it is not a shell and `argument` is its command line (only when it is
 printable and bounded; see `frontend::probePane`). Errors: UnknownSession.
 
+**Control version 3** (additive again): terminal names, so that the owner can tell terminals apart
+in the laptop's attach list, in the browser's *Local terminals* list and in the take-over notice.
+
+| Type | Message | Fields |
+| --- | --- | --- |
+| 0x48 | SetName | string id, string name |
+| 0xc7 | SessionList (named) | as 0xc1, each entry followed by string name |
+| 0xc8 | SessionInfo (named) | as 0xc6, followed by string name |
+
+A name is at most 64 bytes of valid UTF-8 without control characters (C0, DEL, C1); empty removes
+it. `SetName` is answered like `SetShared`, with the `SessionList`; an unknown id gives
+`ControlError` UnknownSession; an exposed connection may not send it. The daemon remembers what
+version the client's hello (`ControlHello` or `ExposedHello`) said: to version 3 or more it sends
+the named types (0xc7, 0xc8), to older clients the unchanged 0xc1 and 0xc6 without names; the
+decoder reads both into the same structures. A version 2 daemon answers `SetName` with
+`ControlError` BadMessage. The web server's `POST /local-sessions` adds `"name"` to each entry
+(JSON-escaped); the browser shows it instead of the first characters of the id.
+
 **Exposed connections** (`matterm-server --expose-local-sessions`). A connection whose first
 frame is `ExposedHello` is answered with `ControlWelcome` and then limited to what a web
 browser may reach: `ListSessions` returns shared sessions only, and a terminal `Hello` must

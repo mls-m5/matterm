@@ -121,7 +121,12 @@ struct App {
     int localOffered = 0;
     bool localAsking = false;
     bool localPick = false;
-    std::vector<std::pair<std::string, bool>> localSessions; // id, attached
+    struct LocalSession {
+        std::string id;
+        bool attached = false;
+        std::string name;
+    };
+    std::vector<LocalSession> localSessions;
     std::string savedLayout;    // What sessionStorage holds.
     bool touchDivider = false;  // A finger is dragging a divider.
     int touchFinger = 0;
@@ -492,7 +497,8 @@ void askLocalSessions(App &app) {
                             j.sessions
                                 .filter((s) => typeof s.id === "string" &&
                                                /^[0-9a-f]{32}$/.test(s.id))
-                                .map((s) => s.id + " " + (s.attached ? "1" : "0"))
+                                .map((s) => s.id + " " + (s.attached ? "1" : "0") + " " +
+                                              (typeof s.name === "string" ? Array.from(s.name).filter((ch) => { const c = ch.charCodeAt(0); return c >= 32 && (c < 127 || c > 159); }).join("") : ""))
                                 .join("\n");
                     }
                     state.done = true;
@@ -504,10 +510,10 @@ void askLocalSessions(App &app) {
 
 void showLocalPicker(App &app) {
     std::vector<ui::PickList::Item> items;
-    for (const auto &[id, attached] : app.localSessions) {
-        items.push_back({id.substr(0, 8),
-                         attached ? "in use" : "",
-                         "local.attach:" + id});
+    for (const auto &s : app.localSessions) {
+        items.push_back({s.name.empty() ? s.id.substr(0, 8) : s.name,
+                         s.attached ? "in use" : "",
+                         "local.attach:" + s.id});
     }
     app.layout->pushLayer(std::make_unique<ui::PickList>(
         "Local terminals", std::move(items), "Nothing is shared from the laptop"));
@@ -539,8 +545,10 @@ void pollLocal(App &app) {
             const auto end = std::min(lines.find('\n', at), lines.size());
             const std::string line = lines.substr(at, end - at);
             at = end + 1;
-            if (line.size() == 34 && LayoutSnapshot::validId(line.substr(0, 32))) {
-                app.localSessions.emplace_back(line.substr(0, 32), line.back() == '1');
+            // "<id> <0|1> <name>": the name may be empty and may hold spaces.
+            if (line.size() >= 34 && line[32] == ' ' && LayoutSnapshot::validId(line.substr(0, 32))) {
+                app.localSessions.push_back({line.substr(0, 32), line[33] == '1',
+                                             line.size() > 35 ? line.substr(35, 64) : std::string()});
             }
         }
     }

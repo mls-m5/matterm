@@ -167,7 +167,7 @@ void listSharedSessions(net::any_io_executor executor,
             if (!reply) return state->finish(std::nullopt);
             if (const auto *list = std::get_if<mtd::SessionList>(&*reply)) {
                 std::vector<LocalSessionInfo> out;
-                for (const auto &s : list->sessions) out.push_back({s.id, s.attached});
+                for (const auto &s : list->sessions) out.push_back({s.id, s.attached, s.name});
                 return state->finish(std::move(out));
             }
             state->finish(std::nullopt);

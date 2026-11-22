@@ -14,16 +14,33 @@ enum Type : std::uint8_t {
     tCreateSession = 0x45,
     tGetSessionInfo = 0x46,
     tExposedHello = 0x47,
+    tSetName = 0x48,
     tControlWelcome = 0xc0,
     tSessionList = 0xc1,
     tStatus = 0xc2,
     tShutdownReply = 0xc3,
     tControlError = 0xc4,
     tSessionCreated = 0xc5,
-    tSessionInfo = 0xc6
+    tSessionInfo = 0xc6,
+    tSessionListNamed = 0xc7,
+    tSessionInfoNamed = 0xc8
 };
 constexpr std::size_t kMaxId = 64;
 constexpr std::size_t kMaxText = 256;
+
+} // namespace
+
+bool validTerminalName(std::string_view name) {
+    if (name.size() > kMaxName || !protocol::validUtf8(name)) return false;
+    for (std::size_t i = 0; i < name.size(); ++i) {
+        const auto c = static_cast<unsigned char>(name[i]);
+        if (c < 0x20 || c == 0x7f) return false;
+        if (c == 0xc2 && i + 1 < name.size() && static_cast<unsigned char>(name[i + 1]) < 0xa0) return false; // C1
+    }
+    return true;
+}
+
+namespace {
 
 void put8(std::string &o, std::uint8_t v) { o.push_back(char(v)); }
 void put16(std::string &o, std::uint16_t v) { put8(o, std::uint8_t(v >> 8)); put8(o, std::uint8_t(v)); }
@@ -65,6 +82,11 @@ bool write(std::string &o, const SetShared &m) {
     put8(o, m.shared ? 1 : 0);
     return true;
 }
+bool write(std::string &o, const SetName &m) {
+    put8(o, tSetName);
+    if (!putString(o, m.id, kMaxId) || !validTerminalName(m.name)) return false;
+    return putString(o, m.name, kMaxName);
+}
 bool write(std::string &o, const GetStatus &) { put8(o, tGetStatus); return true; }
 bool write(std::string &o, const Shutdown &m) { put8(o, tShutdown); put32(o, m.expectedSessions); return true; }
 bool write(std::string &o, const CreateSession &m) {
@@ -82,16 +104,16 @@ bool write(std::string &o, const SessionCreated &m) {
     put8(o, tSessionCreated);
     return putString(o, m.id, kMaxId);
 }
-bool write(std::string &o, const SessionInfo &m) {
+bool writeInfo(std::string &o, const SessionInfo &m, bool named) {
     if (m.command.size() > kMaxArguments) return false;
-    put8(o, tSessionInfo);
+    put8(o, named ? tSessionInfoNamed : tSessionInfo);
     if (!putString(o, m.id, kMaxId) || !putString(o, m.cwd, kMaxPath)) return false;
     put8(o, m.busy ? 1 : 0);
     put8(o, std::uint8_t(m.command.size()));
     for (const auto &a : m.command) {
         if (!putString(o, a, kMaxArgument)) return false;
     }
-    return true;
+    return !named || (validTerminalName(m.name) && putString(o, m.name, kMaxName));
 }
 bool write(std::string &o, const ControlWelcome &m) {
     put8(o, tControlWelcome);
@@ -100,14 +122,15 @@ bool write(std::string &o, const ControlWelcome &m) {
     put32(o, m.features);
     return putString(o, m.build, kMaxText);
 }
-bool write(std::string &o, const SessionList &m) {
+bool writeList(std::string &o, const SessionList &m, bool named) {
     if (m.sessions.size() > kMaxListed) return false;
-    put8(o, tSessionList);
+    put8(o, named ? tSessionListNamed : tSessionList);
     put16(o, std::uint16_t(m.sessions.size()));
     for (const auto &s : m.sessions) {
         if (!putString(o, s.id, kMaxId)) return false;
         put8(o, std::uint8_t((s.attached ? 1 : 0) | (s.shared ? 2 : 0)));
         put64(o, s.outputEnd);
+        if (named && !(validTerminalName(s.name) && putString(o, s.name, kMaxName))) return false;
     }
     return true;
 }
@@ -125,10 +148,15 @@ bool write(std::string &o, const ControlError &m) {
     return putString(o, m.reason, kMaxText);
 }
 
+template <class M>
+bool writeFor(std::string &o, const M &m, std::uint16_t) { return write(o, m); }
+bool writeFor(std::string &o, const SessionList &m, std::uint16_t version) { return writeList(o, m, version >= 3); }
+bool writeFor(std::string &o, const SessionInfo &m, std::uint16_t version) { return writeInfo(o, m, version >= 3); }
+
 template <class Variant>
-bool encodeVariant(const Variant &message, std::string &out) {
+bool encodeVariant(const Variant &message, std::string &out, std::uint16_t version = kControlVersion) {
     std::string tmp;
-    const bool ok = std::visit([&tmp](const auto &m) { return write(tmp, m); }, message);
+    const bool ok = std::visit([&](const auto &m) { return writeFor(tmp, m, version); }, message);
     if (!ok) return false;
     out += tmp;
     return true;
@@ -137,7 +165,9 @@ bool encodeVariant(const Variant &message, std::string &out) {
 } // namespace
 
 bool encode(const ControlRequest &message, std::string &out) { return encodeVariant(message, out); }
-bool encode(const ControlReply &message, std::string &out) { return encodeVariant(message, out); }
+bool encode(const ControlReply &message, std::string &out, std::uint16_t peerVersion) {
+    return encodeVariant(message, out, peerVersion);
+}
 
 std::optional<ControlRequest> decodeRequest(std::string_view bytes) {
     Reader r(bytes);
@@ -176,6 +206,14 @@ std::optional<ControlRequest> decodeRequest(std::string_view bytes) {
         }
         return m;
     }
+    case tSetName: {
+        SetName m;
+        if (!r.get(m.id, kMaxId) || m.id.empty() || !r.get(m.name, kMaxName) || !validTerminalName(m.name) ||
+            !r.done()) {
+            return std::nullopt;
+        }
+        return m;
+    }
     case tGetSessionInfo: {
         GetSessionInfo m;
         if (!r.get(m.id, kMaxId) || m.id.empty() || !r.done()) return std::nullopt;
@@ -198,7 +236,9 @@ std::optional<ControlReply> decodeReply(std::string_view bytes) {
         }
         return m;
     }
-    case tSessionList: {
+    case tSessionList:
+    case tSessionListNamed: {
+        const bool named = type == tSessionListNamed;
         SessionList m;
         std::uint16_t n;
         if (!r.get(n) || n > kMaxListed) return std::nullopt;
@@ -206,6 +246,7 @@ std::optional<ControlReply> decodeReply(std::string_view bytes) {
             SessionEntry e;
             std::uint8_t flags;
             if (!r.get(e.id, kMaxId) || !r.get(flags) || (flags & ~3u) || !r.get(e.outputEnd)) return std::nullopt;
+            if (named && (!r.get(e.name, kMaxName) || !validTerminalName(e.name))) return std::nullopt;
             e.attached = (flags & 1) != 0;
             e.shared = (flags & 2) != 0;
             m.sessions.push_back(std::move(e));
@@ -237,7 +278,9 @@ std::optional<ControlReply> decodeReply(std::string_view bytes) {
         if (!r.get(m.id, kMaxId) || m.id.empty() || !r.done()) return std::nullopt;
         return m;
     }
-    case tSessionInfo: {
+    case tSessionInfo:
+    case tSessionInfoNamed: {
+        const bool named = type == tSessionInfoNamed;
         SessionInfo m;
         std::uint8_t n;
         if (!r.get(m.id, kMaxId) || !r.get(m.cwd, kMaxPath) || !r.getBool(m.busy) || !r.get(n) || n > kMaxArguments) {
@@ -248,6 +291,7 @@ std::optional<ControlReply> decodeReply(std::string_view bytes) {
             if (!r.get(a, kMaxArgument)) return std::nullopt;
             m.command.push_back(std::move(a));
         }
+        if (named && (!r.get(m.name, kMaxName) || !validTerminalName(m.name))) return std::nullopt;
         return r.done() ? std::optional<ControlReply>(std::move(m)) : std::nullopt;
     }
     default:

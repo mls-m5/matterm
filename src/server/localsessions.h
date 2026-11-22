@@ -17,6 +17,7 @@ namespace server {
 struct LocalSessionInfo {
     std::string id;
     bool attached = false;
+    std::string name; // Given by the owner; empty: none.
 };
 
 // One connection to the daemon speaking its length framing. Single io_context thread. The

@@ -87,6 +87,68 @@ TEST_CASE("A shared session is listed, can be driven from the browser and taken 
     EXPECT(closes(browser));
 }
 
+TEST_CASE("Sharing one terminal never exposes a terminal made later, also not after a take-over and take-back") {
+    WithDaemon w;
+    auto owner = controlClient(w.daemon.path);
+    const auto a = createSession(*owner, "");
+    EXPECT(a.has_value());
+    DaemonClient mineA(w.daemon.path);
+    EXPECT(attach(mineA, *a, 0).has_value());
+    EXPECT(owner->sendControl(mtd::SetShared{*a, true}));
+    EXPECT(owner->controlReply().has_value());
+    const auto cookie = w.web->login();
+    // The phone takes A over.
+    Client phone;
+    phone.connect(*w.web, cookie);
+    phone.send(localHello(*a));
+    const auto welcome = next(phone);
+    EXPECT(welcome.has_value() && std::holds_alternative<protocol::Welcome>(*welcome));
+    // The owner opens a second tab: a new terminal, attached by the window, not shared.
+    const auto b = createSession(*owner, "");
+    EXPECT(b.has_value());
+    DaemonClient mineB(w.daemon.path);
+    EXPECT(attach(mineB, *b, 0).has_value());
+    // The owner takes A back; B must not have become visible by any of this.
+    DaemonClient backA(w.daemon.path);
+    EXPECT(attach(backA, *a, 0).has_value());
+    const auto listed = post(*w.web, "/local-sessions", cookie);
+    EXPECT_EQ(int(listed.result_int()), 200);
+    EXPECT(listed.body().find("\"id\":\"" + *a + "\"") != std::string::npos);
+    EXPECT(listed.body().find(*b) == std::string::npos);
+    // B cannot be taken over, with the same answer as for a session that does not exist.
+    Client attacker;
+    attacker.connect(*w.web, cookie);
+    attacker.send(localHello(*b));
+    const auto refused = next(attacker);
+    EXPECT(refused.has_value() && std::holds_alternative<protocol::Error>(*refused));
+    EXPECT(closes(attacker));
+    // B still belongs to the window (no Replaced reached it).
+    EXPECT(owner->sendControl(mtd::ListSessions{}));
+    const auto all = std::get<mtd::SessionList>(*owner->controlReply()).sessions;
+    bool bAttached = false, bShared = true;
+    for (const auto &e : all) {
+        if (e.id == *b) {
+            bAttached = e.attached;
+            bShared = e.shared;
+        }
+    }
+    EXPECT(bAttached && !bShared);
+}
+
+TEST_CASE("The list for the browser carries the owner's name for a terminal, escaped") {
+    WithDaemon w;
+    auto owner = controlClient(w.daemon.path);
+    const auto id = createSession(*owner, "");
+    EXPECT(id.has_value());
+    EXPECT(owner->sendControl(mtd::SetName{*id, "say \"hi\" \\ ok"}));
+    EXPECT(owner->controlReply().has_value());
+    EXPECT(owner->sendControl(mtd::SetShared{*id, true}));
+    EXPECT(owner->controlReply().has_value());
+    const auto listed = post(*w.web, "/local-sessions", w.web->login());
+    EXPECT_EQ(int(listed.result_int()), 200);
+    EXPECT(listed.body().find("\"name\":\"say \\\"hi\\\" \\\\ ok\"") != std::string::npos);
+}
+
 TEST_CASE("Stopping the sharing cuts the browser and keeps the session") {
     WithDaemon w;
     auto owner = controlClient(w.daemon.path);

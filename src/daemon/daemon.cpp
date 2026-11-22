@@ -169,6 +169,7 @@ private:
                 return;
             }
             mode_ = exposed ? Mode::Exposed : Mode::Control;
+            peerVersion_ = exposed ? std::get<ExposedHello>(*request).version : std::get<ControlHello>(*request).version;
             ControlWelcome w;
             w.pid = std::uint32_t(getpid());
             w.features = protocol::featureDaemon;
@@ -230,7 +231,7 @@ private:
         for (const auto &i : d_.registry->list()) {
             if (mode_ == Mode::Exposed && !i.shared) continue;
             if (list.sessions.size() >= kMaxListed) break;
-            list.sessions.push_back({i.id, i.attached, i.shared, i.outputEnd});
+            list.sessions.push_back({i.id, i.attached, i.shared, i.outputEnd, i.name});
         }
         reply(list);
     }
@@ -240,6 +241,13 @@ private:
             return;
         }
         if (!m.shared) d_.cutExposed(m.id);
+        handle(ListSessions{});
+    }
+    void handle(const SetName &m) {
+        if (!d_.registry->setName(m.id, m.name)) {
+            controlError(ControlErrorCode::UnknownSession, "no such session");
+            return;
+        }
         handle(ListSessions{});
     }
     void handle(const CreateSession &m) {
@@ -270,6 +278,9 @@ private:
         info.cwd = state.cwd;
         info.busy = state.busy;
         info.command = state.command;
+        for (const auto &i : d_.registry->list()) {
+            if (i.id == m.id) info.name = i.name;
+        }
         reply(info);
     }
     void handle(const GetStatus &) {
@@ -302,7 +313,7 @@ private:
     template <class M>
     void reply(const M &message) {
         std::string bytes;
-        if (!encode(ControlReply(message), bytes)) return kill();
+        if (!encode(ControlReply(message), bytes, peerVersion_)) return kill();
         sendRaw(bytes);
     }
     void controlError(ControlErrorCode code, const char *reason) { reply(ControlError{code, reason}); }
@@ -401,6 +412,7 @@ private:
     std::optional<server::SessionRegistry::Attachment> attachment_;
     std::function<void()> onFlushed_;
     Mode mode_ = Mode::Unknown;
+    std::uint16_t peerVersion_ = 2; // What the client said in its hello; below 3 it gets no names.
     bool counted_ = false;
     bool exposedAttach_ = false;
     bool writing_ = false;

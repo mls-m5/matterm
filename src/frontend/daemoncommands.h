@@ -38,6 +38,7 @@ inline constexpr const char *attachAllGo = "daemon.attach.all.go";
 inline constexpr const char *attachCancel = "daemon.attach.cancel";
 inline constexpr const char *detachPane = "daemon.detach";
 inline constexpr const char *movePane = "pane.move-to-tab";
+inline constexpr const char *renamePane = "pane.rename"; // The prompt, then "pane.rename:<name>".
 } // namespace daemonaction
 
 // What the first terminal says when the app wanted the daemon and could not have it, so it
@@ -146,6 +147,8 @@ inline std::vector<CommandEntry> attachCommandEntries(const AttachState &state) 
             "Open every terminal that no window shows, each in its own tab");
     }
     if (state.focusedInDaemon) {
+        add(daemonaction::renamePane, "Rename terminal...",
+            "Give this terminal a name that shows when it is attached or taken over");
         add(daemonaction::detachPane, "Detach terminal (keep running)",
             "Close this pane; its program keeps running in the daemon");
         if (state.panesInTab > 1) {
@@ -164,6 +167,7 @@ struct AttachableSession {
     bool attached = false;            // Some window shows it now.
     bool shared = false;
     bool inThisWindow = false;        // This window shows it (not offered).
+    std::string name;                 // Given by the owner (Rename terminal...); empty: none.
 };
 
 namespace attachdetail {
@@ -212,9 +216,19 @@ inline std::vector<ui::PickList::Item> attachItems(const std::vector<AttachableS
         std::string detail = command.empty() ? "shell" : attachdetail::plain(command, 24);
         if (s.attached) detail += " (in another window)";
         if (s.shared) detail += " (shared)";
-        items.push_back({shortFolder(s.cwd), detail, std::string(daemonaction::attachGo) + ":" + s.id});
+        // A named terminal is listed by its name, with the folder after it.
+        const std::string label = s.name.empty() ? shortFolder(s.cwd)
+                                                 : attachdetail::plain(s.name, 40) + " (" + shortFolder(s.cwd) + ")";
+        items.push_back({label, detail, std::string(daemonaction::attachGo) + ":" + s.id});
     }
     return items;
+}
+
+// What the owner is told when another window took a terminal over.
+inline std::string takenOverNotice(bool shared, const std::string &name) {
+    std::string text = shared ? "a shared terminal" : "a terminal";
+    if (!name.empty()) text += " '" + attachdetail::plain(name, 40) + "'";
+    return text + (shared ? " was taken over from another window" : " was taken over by another window");
 }
 
 inline std::unique_ptr<ui::ConfirmDialog> takeOverDialog(const std::string &id, const std::string &what) {

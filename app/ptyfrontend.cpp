@@ -269,6 +269,7 @@ struct NativePane {
     bool hinted = false;
     bool shared = false;           // Marked shared in the daemon (offered to browsers).
     bool takeoverReported = false; // The owner was told that another window took this terminal.
+    std::string name;              // The daemon's name for the terminal (Rename terminal...), if any.
 
     NativePane(const std::vector<std::string> &arguments,
                const std::string &term,
@@ -852,6 +853,7 @@ int runPtyFrontend(const char *font,
             for (const auto &entry : list->sessions) {
                 if (entry.id == pane.daemon->sessionId()) {
                     pane.shared = entry.shared;
+                    pane.name = entry.name;
                 }
             }
         });
@@ -990,6 +992,7 @@ int runPtyFrontend(const char *font,
                 if (const auto *got = info ? std::get_if<mtd::SessionInfo>(&*info) : nullptr) {
                     s.cwd = got->cwd;
                     s.command = got->command;
+                    s.name = got->name;
                 }
             }
             out.push_back(std::move(s));
@@ -1157,6 +1160,37 @@ int runPtyFrontend(const char *font,
         }
         else if (id == daemonaction::shareTab || id == daemonaction::shareTabStop) {
             setShared(activeTabPanes(), id == daemonaction::shareTab);
+        }
+        else if (id == daemonaction::renamePane && colon == std::string::npos) {
+            if (const NativePane *focusedPane = workspace.focusedPane(); focusedPane && focusedPane->daemon) {
+                wv.pushLayer(std::make_unique<ui::TextPrompt>("Rename terminal", focusedPane->name,
+                                                              std::string(daemonaction::renamePane) + ":", true));
+            }
+        }
+        else if (id == daemonaction::renamePane) {
+            NativePane *focusedPane = workspace.focusedPane();
+            if (!focusedPane || !focusedPane->daemon || focusedPane->daemon->sessionId().empty()) {
+                // Nothing to name.
+            }
+            else if (!mtd::validTerminalName(argument)) {
+                notify("names are at most 64 bytes, without control characters");
+            }
+            else {
+                std::string error;
+                const auto reply = askDaemon(daemonPath, mtd::SetName{focusedPane->daemon->sessionId(), argument}, error);
+                if (const auto *list = reply ? std::get_if<mtd::SessionList>(&*reply) : nullptr) {
+                    for (const auto &entry : list->sessions) {
+                        if (entry.id == focusedPane->daemon->sessionId()) {
+                            focusedPane->name = entry.name;
+                        }
+                    }
+                    notify(argument.empty() ? "terminal name removed" : "terminal named '" + argument + "'");
+                }
+                else {
+                    const auto *refused = reply ? std::get_if<mtd::ControlError>(&*reply) : nullptr;
+                    notify("daemon: " + (refused ? refused->reason : error.empty() ? std::string("could not name it (an older daemon?)") : error));
+                }
+            }
         }
         else if (id == daemonaction::attach) {
             wv.pushLayer(std::make_unique<ui::PickList>("Attach terminal", attachItems(daemonSessions(false)),
@@ -1877,6 +1911,8 @@ int runPtyFrontend(const char *font,
                     for (const auto &entry : list->sessions) {
                         if (entry.id == pane.daemon->sessionId()) {
                             pane.shared = entry.shared;
+                            pane.name = entry.name;
+                    pane.name = entry.name;
                         }
                     }
                 });
@@ -1889,8 +1925,7 @@ int runPtyFrontend(const char *font,
             if (pane.inDaemon()) {
                 const bool taken = pane.v.state() == TerminalView::State::Replaced;
                 if (taken && !pane.takeoverReported) {
-                    notify(pane.shared ? "a shared terminal was taken over from another window"
-                                       : "a terminal was taken over by another window");
+                    notify(takenOverNotice(pane.shared, pane.name));
                 }
                 pane.takeoverReported = taken;
             }

@@ -502,7 +502,12 @@ private:
                         continue;
                     body += (first ? "" : ",");
                     body += "{\"id\":\"" + s.id + "\",\"attached\":" +
-                            (s.attached ? "true" : "false") + "}";
+                            (s.attached ? "true" : "false") + ",\"name\":\"";
+                    for (const char c : s.name) { // No control characters: the daemon refuses them.
+                        if (c == '"' || c == '\\') body += '\\';
+                        body += c;
+                    }
+                    body += "\"}";
                     first = false;
                 }
                 body += "]}\n";

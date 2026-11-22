@@ -54,10 +54,13 @@ public:
         bool attached = false;
         bool shared = false;      // The owner marked it as visible to the web server (docs/TABS_PLAN.md s11).
         std::uint64_t outputEnd = 0; // Absolute offset of the end of the replay ring.
+        std::string name;            // Given by the owner (daemon: SetName); empty: none.
     };
     std::vector<Info> list() const;
     // Marks a live session shared or private. False for an unknown or ending session.
     bool setShared(const std::string &id, bool shared);
+    // Names a live session (the caller validated the text). False for an unknown or ending one.
+    bool setName(const std::string &id, const std::string &name);
     // Starts a persistent session nobody is attached to yet (the client then attaches
     // with Hello{sessionId}). `workingDirectory` empty: the daemon's own. Nullopt when the
     // registry is full, cannot persist sessions, or the process did not start.

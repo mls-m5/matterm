@@ -39,6 +39,8 @@ TEST_CASE("Attach entries: detach and move only for a daemon pane, attach-all on
     EXPECT(alone.find("Detach terminal (keep running)") != std::string::npos);
     EXPECT(alone.find("Move terminal to new tab") == std::string::npos); // nothing to move out of
     EXPECT(names({2, 0, true}).find("Move terminal to new tab") != std::string::npos);
+    EXPECT(alone.find("Rename terminal...") != std::string::npos);
+    EXPECT(names({}).find("Rename terminal") == std::string::npos);
 }
 
 TEST_CASE("The attach list shows folder, command and who has the terminal; own terminals are left out") {
@@ -56,6 +58,11 @@ TEST_CASE("The attach list shows folder, command and who has the terminal; own t
     EXPECT_EQ(items[1].detail, std::string("vim notes.txt (in another window) (shared)"));
     EXPECT_EQ(items[2].label, std::string("terminal"));
     EXPECT(items[2].detail.find('\x1b') == std::string::npos);
+    all[0].name = "build box";
+    EXPECT_EQ(attachItems(all)[0].label, std::string("build box (.../project/src)"));
+    EXPECT_EQ(takenOverNotice(true, "build box"),
+              std::string("a shared terminal 'build box' was taken over from another window"));
+    EXPECT_EQ(takenOverNotice(false, ""), std::string("a terminal was taken over by another window"));
     EXPECT_EQ(shortFolder("/"), std::string("/"));
     EXPECT_EQ(shortFolder("/home/me/"), std::string("home/me"));
 }

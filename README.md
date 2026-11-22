@@ -33,6 +33,25 @@ cmake --build build
 The browser build and the server are described in [web/README.md](web/README.md) and
 [docs/SERVER.md](docs/SERVER.md) (`-DMATTERM_BUILD_SERVER=ON`).
 
+## Getting started: a terminal on the laptop, shown in a browser
+
+1. **Start the app**: `./build/matterm`. The daemon starts by itself (it is the default); the
+   terminals live in it, so closing the window does not end them. `--no-daemon` runs them in the
+   window instead. If the daemon cannot start, the first terminal says so.
+2. **Share a terminal** (only shared ones are ever visible to a browser): click *Share* at the end
+   of the tab strip, or Ctrl+Shift+P and *Share this terminal* / *Share this tab*. A shared pane
+   has a small red square in its corner. *Rename terminal...* gives it a name that shows in the
+   lists.
+3. **Run the web server with exposure**: `matterm-server --expose-local-sessions` (it must run as
+   the same user as the daemon; see [docs/SERVER.md](docs/SERVER.md)). Log in from the browser.
+4. **Take it over in the browser**: in the web page open the palette (Ctrl+B `:`, or the button at
+   the end of the strip) and choose **Local terminals...**, then the terminal. The laptop pane
+   pauses with "Press Enter to take it back"; Enter on the laptop takes it back, and the browser
+   is told.
+5. **Another laptop window** can show any terminal of the daemon (also unshared ones, it is your
+   own user): palette *Attach terminal...*.
+6. Ctrl+Shift+H lists every keyboard shortcut.
+
 ## Keep terminals running: the local daemon
 
 `matterm-daemon` (built with `-DMATTERM_BUILD_SERVER=ON`, Linux) keeps terminals alive on a
@@ -54,7 +73,7 @@ private Unix socket, so they survive closing the window or a crash of the GUI.
   many programs end), **Quit and keep running** (closes the window, the programs stay).
   Closing a pane or quitting normally ends its terminal; SIGTERM/SIGHUP and *Quit and keep
   running* leave them. Start `matterm --daemon` again to get a new window; open terminals are
-  still listed by the daemon (re-attaching old ones from the GUI is not built yet).
+  still listed by the daemon: *Attach terminal...* opens one again.
 - **Sharing**: with `--daemon` the end of the tab strip has a *Share* button (grey: nothing in
   the tab is shared; red with a count: that many panes are), and the palette has *Share this
   terminal*, *Share this tab* and the matching *Stop sharing* entries. A shared pane has a

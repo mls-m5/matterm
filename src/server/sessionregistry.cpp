@@ -49,6 +49,7 @@ struct Entry : SessionHost {
                      ended = false;
     bool tombstone = false;
     bool shared = false;
+    std::string name;
     int exitCode = -1, exitSignal = 0;
     Time detachedAt{};
     explicit Entry(std::string identifier,
@@ -427,7 +428,7 @@ std::vector<SessionRegistry::Info> SessionRegistry::list() const {
     for (const auto &[id, entry] : impl_->entries) {
         if (entry->closing || entry->ended)
             continue;
-        out.push_back({id, entry->attached, entry->shared, entry->ring.end()});
+        out.push_back({id, entry->attached, entry->shared, entry->ring.end(), entry->name});
     }
     return out;
 }
@@ -437,6 +438,13 @@ bool SessionRegistry::setShared(const std::string &id, bool shared) {
         found->second->ended)
         return false;
     found->second->shared = shared;
+    return true;
+}
+bool SessionRegistry::setName(const std::string &id, const std::string &name) {
+    const auto found = impl_->entries.find(id);
+    if (found == impl_->entries.end() || found->second->closing || found->second->ended)
+        return false;
+    found->second->name = name;
     return true;
 }
 std::optional<std::string> SessionRegistry::create(const std::string &workingDirectory,

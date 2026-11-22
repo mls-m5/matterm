@@ -15,7 +15,12 @@
 namespace mtd {
 
 // 2: CreateSession and GetSessionInfo (a version 1 daemon answers them with BadMessage).
-constexpr std::uint16_t kControlVersion = 2;
+// 3: SetName, and terminal names in the session list and the session info. The names come in
+//    two new reply types that the daemon sends only to a client whose hello said version 3 or
+//    more; older clients keep getting the old types, which decode to the same structs without
+//    a name. An older daemon answers SetName with BadMessage.
+constexpr std::uint16_t kControlVersion = 3;
+constexpr std::size_t kMaxName = 64;
 constexpr std::size_t kMaxListed = 256;
 constexpr std::size_t kMaxPath = 4096;
 constexpr std::size_t kMaxArguments = 32;
@@ -44,6 +49,11 @@ struct CreateSession {
 };
 // What a session runs, for saving and for the close question (read from /proc by the daemon).
 struct GetSessionInfo { std::string id; };
+// Names a terminal so that it can be told apart in the lists (a laptop window, a browser). At
+// most 64 bytes of UTF-8 without control characters; empty removes the name.
+struct SetName { std::string id; std::string name; };
+// True for a name the daemon stores.
+bool validTerminalName(std::string_view name);
 
 struct ControlWelcome {
     std::uint16_t version = kControlVersion;
@@ -56,6 +66,7 @@ struct SessionEntry {
     bool attached = false;
     bool shared = false;
     std::uint64_t outputEnd = 0;
+    std::string name; // Empty: none (or the peer is older than version 3).
 };
 struct SessionList { std::vector<SessionEntry> sessions; };
 struct Status {
@@ -73,6 +84,7 @@ struct SessionInfo {
     std::string cwd;                  // Absolute, empty when unknown.
     bool busy = false;                // The foreground process is not a shell.
     std::vector<std::string> command; // Its command line when busy and safe to keep.
+    std::string name;                 // See SetName.
 };
 struct ShutdownReply {
     bool done = false;           // false: refused because the count was not current
@@ -90,14 +102,15 @@ struct ControlError {
     std::string reason;
 };
 
-using ControlRequest = std::variant<ControlHello, ExposedHello, ListSessions, SetShared, GetStatus, Shutdown, CreateSession, GetSessionInfo>;
+using ControlRequest = std::variant<ControlHello, ExposedHello, ListSessions, SetShared, GetStatus, Shutdown, CreateSession, GetSessionInfo, SetName>;
 using ControlReply = std::variant<ControlWelcome, SessionList, Status, ShutdownReply, ControlError, SessionCreated, SessionInfo>;
 
 // True for a first byte in the control range (either direction).
 inline bool isControlType(std::uint8_t type) { return (type & 0xf0) == 0x40 || (type & 0xf0) == 0xc0; }
 
 bool encode(const ControlRequest &message, std::string &out);
-bool encode(const ControlReply &message, std::string &out);
+// `peerVersion`: the version the other side said; below 3 the names are left out (old types).
+bool encode(const ControlReply &message, std::string &out, std::uint16_t peerVersion = kControlVersion);
 // Exactly one complete message; nullopt for anything malformed (truncated, trailing bytes, bad
 // UTF-8, out-of-range value, wrong direction).
 std::optional<ControlRequest> decodeRequest(std::string_view bytes);
