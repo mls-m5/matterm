@@ -6,6 +6,8 @@
 #include <cstring>
 #include <fcntl.h>
 #include <string>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -14,14 +16,30 @@ void usage() {
     (void)std::fputs("usage: matterm-daemon [--daemon-socket PATH] [--idle-seconds N] [--daemonize]\n"
                "  --daemon-socket PATH  use PATH instead of $XDG_RUNTIME_DIR/matterm/daemon.sock\n"
                "  --idle-seconds N      exit after N seconds with no sessions and no client (default 60, 0 = never)\n"
-               "  --daemonize           detach; the parent returns once the socket is ready\n",
+               "  --daemonize           detach; the parent returns once the socket is ready\n"
+               "  --ensure              like --daemonize, but do nothing when a daemon already answers there\n"
+               "  --print-socket        print the socket path (after the daemon is up, with --ensure/--daemonize)\n",
                stderr);
+}
+// True when something accepts connections on `path` (for --ensure; the caller checks nothing else).
+bool answers(const std::string &path) {
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    if (path.empty() || path.size() >= sizeof address.sun_path) return false;
+    std::memcpy(address.sun_path, path.data(), path.size());
+    const int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) return false;
+    const bool ok = ::connect(fd, reinterpret_cast<sockaddr *>(&address), sizeof address) == 0;
+    ::close(fd);
+    return ok;
 }
 } // namespace
 
 int main(int argc, char **argv) {
     auto config = mtd::defaultConfig();
     bool detach = false;
+    bool ensure = false;
+    bool printSocket = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--daemon-socket" && i + 1 < argc) {
@@ -40,10 +58,25 @@ int main(int argc, char **argv) {
         else if (a == "--daemonize") {
             detach = true;
         }
+        else if (a == "--ensure") {
+            detach = true;
+            ensure = true;
+        }
+        else if (a == "--print-socket") {
+            printSocket = true;
+        }
         else {
             usage();
             return a == "--help" ? 0 : 2;
         }
+    }
+    if (printSocket && !detach) {
+        (void)std::printf("%s\n", config.socketPath.c_str());
+        return 0;
+    }
+    if (ensure && answers(config.socketPath)) {
+        if (printSocket) (void)std::printf("%s\n", config.socketPath.c_str());
+        return 0;
     }
     int ready[2] = {-1, -1};
     if (detach) {
@@ -61,7 +94,10 @@ int main(int argc, char **argv) {
             ::close(ready[1]);
             char buf[512];
             const auto n = ::read(ready[0], buf, sizeof buf - 1);
-            if (n == 1 && buf[0] == 0) return 0;
+            if (n == 1 && buf[0] == 0) {
+                if (printSocket) (void)std::printf("%s\n", config.socketPath.c_str());
+                return 0;
+            }
             if (n > 1) (void)std::fprintf(stderr, "matterm-daemon: %.*s\n", int(n - 1), buf + 1);
             return 1;
         }

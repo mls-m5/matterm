@@ -41,6 +41,7 @@ private Unix socket, so they survive closing the window or a crash of the GUI.
 ```sh
 ./build/matterm --daemon            # starts the daemon if it is not running (default; --no-daemon runs the programs in the window)
 ./build/matterm --daemon --daemon-socket /tmp/dev.sock   # a separate daemon, for development
+./build/matterm --daemon-host user@host                  # the daemon of another computer, through an ssh tunnel (docs/REMOTE_DAEMON.md)
 ```
 
 - The socket is `$XDG_RUNTIME_DIR/matterm/daemon.sock` (directory 0700, socket 0600, only your

@@ -42,6 +42,11 @@ void printUsage(std::ostream &out, const char *program) {
            "  --no-daemon          Run the programs in this process.\n"
            "  --daemon-socket PATH Socket of the daemon (default: "
            "$XDG_RUNTIME_DIR/matterm/daemon.sock).\n"
+           "  --daemon-host [USER@]HOST\n"
+           "                       Use the daemon of another computer through an ssh tunnel\n"
+           "                       (started there if missing; needs ssh keys, no questions are\n"
+           "                       asked; see docs/REMOTE_DAEMON.md).\n"
+           "  --ssh-arg ARG        An extra argument for ssh (repeatable), e.g. -p / 2222.\n"
            "  --snap-scroll        Let scrolling come to rest on whole rows (default: "
            "smooth\n"
            "                       pixel scrolling, which may stop inside a row).\n"
@@ -313,6 +318,8 @@ int main(int argc, char **argv) {
     bool daemonExplicit = false;
     bool snapScroll = false;
     std::string daemonSocket;
+    std::string daemonHost;
+    std::vector<std::string> sshArguments;
     bool showcase = false;
     std::string term = "xterm-256color";
     std::vector<std::string> command;
@@ -362,6 +369,14 @@ int main(int argc, char **argv) {
         else if (arg == "--daemon-socket" && i + 1 < argc) {
             daemonSocket = argv[++i];
         }
+        else if (arg == "--daemon-host" && i + 1 < argc) {
+            daemonHost = argv[++i];
+            useDaemon = true;
+            daemonExplicit = true;
+        }
+        else if (arg == "--ssh-arg" && i + 1 < argc) {
+            sshArguments.emplace_back(argv[++i]);
+        }
         else if (arg == "--smooth-cursor") {
             smoothCursor = true;
         }
@@ -402,6 +417,10 @@ int main(int argc, char **argv) {
                      "command, --input, --showcase or the smoke tests\n";
         return 1;
     }
+    if (!daemonHost.empty() && (!daemonSocket.empty() || !useDaemon)) {
+        std::cerr << "--daemon-host is its own daemon: it cannot be combined with --daemon-socket or --no-daemon\n";
+        return 1;
+    }
     if (smoothCursor && (inputPath || smokeTest || showcase)) {
         std::cerr << "--smooth-cursor requires native PTY mode; do not combine "
                      "it with --input, --showcase or --smoke-test\n";
@@ -440,7 +459,7 @@ int main(int argc, char **argv) {
                                   recordPath,
                                   smoothCursor,
                                   ptyTabsSmokeTest,
-                                  DaemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll});
+                                  DaemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll, daemonHost, sshArguments});
         }
         catch (const std::exception &error) {
             std::cerr << error.what() << '\n';

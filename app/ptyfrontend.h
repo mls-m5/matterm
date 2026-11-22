@@ -9,6 +9,9 @@ struct DaemonOptions {
     std::string socketPath; // Empty: the default socket.
     bool required = false;  // --daemon given: fail instead of running without it.
     bool snapScroll = false; // --snap-scroll: scrolling comes to rest on whole rows.
+    // --daemon-host: the daemon of another computer through an ssh tunnel (docs/REMOTE_DAEMON.md).
+    std::string host;
+    std::vector<std::string> sshArguments; // --ssh-arg, before the ones the tunnel adds.
 };
 
 // Native entry-point adapter; owns SDL lifecycle after starting the PTY.

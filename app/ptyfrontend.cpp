@@ -15,6 +15,7 @@
 #include "procinfo.h"
 #include "sessionfiles.h"
 #include "sessionrestore.h"
+#include "sshtunnel.h"
 #include "terminalview.h"
 #include "ui/commandpalette.h"
 #include "ui/dialogs.h"
@@ -454,6 +455,23 @@ int runPtyFrontend(const char *font,
         return runSmokeTest(font, fontSize, arguments, term);
     }
     // The daemon is found (or started) before SDL and its threads exist.
+    std::unique_ptr<frontend::SshTunnel> tunnel; // Lives as long as the window (the socket is its).
+    if (!daemonOptions.host.empty()) {
+        std::cerr << "matterm: connecting to " << daemonOptions.host << " ...\n";
+        frontend::SshTunnelOptions tunnelOptions;
+        tunnelOptions.host = daemonOptions.host;
+        tunnelOptions.sshArguments = daemonOptions.sshArguments;
+        std::string tunnelError;
+        tunnel = frontend::SshTunnel::open(tunnelOptions, tunnelError);
+        if (!tunnel) {
+            throw std::runtime_error("--daemon-host: " + tunnelError);
+        }
+        daemonOptions.socketPath = tunnel->socketPath();
+        daemonOptions.enabled = true;
+        daemonOptions.required = true;
+    }
+    const bool remoteDaemon = tunnel != nullptr;
+    bool tunnelNoted = false;
     const std::string daemonPath = daemonSocket(daemonOptions.socketPath);
     std::optional<std::string> daemonFallbackReason; // set: the daemon was wanted and is not there
     if (daemonOptions.enabled) {
@@ -480,7 +498,10 @@ int runPtyFrontend(const char *font,
     // Where a new daemon terminal starts: the saved folder, else the folder of the pane in focus
     // (as the daemon sees it), else this program's folder.
     // Replaced below once the probe exists; the first pane is made before that.
-    std::function<std::string()> daemonCwd = [] {
+    std::function<std::string()> daemonCwd = [remoteDaemon] {
+        if (remoteDaemon) {
+            return std::string(); // A folder of this computer means nothing there.
+        }
         std::error_code ec;
         const auto here = std::filesystem::current_path(ec);
         return ec ? std::string() : here.string();
@@ -760,6 +781,9 @@ int runPtyFrontend(const char *font,
         return probePane(procSource, pane.link ? pane.link->childPid() : 0, pane.link ? pane.link->foregroundProcessGroup() : 0);
     };
     daemonCwd = [&]() -> std::string {
+        if (remoteDaemon) {
+            return {}; // The other computer's shell starts in its own home.
+        }
         if (!nextCwd.empty()) {
             return nextCwd;
         }
@@ -1834,7 +1858,13 @@ int runPtyFrontend(const char *font,
             }
         }
         guarded([&] { wv.sync(nowMs); });
-        if (daemonOptions.enabled && SDL_GetTicks64() - lastSharedPoll >= 2000) {
+        if (tunnel && !tunnelNoted && !tunnel->alive()) {
+            tunnelNoted = true;
+            notify("The connection to " + daemonOptions.host + " ended; the terminals there keep running. Restart matterm to reconnect.");
+        }
+        // A slow link: ask less often (each question waits for the answer).
+        if (daemonOptions.enabled && !(tunnel && !tunnel->alive()) &&
+            SDL_GetTicks64() - lastSharedPoll >= (remoteDaemon ? 10000u : 2000u)) {
             // The shared marks are the daemon's; another tool may have changed them.
             lastSharedPoll = SDL_GetTicks64();
             std::string error;
