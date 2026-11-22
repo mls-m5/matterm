@@ -35,6 +35,12 @@ void printUsage(std::ostream &out, const char *program) {
            "  --font-size PIXELS   Font size, 1..128 renderer pixels (default: "
            "18).\n"
            "  --term TERM          Child TERM (default: xterm-256color).\n"
+           "  --daemon             Keep the terminals in matterm-daemon (started if "
+           "missing),\n"
+           "                       so they survive closing this window.\n"
+           "  --no-daemon          Run the programs in this process (default).\n"
+           "  --daemon-socket PATH Socket of the daemon (default: "
+           "$XDG_RUNTIME_DIR/matterm/daemon.sock).\n"
            "  --smooth-cursor      Animate cursor movement (native PTY only; "
            "default: off).\n"
            "  --record-output FILE Record raw PTY output to a new file (max 64 "
@@ -299,6 +305,8 @@ int main(int argc, char **argv) {
     bool ptySmokeTest = false;
     bool ptyTabsSmokeTest = false;
     bool smoothCursor = false;
+    bool useDaemon = false;
+    std::string daemonSocket;
     bool showcase = false;
     std::string term = "xterm-256color";
     std::vector<std::string> command;
@@ -335,6 +343,15 @@ int main(int argc, char **argv) {
                 return 1;
             }
         }
+        else if (arg == "--daemon") {
+            useDaemon = true;
+        }
+        else if (arg == "--no-daemon") {
+            useDaemon = false;
+        }
+        else if (arg == "--daemon-socket" && i + 1 < argc) {
+            daemonSocket = argv[++i];
+        }
         else if (arg == "--smooth-cursor") {
             smoothCursor = true;
         }
@@ -363,6 +380,12 @@ int main(int argc, char **argv) {
         else {
             valid = false;
         }
+    }
+    if (useDaemon && (!command.empty() || inputPath || smokeTest || showcase || ptySmokeTest ||
+                      ptyTabsSmokeTest)) {
+        std::cerr << "--daemon runs the daemon's shell ($SHELL); it cannot be combined with a "
+                     "command, --input, --showcase or the smoke tests\n";
+        return 1;
     }
     if (smoothCursor && (inputPath || smokeTest || showcase)) {
         std::cerr << "--smooth-cursor requires native PTY mode; do not combine "
@@ -401,7 +424,8 @@ int main(int argc, char **argv) {
                                   ptySmokeTest,
                                   recordPath,
                                   smoothCursor,
-                                  ptyTabsSmokeTest);
+                                  ptyTabsSmokeTest,
+                                  DaemonOptions{useDaemon, daemonSocket});
         }
         catch (const std::exception &error) {
             std::cerr << error.what() << '\n';

@@ -330,6 +330,13 @@ if(BUILD_TESTING)
         add_executable(daemon_test daemon_test.cpp mls-unit-test/test_main.cpp)
         target_link_libraries(daemon_test PRIVATE matterm-daemon-core)
         add_test(NAME daemon COMMAND daemon_test)
+
+        add_executable(daemonclient_test daemonclient_test.cpp mls-unit-test/test_main.cpp)
+        target_include_directories(daemonclient_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+        target_compile_definitions(daemonclient_test PRIVATE MATTERM_DAEMON_BIN="$<TARGET_FILE:matterm-daemon>")
+        target_link_libraries(daemonclient_test PRIVATE matterm-daemon-core matterm::unixchannel matterm::transport matterm::vt matterm::terminal)
+        add_dependencies(daemonclient_test matterm-daemon)
+        add_test(NAME daemon_client COMMAND daemonclient_test)
         set_tests_properties(daemon PROPERTIES TIMEOUT 120)
     endif()
 

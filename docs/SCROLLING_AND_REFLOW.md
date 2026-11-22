@@ -298,3 +298,42 @@ grows. Resize bursts still need the 40 ms throttle of `WorkspaceView`.
   hook in `TerminalMemory::at()` on the write path) and compare with `main`.
 - The soft-wrap flag fix of the prototype (flags survive width changes on the primary
   screen) is a prerequisite of reflow and can be taken on its own.
+
+## Wrapped-line marker (owner, 2026-11-22; design only, nothing implemented)
+
+Soft-wrapped lines get a small visible mark at the end of each row that continues on the next
+one, so a long command or log line can be told from separate lines (and so the user sees what
+reflow will join). The owner suggested a small right-pointing triangle or another glyph that one
+rarely types.
+
+**Where it is drawn.** In the renderer, at the end of every visible row whose
+`softWrap` flag is set (the row continues below). It is not cell text: the last cell
+keeps its character, selection, copy and search never see the mark, and copying a wrapped line
+still joins it without a newline (what `softWrap` already means for copy). A wrapped row is full by definition, so its last
+column always holds a character and the mark cannot go there. Two choices:
+1. **Reserve one column** for the mark (the terminal is one column narrower than the pane).
+   Wrong: programs would see a different width than the pane.
+2. **Draw in the right gutter** (recommended): the pane already reserves a scrollbar strip on
+   its right; the mark sits in the pixels between the last cell and the strip, vertically
+   centred on the row, as a small shape drawn by the backend (a triangle of ~40% of the cell
+   height in a dim foreground), not as a font glyph. No cell is covered, no width changes,
+   and no glyph has to exist in the bundled font, so no cmap test is needed. If the gutter
+   has no room (very narrow panes, compact mode) the mark is simply not drawn.
+
+A glyph variant (U+21B5 or U+25B8 over the last cell, dimmed) stays possible as the fallback
+for the web port if the gutter is not available there; it would need the cmap test the palette
+button has, and it hides the last character, so it is the less good choice.
+
+**Interface.** `RenderFrame` gets `std::vector<bool> wrapMarks` (one entry per visible row;
+empty means none). The model fills it from `softWrap` when it builds the frame (it already
+knows the flag per row), the backend draws it. Frame signatures (`windowSignature`) include the
+flags so a change redraws. Alternate-screen rows never have the flag set.
+
+**Setting.** `wrap_marker = on|off` (default on once reflow exists; default off before, since
+without reflow the mark would promise something that does not happen). Colour: the dim
+foreground, which is the same as the scrollbar thumb at rest.
+
+**Tests.** `terminalmodel_test`: the frame marks exactly the rows that continue (a 25-character
+line at width 10 gives rows 0 and 1 marked, row 2 not; an erase or a hard newline clears the
+mark). `sdlbackend` pixel test: with the mark on, pixels in the gutter beside a wrapped row
+differ from an unwrapped row and no cell pixel changes.

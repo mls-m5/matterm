@@ -165,6 +165,7 @@ inline std::unique_ptr<DaemonLink> attachToDaemon(
     view.detach();
     ClientSession::Config config;
     config.clock = std::move(clock);
+    config.extraFeatures = protocol::featureDaemon;
     view.configure(config, std::move(sessionId), resumeOffset);
     try {
         auto link = DaemonLink::connect(socketPath, std::move(config));

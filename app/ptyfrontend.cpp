@@ -2,6 +2,9 @@
 
 #include "cellbuffer.h"
 #include "cursorglide.h"
+#include "daemoncommands.h"
+#include "daemonclient.h"
+#include "daemonlink.h"
 #include "inputencoder.h"
 #include "ptysession.h"
 #include "sdlbackend.h"
@@ -21,6 +24,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cmath>
 #include <csignal>
 #include <ctime>
@@ -229,36 +233,104 @@ private:
     std::function<void(std::string_view)> tap_;
 };
 
-// One terminal of the window: a process and the view of its output. The link is
-// declared first because the view borrows it.
+// Time for the daemon connection's timers.
+protocol::Time daemonClock() {
+    return std::chrono::duration_cast<protocol::Time>(std::chrono::steady_clock::now().time_since_epoch());
+}
+
+// One terminal of the window: a process (here, or in the daemon) and the view of its output.
+// The links are declared first because the view borrows them.
 struct NativePane {
-    PtyLink link;
+    std::unique_ptr<PtyLink> link;      // The program runs in this process, or
+    std::unique_ptr<DaemonLink> daemon; // in matterm-daemon, which keeps it when this window goes.
+    std::string socket;                 // The daemon's socket (daemon panes).
     std::unique_ptr<TapLink> tap;
     TerminalView v;
+    bool endInDaemon = true; // Closing the pane ends its terminal; false: leave it running.
+    bool hinted = false;
+
     NativePane(const std::vector<std::string> &arguments,
                const std::string &term,
                int columns,
                int rows,
                std::function<void(std::string_view)> record)
-        : link(arguments,
-               columns,
-               rows,
-               term,
-               PtyProcess::ColorCapability::TrueColor)
+        : link(std::make_unique<PtyLink>(
+              arguments, columns, rows, term, PtyProcess::ColorCapability::TrueColor))
         , v(TerminalViewConfig{std::size_t(columns), std::size_t(rows), 1000, {}}) {
         if (record) {
-            tap = std::make_unique<TapLink>(link, std::move(record));
+            tap = std::make_unique<TapLink>(*link, std::move(record));
             v.attach(*tap);
         }
         else {
-            v.attach(link);
+            v.attach(*link);
         }
     }
+    // A pane whose terminal lives in the daemon: a new one (empty `sessionId`) or an existing one.
+    NativePane(const std::string &socketPath, std::string sessionId, int columns, int rows)
+        : socket(socketPath)
+        , v(TerminalViewConfig{std::size_t(columns), std::size_t(rows), 1000, {}}) {
+        daemon = attachToDaemon(v, socket, std::move(sessionId), 0, daemonClock);
+    }
+    ~NativePane() {
+        v.detach();
+        if (daemon && endInDaemon && !v.ended()) {
+            daemon->close();
+        }
+    }
+    NativePane(const NativePane &) = delete;
+    NativePane &operator=(const NativePane &) = delete;
+
     TerminalView &view() {
         return v;
     }
     const TerminalView &view() const {
         return v;
+    }
+    bool inDaemon() const {
+        return !link;
+    }
+    // Serves the process or the connection; says what Enter will do when the terminal is not live.
+    void pump() {
+        if (link) {
+            link->pump();
+            return;
+        }
+        if (daemon) {
+            daemon->tick();
+        }
+        const auto kind = reattachKind(v);
+        if (kind == Reattach::None) {
+            hinted = false;
+        }
+        else if (!hinted) {
+            hinted = true;
+            v.note(kind == Reattach::Fresh ? "press Enter to start a new terminal"
+                                           : "press Enter to attach again");
+        }
+    }
+    bool finished() const {
+        return link ? link->finished() : v.state() == TerminalView::State::Exited;
+    }
+    std::optional<PtyProcess::ExitStatus> exitStatus() const {
+        if (link) {
+            return link->exitStatus();
+        }
+        if (v.state() == TerminalView::State::Exited) {
+            return PtyProcess::ExitStatus{v.exitCode(), v.exitSignal()};
+        }
+        return std::nullopt;
+    }
+    // Enter in a pane that lost its terminal. True when it did something.
+    bool reattach() {
+        if (link || reattachKind(v) == Reattach::None) {
+            return false;
+        }
+        auto fresh = reattachToDaemon(v, daemon.get(), socket, daemonClock);
+        if (fresh) {
+            daemon = std::move(fresh);
+            hinted = false;
+        }
+        return true;
     }
 };
 
@@ -337,10 +409,21 @@ int runPtyFrontend(const char *font,
                    bool smokeTest,
                    const char *recordPath,
                    bool smoothCursor,
-                   bool tabsSmoke) {
+                   bool tabsSmoke,
+                   const DaemonOptions &daemonOptions) {
     if (smokeTest) {
         return runSmokeTest(font, fontSize, arguments, term);
     }
+    // The daemon is found (or started) before SDL and its threads exist.
+    const std::string daemonPath = daemonSocket(daemonOptions.socketPath);
+    if (daemonOptions.enabled) {
+        const auto error = ensureDaemon(daemonOptions.socketPath);
+        if (!error.empty()) {
+            throw std::runtime_error("--daemon: " + error);
+        }
+    }
+    bool keepTerminals = false;           // Leave the programs running in the daemon when we go.
+    std::uint32_t daemonStopCount = 0;    // What the "Stop daemon" question named.
     OutputRecording recording(recordPath);
     bool recordFirst = recordPath != nullptr;
     int hintColumns = 80, hintRows = 24; // size of a new pane until the layout says
@@ -363,8 +446,9 @@ int runPtyFrontend(const char *font,
             command = {"/bin/sh", "-c", "cd -- \"$1\" 2>/dev/null; shift; exec \"$@\"", "sh", nextCwd};
             command.insert(command.end(), arguments.begin(), arguments.end());
         }
-        auto pane = std::make_unique<NativePane>(
-            command, term, hintColumns, hintRows, std::move(record));
+        auto pane = daemonOptions.enabled
+                        ? std::make_unique<NativePane>(daemonPath, std::string(), hintColumns, hintRows)
+                        : std::make_unique<NativePane>(command, term, hintColumns, hintRows, std::move(record));
         pane->v.glide() = CursorGlide([&] {
             CursorGlide::Config c;
             c.enabled = smoothCursor;
@@ -576,13 +660,16 @@ int runPtyFrontend(const char *font,
     SessionPolicy sessionPolicy;
     bool smokeBusy = false; // --pty-tabs-smoke-test: pretend every pane runs a program
     const auto paneState = [&](NativePane &pane) {
-        return probePane(procSource, pane.link.childPid(), pane.link.foregroundProcessGroup());
+        if (!pane.link) {
+            return PaneState{}; // The program is in the daemon: nothing of it can be probed here.
+        }
+        return probePane(procSource, pane.link ? pane.link->childPid() : 0, pane.link ? pane.link->foregroundProcessGroup() : 0);
     };
     {
         // Closing a pane, tab or the window asks when a program other than the shell runs there.
         wv.setBusyProbe([&](PaneId id) -> std::optional<std::string> {
             NativePane *pane = workspace.pane(id);
-            if (!pane || pane->link.finished()) {
+            if (!pane || pane->finished()) {
                 return std::nullopt;
             }
             if (smokeBusy) {
@@ -680,6 +767,9 @@ int runPtyFrontend(const char *font,
             {"session.save", "Save session as...", "Save the tabs and panes under a name", std::nullopt, {}, {}},
             {"tab.rename", "Rename tab...", "Give the tab a name that stays", std::nullopt, {}, {}},
         };
+        for (auto &entry : daemonCommandEntries(daemonOptions.enabled)) {
+            extra.push_back(std::move(entry));
+        }
         wv.pushLayer(std::make_unique<ui::CommandPalette>(buildCommandRegistry(viewConfig.prefix, extra), true));
     };
     const auto handleAction = [&](const std::string &action) {
@@ -722,6 +812,41 @@ int runPtyFrontend(const char *font,
                 sessionPolicy.adopt(argument);
                 saveSession(argument, false);
             }
+        }
+        else if (id == daemonaction::stop || id == daemonaction::status) {
+            std::string error;
+            const auto reply = askDaemon(daemonPath, mtd::GetStatus{}, error);
+            const auto *status = reply ? std::get_if<mtd::Status>(&*reply) : nullptr;
+            if (!status) {
+                notify("daemon: " + (error.empty() ? std::string("unexpected answer") : error));
+            }
+            else if (id == daemonaction::status) {
+                notify(formatDaemonStatus({true, daemonPath, status->sessions, status->attached}));
+            }
+            else {
+                daemonStopCount = status->sessions;
+                wv.pushLayer(stopDaemonDialog(daemonStopCount));
+            }
+        }
+        else if (id == daemonaction::stopConfirm) {
+            std::string error;
+            const auto reply = askDaemon(daemonPath, mtd::Shutdown{daemonStopCount}, error);
+            const auto *done = reply ? std::get_if<mtd::ShutdownReply>(&*reply) : nullptr;
+            if (!done) {
+                notify("daemon: " + (error.empty() ? std::string("unexpected answer") : error));
+            }
+            else if (!done->done) {
+                // The number of programs changed while the question was open: ask again.
+                daemonStopCount = done->sessions;
+                wv.pushLayer(stopDaemonDialog(daemonStopCount));
+            }
+            else {
+                notify("daemon stopped");
+            }
+        }
+        else if (id == daemonaction::quitKeep) {
+            keepTerminals = true;
+            running = false;
         }
         else if (id == "tab.rename" && colon == std::string::npos) {
             wv.pushLayer(std::make_unique<ui::TextPrompt>("Rename tab", workspace.userTitle(workspace.activeIndex()), "tab.rename:", true));
@@ -829,7 +954,7 @@ int runPtyFrontend(const char *font,
         }
         case 5: {
             auto *pane = workspace.pane(hiddenPane);
-            expectThat(pane && !pane->link.finished(),
+            expectThat(pane && !pane->finished(),
                        "the hidden process still runs");
             expectThat(pane->v.model().frame(backend.cellHeight()).scrollbar.size <
                            hiddenShare,
@@ -972,6 +1097,7 @@ int runPtyFrontend(const char *font,
     while (running) {
         skipText = false;
         if (gShutdownSignal != 0) {
+            keepTerminals = true; // The terminal or session went away, not the owner's wish to end them.
             break; // SIGTERM or SIGHUP: leave through the shutdown save below, no question asked.
         }
         if (wv.pendingClose() && !wv.hasLayer()) {
@@ -1266,6 +1392,10 @@ int runPtyFrontend(const char *font,
                     continue;
                 }
                 NativePane &np = *focused;
+                if (key == SDLK_RETURN && !mod.control && !mod.alt && !mod.shift && np.inDaemon() &&
+                    np.reattach()) {
+                    continue; // Enter in a pane that lost its terminal: attach again.
+                }
                 auto &model = np.v.model();
                 if (mod.control && mod.shift && key == SDLK_v) {
                     if (!event.key.repeat) {
@@ -1332,14 +1462,14 @@ int runPtyFrontend(const char *font,
         // Every process keeps being served, shown or not; ended ones close their pane.
         std::vector<PaneId> ended;
         workspace.forEachPane([&](PaneId id, NativePane &pane, bool) {
-            pane.link.pump();
-            if (pane.link.finished()) {
+            pane.pump();
+            if (pane.finished()) {
                 ended.push_back(id);
             }
         });
         for (const PaneId id : ended) {
             if (auto *pane = workspace.pane(id)) {
-                lastExit = pane->link.exitStatus();
+                lastExit = pane->exitStatus();
             }
             if (workspace.closePaneAnywhere(id) == Outcome::Empty) {
                 running = false;
@@ -1466,6 +1596,9 @@ int runPtyFrontend(const char *font,
         backend.present();
     }
     SDL_StopTextInput();
+    if (keepTerminals) {
+        workspace.forEachPane([](PaneId, NativePane &pane, bool) { pane.endInDaemon = false; });
+    }
     // A controlled shutdown (quit, the window's close button, SIGTERM, SIGHUP) writes the session
     // of a window the owner made persistent, with a checkpoint of what is on the screens. Nothing
     // is written for a window whose session was never saved, and nothing is ever restored on start.

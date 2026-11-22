@@ -47,7 +47,7 @@ void ClientSession::onOpened() {
     hello.rows = std::uint16_t(config_.rows);
     hello.sessionId = config_.sessionId;
     hello.resumeOffset = config_.resumeOffset;
-    hello.features = config_.replay ? featureReplay : 0;
+    hello.features = (config_.replay ? featureReplay : 0) | config_.extraFeatures;
     if (!sendMessage(hello)) {
         fail("could not send Hello", 1011);
         return;
@@ -102,7 +102,7 @@ void ClientSession::handle(const Welcome &message) {
         fail("server chose an unsupported protocol version", 1002);
         return;
     }
-    const auto offered = config_.replay ? featureReplay : 0;
+    const auto offered = (config_.replay ? featureReplay : 0) | config_.extraFeatures;
     const bool resumed = (message.flags & welcomeResumed) != 0;
     const bool reset = (message.flags & welcomeOutputLost) != 0;
     const bool validReplayId =

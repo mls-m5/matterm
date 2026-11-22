@@ -27,6 +27,8 @@ public:
         ms pongTimeout{30000};            // Silence after a Ping is fatal.
         std::size_t maxInputChunk = 4096;
         bool replay = false;
+        // Further feature bits to offer in Hello (featureDaemon for the local daemon).
+        std::uint32_t extraFeatures = 0;
         std::string sessionId;
         std::uint64_t resumeOffset = 0;
         // Required before accepting a reset/full replay (Welcome.flags=3).
