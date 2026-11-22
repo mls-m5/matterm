@@ -438,13 +438,13 @@ TEST_CASE("Window buttons close the row: minimise, maximise or restore, close") 
 }
 
 TEST_CASE("The share button is a symbol; shared or not shows in the text, not only in the colour") {
-    EXPECT(kShareIcon == U'\u2234'); // One constant to change if another symbol is preferred.
+    EXPECT(kShareIcon == U'\u21E7'); // One constant to change if another symbol is preferred.
     const std::u32string none = shareLabel(ShareButton{true, 0});
     const std::u32string two = shareLabel(ShareButton{true, 2});
     const std::u32string many = shareLabel(ShareButton{true, 12});
-    EXPECT(none == U" \u2234 ");
-    EXPECT(two == U" \u2234 2 ");
-    EXPECT(many == U" \u2234 12 ");
+    EXPECT(none == U" \u21E7 ");
+    EXPECT(two == U" \u21E7 2 ");
+    EXPECT(many == U" \u21E7 12 ");
     // Nothing shared: no digit anywhere. Shared: the count is there. A colour-blind owner can tell.
     for (const char32_t c : none) EXPECT(c < U'0' || c > U'9');
     EXPECT(none != two && two != many);

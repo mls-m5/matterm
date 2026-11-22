@@ -35,9 +35,9 @@ inline constexpr char32_t kMinimizeIcon = U'–';
 inline constexpr char32_t kMaximizeIcon = U'□';
 inline constexpr char32_t kRestoreIcon = U'◫'; // U+25EB (the font has no overlapping-squares glyph)
 inline constexpr char32_t kCloseWindowIcon = U'✕';
-// The share button's symbol (three dots, like the share icon of a phone). The bundled font has no
-// box-with-arrow; U+2197 and U+21E7 are the other candidates.
-inline constexpr char32_t kShareIcon = U'\u2234';
+// The share button's symbol (an up arrow; the owner's choice). The bundled font has no
+// box-with-arrow; U+2234 (three dots) and U+2197 are the other candidates it has.
+inline constexpr char32_t kShareIcon = U'\u21E7';
 inline constexpr char32_t kStripGlyphs[] = {kShareIcon, U'●', U'×', U'…', U'≡', kWorkingIcon,
                                             kMinimizeIcon, kMaximizeIcon, kRestoreIcon, kCloseWindowIcon};
 
