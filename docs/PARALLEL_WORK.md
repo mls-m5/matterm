@@ -72,7 +72,7 @@ clang-tidy (`docs/STATIC_ANALYSIS.md`).
   operator plans them; the implementation is archived on `archive/web-tabs`.
 - `docs/tasks/daemon-reconnect.md`: reconnect for `--daemon-host`. agent2 (`.tmp/agent2`, branch `agent2`).
 - `docs/tasks/borderless-window.md`: borderless native window. agent3 (`.tmp/agent3`, branch `agent3`).
-- `docs/tasks/csd-window.md`: experiment, own shadow and rounded corners (`--csd`). **On hold** (owner, 2026-11-22): the system frame (libdecor) is used first; not assigned.
+- `docs/tasks/csd-window.md`: experiment, own shadow and rounded corners (`--csd`). Step 1 only (transparency probe in `--window-test`) released 2026-11-22; the rest on hold. SDL3 ruled out by the owner.
 - Width reflow: designed only (docs/SCROLLING_AND_REFLOW.md), not assigned.
 
 Agents can be reached through the MCP message tools (`list_peers`,
