@@ -400,10 +400,26 @@ cell and slot-wise copies would likely halve it, but that is not measured.
 Limits of these numbers: one machine, synthetic text, the algorithm outside the model, no allocation-failure
 rollback measured (the new history is built beside the old, so peak memory is 2x the history for the duration).
 
-**Prepared (2026-11-22):** `RenderFrame::wrapMarks` (one flag per supplied row, empty = unknown) and
-`TerminalModel::viewWrapMarks()` (the flags of the current frame's rows, from `softWrap`) exist and
-are tested. No backend draws the mark yet: that waits for the reflow work to land, since without
-reflow the mark would promise something that does not happen.
+**Implemented (2026-11-22, agent2; `docs/tasks/wrap-marker.md`):** the native window and the browser
+(they share `SdlBackend`) draw a small filled triangle for every row that continues on the next, with
+`RenderFrame::wrapMarks` filled from `TerminalModel::viewWrapMarks()` at the two places that draw
+panes (`app/ptyfrontend.cpp`, `web/main.cpp`). The model's `frame()` itself stays cheap. Differences from
+the plan above, decided while building it:
+
+* The gutter is the scrollbar strip: for a pane at the window edge the strip (12 px) holds the mark on its
+  left and the scrollbar thumb on its right, 4 px wide instead of 8 (the thumb only moves when marks are on,
+  which is always now); for a pane next to a divider the scrollbar stays in the near half and the mark is
+  in the far half. The leftover pixels beside the last column are not used: their width is arbitrary, so
+  a mark there would come and go while resizing.
+* No room (a strip narrower than 12 px, a divider half narrower than 5 px, a pane without a reserved
+  strip): not drawn; the grid never changes.
+* The alternate screen has no marks (`viewWrapMarks()` is all false there; the model does set the flag
+  while a program on the alternate screen wraps, the plan's "never set" was not true).
+* No setting `wrap_marker`: there is no config file; the look is `wrapmark::kStyle` in
+  `src/render/wrapmark.h` (size, colour, side, strip split) and nowhere else.
+* Cost: one triangle per marked row in one `SDL_RenderGeometry` call, a vector of flags per pane and frame,
+  and the flags in the frame signature. Measured below in the feature description
+  (`docs/handover/features/agent2-wrap-marker.md`).
 
 ## Implemented: history-only reflow (2026-11-22, agent2)
 

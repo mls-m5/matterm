@@ -123,8 +123,10 @@ public:
     // Invalid row/cell IDs return nullopt/false. A wrapped row joins the next.
     std::optional<char32_t> textCodePoint(TextCell cell) const noexcept;
     bool textRowWrapped(std::size_t row) const noexcept;
-    // For each row of the current frame (frame(cellHeight).cells): does it continue on the next
-    // row? Fill RenderFrame::wrapMarks with it when a front end wants the wrapped-line marker.
+    // For each row of the current frame (frame(cellHeight).cells): does it
+    // continue on the next row? Fill RenderFrame::wrapMarks with it when a
+    // front end wants the wrapped-line marker. Always all false on the
+    // alternate screen.
     std::vector<bool> viewWrapMarks() const;
     // Inclusive endpoints, either order. UTF-8, no newline across soft wraps.
     // Invalid or over-limit ranges return nullopt.

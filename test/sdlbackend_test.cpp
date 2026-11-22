@@ -203,6 +203,115 @@ TEST_CASE("Fractional rows are clipped to text bounds and cannot cover the "
     EXPECT_EQ(fixture.pixel(319, 0), Uint32(0xc81e28));
 }
 
+TEST_CASE("Wrapped rows get a mark in the strip; no cell changes, unwrapped "
+          "rows get none") {
+    Fixture fixture;
+    fixture.backend->setReserveScrollbarStrip(true);
+    const auto columns = std::size_t(fixture.backend->columns(true));
+    const int h = fixture.backend->cellHeight();
+    const int width = 320; // The fixture's window.
+    CellBuffer cells(columns, 4);
+    cells.clear(FChar{U' ', {}, {200, 30, 40}});
+    RenderFrame frame{cells.view(), {}};
+    frame.wrapMarks = {true, false, true, false};
+    fixture.backend->render(frame);
+    const int strip = width - 12;
+    // Row 0 and 2 continue: the middle of the mark's base column is the dim
+    // foreground.
+    const int markX = strip + 2;
+    EXPECT_EQ(fixture.pixel(markX, h / 2), Uint32(0x6e7a8e));
+    EXPECT_EQ(fixture.pixel(markX, 2 * h + h / 2), Uint32(0x6e7a8e));
+    // Row 1 and 3 end there: the strip looks like the cell beside it.
+    EXPECT_EQ(fixture.pixel(markX, h + h / 2), Uint32(0xc81e28));
+    EXPECT_EQ(fixture.pixel(markX, 3 * h + h / 2), Uint32(0xc81e28));
+    // Above and below the mark, still the cell colour; the cells themselves are
+    // untouched.
+    EXPECT_EQ(fixture.pixel(markX, 1), Uint32(0xc81e28));
+    EXPECT_EQ(fixture.pixel(markX, h - 1), Uint32(0xc81e28));
+    EXPECT_EQ(fixture.pixel(1, h / 2), Uint32(0xc81e28));
+    EXPECT_EQ(
+        fixture.pixel(int(columns) * fixture.backend->cellWidth() - 1, h / 2),
+        Uint32(0xc81e28));
+    // No marks asked for (empty): nothing drawn there.
+    frame.wrapMarks.clear();
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(markX, h / 2), Uint32(0xc81e28));
+}
+
+TEST_CASE("Marks and the scrollbar share the strip: the thumb moves right, the "
+          "mark stays visible") {
+    Fixture fixture;
+    fixture.backend->setReserveScrollbarStrip(true);
+    const auto columns = std::size_t(fixture.backend->columns(true));
+    const int h = fixture.backend->cellHeight();
+    CellBuffer cells(columns, 4);
+    cells.clear(FChar{U' ', {}, {200, 30, 40}});
+    RenderFrame frame{cells.view(), {}};
+    frame.scrollbar = {true, 0.0f, 1.0f};
+    frame.wrapMarks = {true, false, false, false};
+    fixture.backend->render(frame);
+    const int strip = 320 - 12;
+    EXPECT_EQ(fixture.pixel(strip + 2, h / 2), Uint32(0x6e7a8e)); // the mark
+    EXPECT_EQ(fixture.pixel(strip + 2, 2 * h),
+              Uint32(0x191d24)); // the track beside the thumb
+    EXPECT_EQ(fixture.pixel(strip + 9, 2 * h),
+              Uint32(0x6e7a8e)); // the thumb, narrower and to the right
+    // Without marks the thumb is where it always was.
+    frame.wrapMarks.clear();
+    fixture.backend->render(frame);
+    EXPECT_EQ(fixture.pixel(strip + 2, 2 * h), Uint32(0x6e7a8e));
+}
+
+TEST_CASE("A pane beside a divider: the scrollbar in the near half, the mark "
+          "in the far half") {
+    Fixture fixture; // 320x160
+    const int w = fixture.backend->cellWidth();
+    const int h = fixture.backend->cellHeight();
+    const Uint32 gap = 0x0a141e;
+    fixture.backend->beginFrame({10, 20, 30});
+    const int paneWidth = (96 / w) * w;
+    CellBuffer cells(std::size_t(96 / w), 3);
+    cells.clear(FChar{U' ', {}, {200, 30, 40}});
+    RenderFrame frame{cells.view(), {}};
+    frame.scrollbar = {true, 0.0f, 0.25f};
+    frame.wrapMarks = {true, false, false};
+    // The pane at x=20, its divider 12 px wide right of it; the scrollbar is
+    // the near half (6 px).
+    const int x = 20, y = 10;
+    fixture.backend->render(
+        frame,
+        PaneArea{{x, y, paneWidth, 3 * h}, {x + paneWidth, y, 6, 3 * h}});
+    // Near half: the scrollbar as before, no mark there.
+    EXPECT_EQ(fixture.pixel(x + paneWidth, y + h / 2), Uint32(0x191d24));
+    // Far half: the mark on the wrapped row's middle, nothing on the next row,
+    // the gap elsewhere.
+    EXPECT_EQ(fixture.pixel(x + paneWidth + 6 + 1, y + h / 2),
+              Uint32(0x6e7a8e));
+    EXPECT_EQ(fixture.pixel(x + paneWidth + 6 + 1, y + h + h / 2), gap);
+    // Nothing leaks past the divider.
+    EXPECT_EQ(fixture.pixel(x + paneWidth + 12 + 2, y + h / 2), gap);
+    // A scrollbar half too narrow for the mark: not drawn.
+    fixture.backend->beginFrame({10, 20, 30});
+    fixture.backend->render(
+        frame,
+        PaneArea{{x, y, paneWidth, 3 * h}, {x + paneWidth, y, 4, 3 * h}});
+    EXPECT_EQ(fixture.pixel(x + paneWidth + 4 + 1, y + h / 2), gap);
+}
+
+TEST_CASE("Without a reserved strip there is no room, so no mark") {
+    Fixture fixture;
+    const int h = fixture.backend->cellHeight();
+    CellBuffer cells(8, 2);
+    cells.clear(FChar{U' ', {}, {200, 30, 40}});
+    RenderFrame frame{cells.view(), {}};
+    frame.wrapMarks = {true, false};
+    fixture.backend->render(frame);
+    for (int x = 0; x < 320; x += 7) {
+        const auto p = fixture.pixel(x, h / 2);
+        EXPECT(p == Uint32(0xc81e28) || p == Uint32(0x1e1e1e));
+    }
+}
+
 TEST_CASE(
     "A reserved strip without a scrollbar continues the last cell per row") {
     Fixture fixture;

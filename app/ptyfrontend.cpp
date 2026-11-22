@@ -2366,6 +2366,9 @@ int runPtyFrontend(const char *font,
             model.advanceViewport(seconds);
             auto frame = model.frame(backend.cellHeight());
             frame.palette = &pane->v.palette();
+            frame.wrapMarks =
+                model.viewWrapMarks(); // The wrapped-line marker
+                                       // (docs/tasks/wrap-marker.md).
             if (pane->v.selection) {
                 if (pane->v.selection->valid(model)) {
                     pane->v.selection->apply(model, frame);

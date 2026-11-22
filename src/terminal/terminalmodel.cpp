@@ -1069,6 +1069,10 @@ std::vector<bool> TerminalModel::viewWrapMarks() const {
     const auto &viewport = impl_->active().viewport;
     const auto first = firstRetainedRow() + viewport.firstRow();
     std::vector<bool> marks(viewport.rowCount());
+    if (alternateScreen()) {
+        return marks; // Full-screen programs place their own lines: nothing
+                      // there "continues".
+    }
     for (std::size_t i = 0; i < marks.size(); ++i) {
         marks[i] = textRowWrapped(first + i);
     }

@@ -1,6 +1,7 @@
 #include "sdlbackend.h"
 
 #include "glyphatlas.h"
+#include "wrapmark.h"
 
 #include <SDL.h>
 
@@ -129,6 +130,83 @@ SdlBackend::SdlBackend(SDL_Window &window,
     : impl_(std::make_unique<Impl>(window, fontPath, pixelSize, software)) {}
 
 SdlBackend::~SdlBackend() = default;
+
+// One filled triangle per row that continues on the next
+// (docs/tasks/wrap-marker.md). In the strip at the pane's own right edge, or,
+// for a pane with its scrollbar in a divider, in the far half of that divider.
+template <class Impl>
+void drawWrapMarks(const Impl &s,
+                   const RenderFrame &frame,
+                   std::size_t rows,
+                   int textHeight,
+                   int width,
+                   int height,
+                   bool external) {
+    if (frame.wrapMarks.empty() || rows == 0) {
+        return;
+    }
+    const auto &style = wrapmark::kStyle;
+    // The region (window coordinates when `external`, else relative to the
+    // pane's viewport) and its clip.
+    float regionX = 0;
+    int regionWidth = 0;
+    float originY = 0;
+    SDL_Rect clip{0, 0, width, height};
+    if (external) {
+        const auto &track = *s.externalTrack;
+        // The far half of the divider: as wide as the near half, which holds
+        // the scrollbar.
+        regionX = float(track.x + track.w + 1);
+        regionWidth = track.w - 1;
+        if (s.viewport) {
+            originY = float(
+                s.viewport
+                    ->y); // Rows are relative to the pane, the divider is not.
+        }
+        clip = SDL_Rect{track.x + track.w, track.y, track.w, track.h};
+        check(SDL_RenderSetViewport(s.renderer.get(), nullptr));
+    }
+    else {
+        const bool strip = frame.scrollbar.visible || s.reserveStrip;
+        const auto layout = wrapmark::stripLayout(scrollbarWidth, true, style);
+        if (!strip || !layout.hasMarks()) {
+            return;
+        }
+        regionX = float(width - scrollbarWidth + layout.markX);
+        regionWidth = scrollbarWidth - layout.markX;
+    }
+    std::vector<SDL_Vertex> vertices;
+    const SDL_Color color{style.color.r, style.color.g, style.color.b, 255};
+    for (std::size_t y = 0; y < rows && y < frame.wrapMarks.size(); ++y) {
+        if (!frame.wrapMarks[y]) {
+            continue;
+        }
+        const float top = float(y) * s.cellHeight + frame.verticalOffsetPixels;
+        if (top + float(s.cellHeight) <= 0 || top >= float(textHeight)) {
+            continue;
+        }
+        if (const auto t = wrapmark::triangleFor(
+                regionX, originY + top, s.cellHeight, regionWidth, style)) {
+            for (const auto &p : {t->a, t->b, t->c}) {
+                vertices.push_back(SDL_Vertex{{p.x, p.y}, color, {0, 0}});
+            }
+        }
+    }
+    if (!vertices.empty()) {
+        if (external) {
+            check(SDL_RenderSetClipRect(s.renderer.get(), &clip));
+        }
+        check(SDL_RenderGeometry(s.renderer.get(),
+                                 nullptr,
+                                 vertices.data(),
+                                 int(vertices.size()),
+                                 nullptr,
+                                 0));
+        if (external) {
+            check(SDL_RenderSetClipRect(s.renderer.get(), nullptr));
+        }
+    }
+}
 
 void SdlBackend::render(const RenderFrame &frame) {
     auto &s = *impl_;
@@ -440,14 +518,19 @@ void SdlBackend::render(const RenderFrame &frame) {
         const float thumbY =
             float(track.y) + std::clamp(frame.scrollbar.position, 0.0f, 1.0f) *
                                  (float(trackHeight) - thumbHeight);
+        // With wrapped-line marks the strip's right part is the thumb's
+        // (docs/tasks/wrap-marker.md).
+        const auto strip = wrapmark::stripLayout(
+            stripWidth, !external && !frame.wrapMarks.empty());
         const SDL_FRect thumb{
-            float(track.x + (external ? 1 : 2)),
+            float(track.x + (external ? 1 : strip.thumbX)),
             thumbY,
-            float(std::max(0, stripWidth - (external ? 2 : 4))),
+            float(external ? std::max(0, stripWidth - 2) : strip.thumbWidth),
             thumbHeight};
         check(SDL_SetRenderDrawColor(s.renderer.get(), 110, 122, 142, 255));
         check(SDL_RenderFillRectF(s.renderer.get(), &thumb));
     }
+    drawWrapMarks(s, frame, rows, textHeight, width, height, external);
 }
 
 void SdlBackend::beginFrame(Rgb8 background) {

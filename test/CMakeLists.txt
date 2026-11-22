@@ -89,6 +89,10 @@ if(BUILD_TESTING)
     target_link_libraries(framesignature_test PRIVATE cellbuffer)
     add_test(NAME frame_signature COMMAND framesignature_test)
 
+    add_executable(wrapmark_test wrapmark_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(wrapmark_test PRIVATE ../src/render ../src/core)
+    add_test(NAME wrap_mark COMMAND wrapmark_test)
+
     add_executable(sessionsnapshot_test sessionsnapshot_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(sessionsnapshot_test PRIVATE ../src/frontend)
     target_link_libraries(sessionsnapshot_test PRIVATE palette)

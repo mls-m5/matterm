@@ -422,4 +422,18 @@ TEST_CASE("viewWrapMarks marks the rows of the frame that continue on the next o
     EXPECT(marks.size() == 3 && marks[0] && !marks[1] && !marks[2]);
 }
 
+TEST_CASE("The alternate screen never has wrapped-line marks, and the main "
+          "screen's come back") {
+    TerminalModel model(10, 3, 10);
+    model.write(U"0123456789ABCDE");
+    EXPECT(model.viewWrapMarks()[0]);
+    model.setAlternateScreen(true);
+    model.write(U"0123456789ABCDE");
+    for (const bool mark : model.viewWrapMarks()) {
+        EXPECT(!mark);
+    }
+    model.setAlternateScreen(false);
+    EXPECT(model.viewWrapMarks()[0]);
+}
+
 TEST_SUIT_END

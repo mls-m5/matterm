@@ -1927,6 +1927,9 @@ void frame(void *data) {
         model.advanceViewport(dt);
         auto rendered = model.frame(app.backend->cellHeight());
         rendered.palette = &view.palette();
+        rendered.wrapMarks =
+            model.viewWrapMarks(); // The wrapped-line marker
+                                   // (docs/tasks/wrap-marker.md).
         if (view.selection) {
             if (view.selection->valid(model)) {
                 view.selection->apply(model, rendered);

@@ -95,6 +95,22 @@ inline void addFrame(FrameSignature &s,
         s.add(r.second);
     }
     s.add(frame.matchRanges.size());
+    // The wrapped-line marks: empty (none asked for) differs from all false
+    // (the thumb makes room).
+    s.add(frame.wrapMarks.size());
+    {
+        std::uint64_t word = 0;
+        int bits = 0;
+        for (const bool mark : frame.wrapMarks) {
+            word = (word << 1) | (mark ? 1u : 0u);
+            if (++bits == 64) {
+                s.add(word);
+                word = 0;
+                bits = 0;
+            }
+        }
+        s.add(word);
+    }
     s.bytes(palette.colors.data(), sizeof palette.colors);
     s.add(palette.foreground);
     s.add(palette.background);

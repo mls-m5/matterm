@@ -33,6 +33,19 @@ TEST_CASE("One frame: any visible change changes the signature") {
     EXPECT(frontend::frameSignature(p.frame, p.palette) != base);
 }
 
+TEST_CASE("The wrapped-line marks are part of what is drawn") {
+    Pane p;
+    const auto none = frontend::frameSignature(p.frame, p.palette);
+    p.frame.wrapMarks = {false, false};
+    const auto enabled = frontend::frameSignature(p.frame, p.palette);
+    EXPECT(enabled != none); // Marks on, none set: the thumb moves aside.
+    p.frame.wrapMarks = {true, false};
+    const auto first = frontend::frameSignature(p.frame, p.palette);
+    EXPECT(first != enabled);
+    p.frame.wrapMarks = {false, true};
+    EXPECT(frontend::frameSignature(p.frame, p.palette) != first);
+}
+
 TEST_CASE(
     "A window signature covers every pane, divider, place and the strip") {
     Pane a, b, strip;
