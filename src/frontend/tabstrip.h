@@ -27,7 +27,10 @@ namespace frontend {
 
 // Every non-ASCII glyph the strip draws (the font must have them; see
 // test/chat_glyphs_test.cpp): activity mark, close button, ellipsis.
-inline constexpr char32_t kStripGlyphs[] = {U'●', U'×', U'…', U'≡'};
+// The mark of a tab whose terminals are busy on their own (a fisheye: unlike the amber ● that says
+// something happened while you were away).
+inline constexpr char32_t kWorkingIcon = U'◉';
+inline constexpr char32_t kStripGlyphs[] = {U'●', U'×', U'…', U'≡', kWorkingIcon};
 
 inline constexpr int kMaxTitle = 20; // Columns of a title at most.
 inline constexpr int kMinTitle = 4;  // Shrinking stops here.
@@ -167,7 +170,7 @@ inline std::u32string cut(const std::u32string &s, int cap) {
 }
 
 struct Colors {
-    Rgb8 stripBg, tabBg, tabFg, activeBg, activeFg, dim, mark, activeMark;
+    Rgb8 stripBg, tabBg, tabFg, activeBg, activeFg, dim, mark, activeMark, working, activeWorking;
 };
 
 inline Rgb8 mix(Rgb8 a, Rgb8 b, int percentOfB) {
@@ -188,6 +191,8 @@ inline Colors colors(const Palette &p) {
     c.dim = mix(p.foreground, p.background, 55);
     c.mark = {255, 190, 60};
     c.activeMark = {150, 90, 0};
+    c.working = {90, 200, 120};
+    c.activeWorking = {0, 120, 50};
     return c;
 }
 
@@ -339,8 +344,13 @@ inline TabStrip buildTabStrip(const std::vector<TabInfo> &tabs,
         const Rgb8 fg = info.active ? col.activeFg : col.tabFg;
         const int begin = row.column();
         row.put(U' ', fg, bg);
-        const char32_t mark = info.activity ? U'●' : U' ';
-        row.put(mark, info.active ? col.activeMark : col.mark, bg);
+        if (info.working) {
+            row.put(kWorkingIcon, info.active ? col.activeWorking : col.working, bg);
+        }
+        else {
+            const char32_t mark = info.activity ? U'●' : U' ';
+            row.put(mark, info.active ? col.activeMark : col.mark, bg);
+        }
         row.puts(label,
                  fg,
                  bg,

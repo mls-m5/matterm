@@ -582,7 +582,7 @@ Native with the daemon. Design in short:
   drawing as before (docs/CPU.md). Measured with `MATTERM_LOOP_STATS=1`, a window with one tab and
   a program printing every 0.4 s draws the same number of frames with and without the pulse (36 and
   35 in 8 s): the strip is hidden with one tab, so this shows only that nothing else was added.
-- Off: `--no-tab-pulse` (native), `?pulse=0` (browser), `ViewConfig::tabPulse = false`.
+- Off: see "Mode" below (`--tab-activity=off`, `--no-tab-pulse`, `?pulse=0`).
 - Tests: `test/workspaceview_test.cpp` (working or not, phase, the time limit, in step, off, the
   wake-up), `web/tools/e2e-pulse.js` (pictures of the strip; not run here: no browser).
 - **Your own input and new panes do not count** (`OutputWatch`): output within 5 s after something
@@ -592,3 +592,23 @@ Native with the daemon. Design in short:
   and `pulseIgnoreAfterStartMs` (5000; the owner said 5-10 s, longer than the round trip of an echo
   through a tunnel). Output after that starts the pulse as usual. Program answers to its own
   queries (device attributes) also count as input, which only makes the pane calmer.
+
+### Mode: icon (default), pulse, off
+
+The owner preferred a static mark to the blinking background, so `ViewConfig::tabActivity`
+(`TabActivity`, tabtypes.h) chooses: **icon** (default), **pulse** (the alternating background
+described above) or **off**. Flags until there is a config file: `--tab-activity=icon|pulse|off`
+(native; `--no-tab-pulse` stays as an alias for off), `?tabactivity=icon|pulse|off` (browser;
+`?pulse=0` is off).
+
+- **Icon:** a tab that works (same rule as above, same ignore of your own input and of new panes)
+  shows `kWorkingIcon` U+25C9 `◉` in the mark slot before its title, green (darker green on the
+  active tab's light background). It is not the amber `●` that says "something happened while
+  you were away"; when both apply, the working icon is shown. The icon is looked at once a
+  second (`WorkspaceView` evaluates it when the second of `tick(nowMs)` changes), so it appears or
+  disappears at most once a second and never animates; `tick()` reports `changed` only then, and
+  `nextWakeMs()` names the next second only while the icon shows or a tab works. The glyph is in
+  the bundled font (`kStripGlyphs`, cmap test); `⚙` and `◐` are not, hence this one.
+- **Tests:** `test/workspaceview_test.cpp` (the icon shows after the grace, exactly two changes
+  over eight seconds of ticking every 50 ms, own input silences it, the wake-up, the mode names, off
+  leaves no timer); the pulse tests set the mode with `setTabActivity`.

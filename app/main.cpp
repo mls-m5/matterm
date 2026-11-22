@@ -1,4 +1,5 @@
 #include "clioptions.h"
+#include "tabtypes.h"
 #include "fontpath.h"
 #include "render/sdlbackend.h"
 #include "terminal/terminalmodel.h"
@@ -67,7 +68,10 @@ void printUsage(std::ostream &out, const char *program) {
            "  --completion SHELL   Print the shell completion script (bash, zsh or fish) for "
            "matterm,\n"
            "                       matterm-server and matterm-daemon; see the README.\n"
-           "  --no-tab-pulse       Tabs with recent output do not alternate their colour.\n"
+           "  --tab-activity=MODE  What a tab shows while its terminals print on their own: icon\n"
+           "                       (default, a small static mark), pulse (the background\n"
+           "                       alternates once a second) or off.\n"
+           "  --no-tab-pulse       Same as --tab-activity=off.\n"
            "  --snap-scroll        Let scrolling come to rest on whole rows (default: "
            "smooth\n"
            "                       pixel scrolling, which may stop inside a row).\n"
@@ -338,7 +342,7 @@ int main(int argc, char **argv) {
     bool useDaemon = true; // Default; --no-daemon turns it off.
     bool daemonExplicit = false;
     bool snapScroll = false;
-    bool tabPulse = true;
+    std::string tabActivity = "icon";
     std::string daemonSocket;
     std::string daemonHost;
     std::vector<std::string> sshArguments;
@@ -399,7 +403,17 @@ int main(int argc, char **argv) {
             snapScroll = true;
         }
         else if (arg == "--no-tab-pulse") {
-            tabPulse = false;
+            tabActivity = "off"; // The first name of the switch: now an alias.
+        }
+        else if (arg == "--tab-activity" || arg.substr(0, 15) == "--tab-activity=") {
+            const std::string value = arg == "--tab-activity" ? (i + 1 < argc ? std::string(argv[++i]) : std::string())
+                                                              : std::string(arg.substr(15));
+            frontend::TabActivity parsed;
+            if (!frontend::parseTabActivity(value, parsed)) {
+                std::cerr << "--tab-activity needs icon, pulse or off\n";
+                return 1;
+            }
+            tabActivity = value;
         }
         else if (arg == "--no-daemon") {
             useDaemon = false;
@@ -507,7 +521,7 @@ int main(int argc, char **argv) {
                                   recordPath,
                                   smoothCursor,
                                   ptyTabsSmokeTest,
-                                  DaemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll, daemonHost, sshArguments, daemonInstall, assumeYes, tabPulse});
+                                  DaemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll, daemonHost, sshArguments, daemonInstall, assumeYes, tabActivity});
         }
         catch (const std::exception &error) {
             std::cerr << error.what() << '\n';

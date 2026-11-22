@@ -43,12 +43,32 @@ struct DividerBox {
     PaneId after = 0;  // right or lower neighbour
 };
 
+// What a tab shows while its terminals produce output nobody asked for (docs/TABS_PLAN.md section 15).
+enum class TabActivity {
+    Icon,  // a small static mark, changed at most once a second (the default)
+    Pulse, // the background alternates once a second
+    Off,
+};
+
+inline const char *tabActivityName(TabActivity a) {
+    return a == TabActivity::Icon ? "icon" : a == TabActivity::Pulse ? "pulse" : "off";
+}
+// "icon", "pulse" or "off"; false for anything else.
+inline bool parseTabActivity(const std::string &text, TabActivity &out) {
+    if (text == "icon") out = TabActivity::Icon;
+    else if (text == "pulse") out = TabActivity::Pulse;
+    else if (text == "off") out = TabActivity::Off;
+    else return false;
+    return true;
+}
+
 // One entry of the tab strip (input of the strip builder).
 struct TabInfo {
     TabId id = 0;
     std::string title; // plain short text, already sanitized by the owner
     bool active = false;
     bool activity = false; // output or a bell in a hidden pane
+    bool working = false;   // the static work icon (tabActivity = icon)
     bool pulseDark = false; // working tab, in the darker half of the pulse (docs/TABS_PLAN.md section 15)
 };
 

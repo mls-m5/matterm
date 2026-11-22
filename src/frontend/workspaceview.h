@@ -59,7 +59,7 @@ struct ViewConfig {
     PrefixKeys::Config prefix;
     std::int64_t pulseIgnoreAfterInputMs = 5000; // output this soon after input to a pane is its echo, not work
     std::int64_t pulseIgnoreAfterStartMs = 5000; // and this soon after a pane was made
-    bool tabPulse = true;               // working tabs alternate their colour once a second (--no-tab-pulse: off)
+    TabActivity tabActivity = TabActivity::Icon; // what a tab with output nobody asked for shows (--tab-activity)
     std::int64_t whichKeyDelayMs = 500; // after the prefix key, a box lists what can follow (0: never)
     int touchSlop = 16;          // extra pixels around dividers and below the strip for a finger
     // Windows narrower than this many columns show only the focused pane of a
@@ -322,7 +322,7 @@ public:
     KeyResult tick(std::int64_t nowMs) {
         KeyResult r;
         r.forwardPrefix = prefix_.tick(nowMs).forwardPrefix;
-        if (config_.tabPulse && pollOutput(nowMs)) r.changed = true;
+        if (config_.tabActivity != TabActivity::Off && pollOutput(nowMs)) r.changed = true;
         const bool show = prefix_.waiting() && config_.whichKeyDelayMs > 0 && nowMs >= whichKeyAt();
         if (show != whichKey_) {
             whichKey_ = show;
@@ -516,8 +516,17 @@ public:
 
     // A key press is pending after the prefix key (the next printable key is a command).
     bool prefixWaiting() const { return prefix_.waiting(); }
+    void setTabActivity(TabActivity mode) {
+        config_.tabActivity = mode;
+        lastPulse_ = iconBits_ = 0;
+        iconSecond_ = -1;
+    }
     // Tab `index` had output that counts lately (as of the last tick).
-    bool working(std::size_t index) const { return config_.tabPulse && tabWorking(index, nowMs_); }
+    bool working(std::size_t index) const {
+        if (config_.tabActivity == TabActivity::Off) return false;
+        if (config_.tabActivity == TabActivity::Icon) return index < 64 && ((iconBits_ >> index) & 1) != 0;
+        return tabWorking(index, nowMs_);
+    }
     bool whichKeyShown() const { return whichKey_ && prefix_.waiting(); }
 
     // The pane under a point and where in it, without changing anything (hover, wheel).
@@ -615,6 +624,19 @@ private:
             output_.update(id, pane.view().outputBytes(), pane.view().inputBytes(), nowMs,
                            {config_.pulseIgnoreAfterInputMs, config_.pulseIgnoreAfterStartMs});
         });
+        if (config_.tabActivity == TabActivity::Icon) {
+            // The icon is looked at once a second: it shows or hides at most that often.
+            const std::int64_t second = nowMs / TabPulse::kPeriodMs;
+            if (second == iconSecond_) return false;
+            iconSecond_ = second;
+            std::uint64_t bits = 0;
+            for (std::size_t i = 0; i < workspace_.tabCount() && i < 64; ++i) {
+                if (tabWorking(i, nowMs)) bits |= std::uint64_t(1) << i;
+            }
+            const bool changed = bits != iconBits_;
+            iconBits_ = bits;
+            return changed;
+        }
         const std::uint64_t now = pulseState(nowMs);
         const bool changed = now != lastPulse_;
         lastPulse_ = now;
@@ -639,15 +661,21 @@ private:
     }
     // The strip's tabs with the pulse applied for the time of the last tick.
     std::vector<TabInfo> pulsed(std::vector<TabInfo> infos) const {
-        if (!config_.tabPulse) return infos;
+        if (config_.tabActivity == TabActivity::Off) return infos;
         for (std::size_t i = 0; i < infos.size(); ++i) {
-            infos[i].pulseDark = TabPulse::dark(nowMs_) && tabWorking(i, nowMs_);
+            if (config_.tabActivity == TabActivity::Icon) {
+                infos[i].working = i < 64 && ((iconBits_ >> i) & 1) != 0;
+            }
+            else {
+                infos[i].pulseDark = TabPulse::dark(nowMs_) && tabWorking(i, nowMs_);
+            }
         }
         return infos;
     }
     // When the pulse next needs a look: a working tab flips at the next period boundary.
     std::optional<std::int64_t> pulseWakeMs() const {
-        if (!config_.tabPulse) return std::nullopt;
+        if (config_.tabActivity == TabActivity::Off) return std::nullopt;
+        if (config_.tabActivity == TabActivity::Icon && iconBits_ != 0) return TabPulse::nextChange(nowMs_);
         for (std::size_t i = 0; i < workspace_.tabCount(); ++i) {
             if (tabWorking(i, nowMs_)) return TabPulse::nextChange(nowMs_);
         }
@@ -984,6 +1012,8 @@ private:
     OutputWatch output_;
     std::int64_t nowMs_ = 0;
     std::uint64_t lastPulse_ = 0;
+    std::uint64_t iconBits_ = 0;      // tab i shows the work icon (tabActivity = icon)
+    std::int64_t iconSecond_ = -1;    // the second the icon was last looked at
     mutable std::vector<std::unique_ptr<ui::Layer>> layers_; // bottom first; resized by place()
     PrefixKeys prefix_;
     WindowMetrics metrics_;

@@ -2311,7 +2311,11 @@ int main() {
     layoutConfig.prefix.timeoutMs = 4000;     // Time to reach for the keyboard.
     layoutConfig.desktopShortcuts = false;    // The browser keeps Ctrl+T/N/W.
     layoutConfig.prefixKeys = !app.url.empty(); // Off in the static demo.
-    layoutConfig.tabPulse = queryParam("pulse") != "0"; // ?pulse=0: no colour pulse on working tabs
+    // ?tabactivity=icon|pulse|off (default icon); ?pulse=0 is the old name of off.
+    parseTabActivity(queryParam("tabactivity"), layoutConfig.tabActivity);
+    if (queryParam("pulse") == "0") {
+        layoutConfig.tabActivity = TabActivity::Off;
+    }
     layoutConfig.scrollbarStrip = SdlBackend::scrollbarStrip();
     layoutConfig.dividerThickness =
         16; // Half of it holds the left pane's scrollbar.

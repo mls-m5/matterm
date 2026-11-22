@@ -43,7 +43,8 @@ inline const std::vector<Program> &programs() {
              {"--yes", "", Value::None, "", "Copy it without asking", false},
              {"--ssh-arg", "", Value::Text, "", "Extra argument for ssh", false},
              {"--snap-scroll", "", Value::None, "", "Scrolling comes to rest on whole rows", false},
-             {"--no-tab-pulse", "", Value::None, "", "Working tabs do not alternate their colour", false},
+             {"--tab-activity", "", Value::Choices, "icon pulse off", "What a working tab shows", false},
+             {"--no-tab-pulse", "", Value::None, "", "Same as tab-activity off", false},
              {"--smooth-cursor", "", Value::None, "", "Animate cursor movement", false},
              {"--record-output", "", Value::File, "", "Record raw PTY output to a new file", false},
              {"--input", "", Value::File, "", "Play a VT file without a shell", false},
@@ -122,7 +123,10 @@ inline std::string bashCompletion() {
     for (const auto &p : programs()) {
         std::string fn = "_" + std::string(p.name);
         for (char &c : fn) if (c == '-') c = '_';
-        o += fn + "() {\n  local cur=\"${COMP_WORDS[COMP_CWORD]}\" prev=\"${COMP_WORDS[COMP_CWORD-1]}\"\n  COMPREPLY=()\n  case \"$prev\" in\n";
+        o += fn + "() {\n  local cur=\"${COMP_WORDS[COMP_CWORD]}\" prev=\"${COMP_WORDS[COMP_CWORD-1]}\"\n  COMPREPLY=()\n"
+             "  # --opt=value: bash splits at the =\n"
+             "  if [[ \"$prev\" == = ]]; then prev=\"${COMP_WORDS[COMP_CWORD-2]}\"; elif [[ \"$cur\" == = ]]; then cur=\"\"; fi\n"
+             "  case \"$prev\" in\n";
         for (const auto &opt : p.options) {
             if (opt.hidden || opt.value == Value::None) continue;
             o += std::string("    ") + opt.name + ")\n      ";

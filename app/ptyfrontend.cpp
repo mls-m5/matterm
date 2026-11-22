@@ -600,7 +600,7 @@ int runPtyFrontend(const char *font,
     // Ctrl+B is readline's backward-char; the native app has the desktop
     // shortcuts instead (the browser uses the prefix keys).
     viewConfig.prefixKeys = false;
-    viewConfig.tabPulse = daemonOptions.tabPulse;
+    parseTabActivity(daemonOptions.tabActivity, viewConfig.tabActivity);
     viewConfig.paletteButton = true;
     viewConfig.shareButton = daemonOptions.enabled;
     WorkspaceView<NativePane> wv(workspace, viewConfig);

@@ -876,6 +876,7 @@ TEST_CASE("Which-key: the box appears half a second after the prefix and goes wi
 
 TEST_CASE("Tab pulse: a tab with recent output alternates its colour once a second, in step, and calms down") {
     Rig r;
+    r.view.setTabActivity(TabActivity::Pulse);
     r.view.key({'t', true, true, false}, 0); // second tab, in focus
     r.view.sync(0);
     auto bgOf = [&](std::int64_t now, std::size_t cell) {
@@ -905,6 +906,7 @@ TEST_CASE("Tab pulse: a tab with recent output alternates its colour once a seco
 
 TEST_CASE("Tab pulse: also the tab in focus, all working tabs in step, and it can be switched off") {
     Rig r;
+    r.view.setTabActivity(TabActivity::Pulse);
     r.view.key({'t', true, true, false}, 0); // second tab in focus
     r.view.sync(0);
     r.view.tick(0);
@@ -922,7 +924,7 @@ TEST_CASE("Tab pulse: also the tab in focus, all working tabs in step, and it ca
     // Off.
     Space space([] { return std::make_unique<Pane>(); });
     ViewConfig c;
-    c.tabPulse = false;
+    c.tabActivity = TabActivity::Off;
     View v(space, c);
     v.setWindow({800, 480, 8, 16});
     v.key({'t', true, true, false}, 0);
@@ -934,6 +936,7 @@ TEST_CASE("Tab pulse: also the tab in focus, all working tabs in step, and it ca
 
 TEST_CASE("Tab pulse: output after your own input or right after a pane starts is not work") {
     Rig r;
+    r.view.setTabActivity(TabActivity::Pulse);
     r.view.key({'t', true, true, false}, 0);
     r.view.sync(0);
     r.view.tick(0);
@@ -973,6 +976,7 @@ TEST_CASE("Tab pulse: output after your own input or right after a pane starts i
     // The settings can change: no grace at all.
     Space space([] { return std::make_unique<Pane>(); });
     ViewConfig cfg;
+    cfg.tabActivity = TabActivity::Pulse;
     cfg.pulseIgnoreAfterInputMs = 0;
     cfg.pulseIgnoreAfterStartMs = 0;
     View v(space, cfg);
@@ -982,6 +986,67 @@ TEST_CASE("Tab pulse: output after your own input or right after a pane starts i
     space.pane(space.tab(0)->tree.ids().front())->link.push("x");
     v.tick(100);
     EXPECT(v.working(0));
+}
+
+TEST_CASE("Tab activity icon: a static mark that shows and hides at most once a second, same ignore rules") {
+    Rig r; // The default mode is the icon.
+    r.view.key({'t', true, true, false}, 0);
+    r.view.sync(0);
+    r.view.tick(0);
+    const PaneId a = r.space.tab(0)->tree.ids().front();
+    auto mark = [&](std::size_t cell) { return r.view.plan().strip.cells[cell].codePoint; };
+    // Within the start grace: nothing, however much it prints.
+    r.space.pane(a)->link.push("banner");
+    r.view.tick(1500);
+    EXPECT(mark(1) == U' ' && !r.view.working(0));
+    r.view.tick(K - 10);
+    r.space.pane(a)->link.push("make output");
+    int changes = 0;
+    bool seen = false;
+    for (std::int64_t t = K; t <= K + 8000; t += 50) {
+        if (r.view.tick(t).changed) ++changes;
+        seen = seen || mark(1) == kWorkingIcon;
+    }
+    EXPECT(seen);
+    EXPECT_EQ(changes, 2); // On once, off once: no flicker in between, no animation.
+    EXPECT(mark(1) == U' ');
+    EXPECT(!r.view.working(0) && !r.view.working(1));
+    // The tab in focus shows it too; keys typed there silence it for 5 s.
+    const PaneId b = r.space.tab(1)->tree.ids().front();
+    r.view.tick(K + 8100);
+    r.space.pane(b)->link.push("build");
+    r.view.tick(K + 8200);
+    r.view.tick(K + 9000);
+    EXPECT(r.view.working(1));
+    r.view.tick(K + 13000);
+    r.space.pane(b)->view().sendInput("x");
+    r.view.tick(K + 13100);
+    r.space.pane(b)->link.push("x");
+    r.view.tick(K + 14000);
+    EXPECT(!r.view.working(1));
+    // The wake-up is a second boundary while the icon shows or may need to go.
+    r.space.pane(a)->link.push("again");
+    r.view.tick(K + 20000);
+    r.view.tick(K + 20100);
+    EXPECT(r.view.nextWakeMs().has_value());
+    EXPECT_EQ(*r.view.nextWakeMs(), K + 21000);
+}
+
+TEST_CASE("Tab activity: the mode names, off shows nothing and leaves no timer") {
+    TabActivity mode = TabActivity::Pulse;
+    EXPECT(parseTabActivity("icon", mode) && mode == TabActivity::Icon);
+    EXPECT(parseTabActivity("pulse", mode) && mode == TabActivity::Pulse);
+    EXPECT(parseTabActivity("off", mode) && mode == TabActivity::Off);
+    EXPECT(!parseTabActivity("", mode) && !parseTabActivity("Icon", mode) && mode == TabActivity::Off);
+    EXPECT_EQ(std::string(tabActivityName(TabActivity::Icon)), std::string("icon"));
+    Rig r;
+    r.view.setTabActivity(TabActivity::Off);
+    r.view.key({'t', true, true, false}, 0);
+    r.view.sync(0);
+    r.view.tick(0);
+    r.space.pane(r.space.tab(0)->tree.ids().front())->link.push("x");
+    r.view.tick(K + 100);
+    EXPECT(!r.view.working(0) && !r.view.nextWakeMs().has_value());
 }
 
 TEST_SUIT_END
