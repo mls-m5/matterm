@@ -40,10 +40,11 @@ async function open(browser, url, pw, options) {
   check('the ^B button is shown in the key bar', await t.page.evaluate(() => { const b = document.querySelector('#keybar [data-prefix]'); return !!b && !b.hidden; }));
   await t.page.tap('#canvas', { position: { x: 200, y: 300 } });
   await t.page.waitForTimeout(300);
+  const firstId = t.last() ? t.last().panes[0].id : 0; // the pane of Tab 1
   await t.prefix('c');
   let p = t.last();
   check('^B then c on the soft keyboard opens a second tab', p && p.tabs === 2 && p.strip > 0, JSON.stringify(p));
-  const first = p ? p.panes[0].id : 0;
+  const first = firstId;
   await t.prefix('"');
   p = t.last();
   check('^B then " splits; a 400 px window shows only the focused pane', p && p.total === 3 && p.panes.length === 1 && p.panes[0].w >= 700, JSON.stringify(p));
