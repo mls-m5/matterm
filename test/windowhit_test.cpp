@@ -1,4 +1,5 @@
 #include "mls-unit-test/unittest.h"
+#include "probelayout.h"
 #include "tabstrip.h"
 #include "windowhit.h"
 
@@ -135,26 +136,41 @@ TEST_CASE(
     EXPECT(dragSpans(TabStrip{}, 8, 1.0).empty());
 }
 
-TEST_CASE("A 1 px border is drawn round a normal window and not round a maximised one") {
-    const auto rects = borderRects(1000, 600, false);
-    EXPECT_EQ(rects.size(), std::size_t(4));
-    // Together they cover exactly the outermost pixel ring: count covered pixels of a small window.
-    for (const auto &size : {std::pair{10, 7}, std::pair{1, 1}, std::pair{2, 2}, std::pair{3, 50}}) {
-        const auto ring = borderRects(size.first, size.second, false);
-        for (int y = 0; y < size.second; ++y) {
-            for (int x = 0; x < size.first; ++x) {
-                int covered = 0;
-                for (const auto &r : ring) {
-                    if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) ++covered;
+TEST_CASE("The borders are as wide as decided: 4 px visible, 8 px grip, 16 px corners") {
+    EXPECT_EQ(kBorderWidth, 4);
+    EXPECT_EQ(kResizeEdge, 8);
+    EXPECT_EQ(kResizeCorner, 16);
+    EXPECT_GT(kResizeEdge, kBorderWidth); // The grip is wider than what is drawn, never narrower.
+}
+
+TEST_CASE("A border is drawn round a normal window and not round a maximised one") {
+    for (const int thickness : {1, 4}) {
+        for (const auto &size : {std::pair{10, 7}, std::pair{1, 1}, std::pair{2, 2}, std::pair{3, 50}, std::pair{8, 8},
+                                 std::pair{9, 9}, std::pair{1000, 600}}) {
+            const auto ring = borderRects(size.first, size.second, false, thickness);
+            // The rectangles cover every pixel of the outermost ring once and nothing inside.
+            for (int y = 0; y < size.second; ++y) {
+                for (int x = 0; x < size.first; ++x) {
+                    int covered = 0;
+                    for (const auto &r : ring) {
+                        if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) ++covered;
+                    }
+                    const bool edge = x < thickness || y < thickness || x >= size.first - thickness ||
+                                      y >= size.second - thickness;
+                    EXPECT_EQ(covered, (edge ? 1 : 0));
                 }
-                const bool edge = x == 0 || y == 0 || x == size.first - 1 || y == size.second - 1;
-                EXPECT_EQ(covered, (edge ? 1 : 0)); // Every ring pixel once, nothing inside, no overlap.
+            }
+            for (const auto &r : ring) {
+                EXPECT(r.w > 0 && r.h > 0 && r.x >= 0 && r.y >= 0 && r.x + r.w <= size.first &&
+                       r.y + r.h <= size.second);
             }
         }
     }
+    EXPECT_EQ(borderRects(1000, 600, false).size(), std::size_t(4));
     EXPECT(borderRects(1000, 600, true).empty());
     EXPECT(borderRects(0, 0, false).empty());
     EXPECT(borderRects(-5, 10, false).empty());
+    EXPECT(borderRects(100, 100, false, 0).empty());
     // A colour from the theme: between the background and the foreground, discreet, not either.
     const Palette palette;
     const Rgb8 c = borderColor(palette);
@@ -162,6 +178,11 @@ TEST_CASE("A 1 px border is drawn round a normal window and not round a maximise
     EXPECT(!same(c, palette.background) && !same(c, palette.foreground));
     EXPECT(c.r >= std::min(palette.background.r, palette.foreground.r) &&
            c.r <= std::max(palette.background.r, palette.foreground.r));
+    // The outermost pixel is brighter than the band (when the text is brighter than the background).
+    const Rgb8 edge = borderEdgeColor(palette);
+    EXPECT_GT(int(edge.r) + int(edge.g) + int(edge.b) - (int(c.r) + int(c.g) + int(c.b)) +
+                  (palette.foreground.r > palette.background.r ? 0 : 1000),
+              0);
     // The border is part of the window: the edge pixel it covers is still a resize zone.
     WindowGeometry g = window();
     EXPECT(classifyWindowPoint(g, 0, 300) == Zone::ResizeLeft);
@@ -191,6 +212,20 @@ TEST_CASE("A window call is only FAILED when it returned an error; a state that 
     EXPECT(std::string(callVerdict(true, false)) == "called, state not reported");
     EXPECT(std::string(callVerdict(false, true)) == "FAILED");
     EXPECT(std::string(callVerdict(false, false)) == "FAILED");
+}
+
+TEST_CASE("The transparency probe picture nests: transparent rim, red margin, solid box") {
+    const ProbeLayout layout = probeLayout(360, 240, 40);
+    EXPECT(!layout.red.empty() && !layout.box.empty());
+    EXPECT_EQ(layout.red.x, 20); // A 20 px rim outside the red stays transparent.
+    EXPECT_EQ(layout.box.x, 40);
+    EXPECT(layout.red.x + layout.red.w <= 360 && layout.red.y + layout.red.h <= 240);
+    EXPECT(layout.box.x >= layout.red.x && layout.box.y >= layout.red.y);
+    EXPECT(layout.box.x + layout.box.w <= layout.red.x + layout.red.w);
+    EXPECT(layout.box.y + layout.box.h <= layout.red.y + layout.red.h);
+    EXPECT(probeLayout(60, 60, 40).box.empty()); // Too small: nothing to show.
+    EXPECT(probeLayout(360, 240, 0).red.empty());
+    EXPECT(probeLayout(-1, -1, 10).box.empty());
 }
 
 TEST_CASE("The frame is the system frame unless borderless works") {

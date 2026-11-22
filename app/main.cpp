@@ -1,4 +1,5 @@
 #include "borderless.h"
+#include "transparencyprobe.h"
 #include "clioptions.h"
 #include "tabtypes.h"
 #include "fontpath.h"
@@ -466,6 +467,7 @@ int windowTest() {
                       ? "--borderless would draw its own frame here.\n"
                       : choice.note + "\n");
     window.reset();
+    borderless::probeTransparency(std::cout);
     SDL_Quit();
     return failed ? 1 : 0;
 }

@@ -81,8 +81,31 @@ Decided by the owner: system frame only when the hit test fails; restore glyph `
   (not run: no clang-tidy here; the casts now widen each operand before the arithmetic).
 - Not verified: all of the above on a real display; `StderrCapture` was checked with a small program only.
 
+## Update 3 (owner's third round)
+
+- **Border / grip:** visible border 4 px (outermost pixel brighter), grip 8 px, corners 16 px (inside
+  the window). It is drawn over the content (up to 4 px of the edge cells and the strip's top row are
+  covered); insetting the layout instead is not done. If resize still fails, run
+  `MATTERM_HITTEST_LOG=1 matterm --borderless 2> hit.log`, move the pointer slowly to the edge and
+  into the corner, press and drag, and send `hit.log`. Lines look like `hit test (x, y): zone N`
+  (N = 2..9 resize, 1 drag, 0 none). No lines at the edge at all means SDL does not ask there.
+- **Transparency probe** in `matterm --window-test` (after the existing lines): three windows of
+  about two seconds each (software renderer, accelerated renderer, OpenGL with alpha). Please run it
+  on GNOME Wayland and, with `SDL_VIDEODRIVER=x11 matterm --window-test`, on X11, and report for
+  each of the three windows whether you see the desktop through the red margin (and through the
+  outer rim), plus the printed lines. Details: TABS_PLAN 16.4.
+- **Window geometry / `_GTK_FRAME_EXTENTS`:** only the handles from `SDL_GetWindowWMInfo` are
+  printed. Setting them would need libwayland-client or libX11 (a link dependency), so I stopped:
+  question below.
+- **cert-err33-c** in `app/borderless.h` (5 places): the results are now cast to `(void)`.
+- Not verified: everything on a real display; the OpenGL and accelerated variants (the sandbox has
+  neither); clang-tidy.
+
 ## Open design questions (the owner decides)
 
 (1-3 of the first round are decided, see above.)
 1. Rounded corners: nothing / painted corners / wait for SDL3 (TABS_PLAN 16.2; recommended: nothing, painted corners if wanted).
+3. May `--csd` link libwayland-client / libX11 to set the window geometry and `_GTK_FRAME_EXTENTS`? Without it no
+   compositor-correct shadow is possible (TABS_PLAN 16.4). Alternatives: yes / no, drop `--csd` and keep the plain
+   border (recommended unless the probe shows transparency works and you want the shadow).
 2. Detecting a missing frame: which variant, or a `windowFrame = system | own | auto` setting (TABS_PLAN 16.3).

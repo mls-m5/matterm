@@ -15,10 +15,9 @@
 
 namespace frontend {
 
-inline constexpr int kResizeEdge =
-    6; // Window pixels along each side that resize.
-inline constexpr int kResizeCorner =
-    12; // A corner reaches this far along each side.
+inline constexpr int kResizeEdge = 8;    // Window pixels along each side that resize (the grip).
+inline constexpr int kResizeCorner = 16; // A corner reaches this far along each side.
+inline constexpr int kBorderWidth = 4;   // The visible border; narrower than the grip.
 
 enum class WindowZone {
     Normal, // An ordinary point: the click goes to the app.
@@ -114,33 +113,41 @@ inline std::vector<DragSpan> dragSpans(const TabStrip &strip,
     return spans;
 }
 
-// A border of one pixel round the window, drawn by the app because the window has no frame of its
+// A border (kBorderWidth px) round the window, drawn by the app because the window has no frame of its
 // own (not when maximised). The four strips cover the outermost pixel ring exactly once.
 struct BorderRect {
     int x = 0, y = 0, w = 0, h = 0;
 };
 
-inline std::vector<BorderRect> borderRects(int width, int height, bool maximized) {
-    if (maximized || width <= 0 || height <= 0) {
+inline std::vector<BorderRect> borderRects(int width, int height, bool maximized, int thickness = kBorderWidth) {
+    if (maximized || width <= 0 || height <= 0 || thickness <= 0) {
         return {};
     }
+    const int tx = std::min(thickness, width);
+    const int ty = std::min(thickness, height);
     std::vector<BorderRect> rects;
-    rects.push_back({0, 0, width, 1}); // Top.
-    if (height > 1) {
-        rects.push_back({0, height - 1, width, 1}); // Bottom.
+    rects.push_back({0, 0, width, ty}); // Top.
+    const int bottom = std::max(ty, height - thickness);
+    if (bottom < height) {
+        rects.push_back({0, bottom, width, height - bottom});
     }
-    if (height > 2) {
-        rects.push_back({0, 1, 1, height - 2}); // Left, between them.
-        if (width > 1) {
-            rects.push_back({width - 1, 1, 1, height - 2}); // Right.
+    if (bottom > ty) { // The sides between them.
+        rects.push_back({0, ty, tx, bottom - ty});
+        const int right = std::max(tx, width - thickness);
+        if (right < width) {
+            rects.push_back({right, ty, width - right, bottom - ty});
         }
     }
     return rects;
 }
 
-// Discreet: a third of the way from the background to the text colour.
+// Discreet: a third of the way from the background to the text colour; the outermost pixel is
+// drawn brighter so the edge of the window can be found against any background.
 inline Rgb8 borderColor(const Palette &palette) {
     return tabstrip_detail::mix(palette.background, palette.foreground, 33);
+}
+inline Rgb8 borderEdgeColor(const Palette &palette) {
+    return tabstrip_detail::mix(palette.background, palette.foreground, 60);
 }
 
 // What --window-test says about a call. Most window calls return nothing; whether they worked can

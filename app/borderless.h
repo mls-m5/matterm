@@ -113,7 +113,7 @@ inline void toggleMaximize(SDL_Window *window) {
 class StderrCapture {
 public:
     StderrCapture() {
-        std::fflush(stderr);
+        (void)std::fflush(stderr);
         file_ = std::tmpfile();
         saved_ = ::dup(2);
         if (file_ == nullptr || saved_ < 0 || ::dup2(::fileno(file_), 2) < 0) {
@@ -131,7 +131,7 @@ public:
             return {};
         }
         active_ = false;
-        std::fflush(stderr);
+        (void)std::fflush(stderr);
         ::dup2(saved_, 2);
         std::string text;
         std::rewind(file_);
@@ -141,7 +141,7 @@ public:
         }
         release();
         if (!text.empty()) {
-            std::fwrite(text.data(), 1, text.size(), stderr);
+            (void)std::fwrite(text.data(), 1, text.size(), stderr);
         }
         return text;
     }
@@ -149,7 +149,7 @@ public:
 private:
     void release() {
         if (saved_ >= 0) ::close(saved_);
-        if (file_ != nullptr) std::fclose(file_);
+        if (file_ != nullptr) (void)std::fclose(file_);
         saved_ = -1;
         file_ = nullptr;
     }
@@ -210,7 +210,7 @@ inline frontend::DetectVariant detectVariantFromEnvironment() {
     frontend::DetectVariant variant = frontend::DetectVariant::Off;
     if (const char *value = std::getenv("MATTERM_FRAME_DETECT"); value && *value) {
         if (!frontend::parseDetectVariant(value, variant)) {
-            std::fprintf(stderr, "matterm: MATTERM_FRAME_DETECT=%s is not off, borders, plugins, message or any\n", value);
+            (void)std::fprintf(stderr, "matterm: MATTERM_FRAME_DETECT=%s is not off, borders, plugins, message or any\n", value);
             variant = frontend::DetectVariant::Off;
         }
     }

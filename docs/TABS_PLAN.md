@@ -738,3 +738,31 @@ using the built-in frame`. If the hit test then fails, a line says so and the wi
 window, with and without a plugin installed. Only the variant that proves right stays; the rest
 is removed. Alternative if none is reliable: a flag or setting (`windowFrame = system | own |
 auto`); the question for the owner is which of these he wants.
+
+### 16.4 Round 3 (owner, 2026-11-22): wider border and grip, transparency probe
+
+- **Border and grip.** The owner saw only 1 px and could not grab it. Now: a visible border of
+  `kBorderWidth` 4 px (the outermost pixel brighter, `borderEdgeColor`), a grip of `kResizeEdge` 8
+  px and corners of `kResizeCorner` 16 px, all inside the window (SDL's hit test never sees points
+  outside it; Wayland asks it on pointer motion and presses inside the window only). The border is
+  drawn over the content, so up to 4 px of the first and last cell column, the top of the strip and
+  the bottom row are covered; if that bothers, the next step is to inset the layout by the border
+  (touches `WindowMetrics` and every mouse coordinate), which is not done. `MATTERM_HITTEST_LOG=1`
+  still prints what SDL asks.
+- **Transparency probe** (`matterm --window-test`, `app/transparencyprobe.cpp`; step 1 of
+  `docs/tasks/csd-window.md`, nothing else of it is built). Three windows of about two seconds each
+  show a half-transparent red margin round a dark box and a fully transparent rim outside the red:
+  (1) `SDL_Renderer` software, (2) `SDL_Renderer` accelerated, both with `SDL_BLENDMODE_BLEND` and the
+  margin cleared to alpha 0 with blending off; (3) OpenGL with `SDL_GL_ALPHA_SIZE 8` (functions
+  through `SDL_GL_GetProcAddress`, no link). Each prints the renderer, the window pixel format and
+  whether it has alpha, the alpha bits granted. The owner answers: *is the desktop visible through
+  the red margin and the rim?* On X11 a compositor is needed; SDL2's X11 renderers use the default
+  (opaque) visual, so only the OpenGL variant is expected to see through there.
+- **Window geometry / `_GTK_FRAME_EXTENTS`.** `SDL_GetWindowWMInfo` (no new link) is queried and the
+  handles are printed (Wayland: display, surface, xdg_surface, xdg_toplevel; X11: display, window).
+  Setting the geometry needs `xdg_surface_set_window_geometry` (libwayland-client and the xdg-shell
+  protocol code) or `XChangeProperty` (libX11): a link dependency, so **stopped here, question for the
+  owner**: allow linking libwayland-client / libX11 for `--csd`, or drop `--csd` (fallback 2 in the task).
+- Tests: `test/windowhit_test.cpp` (widths, the ring of the border for 1 and 4 px at many sizes,
+  the probe's rectangles). The SDL drawing of the probe was run only with the dummy driver
+  (software variant ok, the others report why they are not available).

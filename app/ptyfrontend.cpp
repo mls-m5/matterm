@@ -2540,6 +2540,9 @@ int runPtyFrontend(const char *font,
                 for (const auto &edge : frontend::borderRects(w, h, maximized)) {
                     backend.drawRect({edge.x, edge.y, edge.w, edge.h}, frontend::borderColor(stripPalette));
                 }
+                for (const auto &edge : frontend::borderRects(w, h, maximized, 1)) {
+                    backend.drawRect({edge.x, edge.y, edge.w, edge.h}, frontend::borderEdgeColor(stripPalette));
+                }
             }
             backend.present();
             ++framesDrawn;
