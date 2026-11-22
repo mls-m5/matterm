@@ -612,3 +612,58 @@ described above) or **off**. Flags until there is a config file: `--tab-activity
 - **Tests:** `test/workspaceview_test.cpp` (the icon shows after the grace, exactly two changes
   over eight seconds of ticking every 50 ms, own input silences it, the wake-up, the mode names, off
   leaves no timer); the pulse tests set the mode with `setTabActivity`.
+
+## 16. Borderless native window (agent3)
+
+`matterm --borderless` draws the window frame itself: the tab strip row is the window handle.
+The default stays the system frame (a `windowFrame` setting comes with the config file). The web
+client is unaffected (the browser has its own frame; the buttons are never offered there).
+
+**Strip.** With `ViewConfig::windowButtons` the strip ends with `[ – ][ □ ][ ✕ ]` (three columns
+each, after Share and the palette button): minimise, maximise/restore (`□` when the window is
+normal, `◫` while maximised: the bundled font has no overlapping-squares glyph) and close. They are `StripHit` kinds
+(`Minimize`, `Maximize`, `CloseWindow`) like every other button; `WorkspaceView::mouse()` turns a click
+into `MouseResult::action` `window.minimize`, `window.maximize` (toggle) or `window.close`, which
+the native loop executes with SDL. **Close is `requestQuit()`**: the same close question as the
+window's own close button. A double click (`clicks == 2`) on a gap of the strip (a column with no
+region: between the last tab and Share, and between tabs) also gives `window.maximize`.
+Glyphs are in `kStripGlyphs`, so the font test covers them.
+
+**Hit test.** `SDL_SetWindowHitTest` asks, for a point in *window* coordinates, whether it is
+a drag handle or a resize edge. The decision is pure and lives in `src/frontend/windowhit.h`
+(`classifyWindowPoint`): inputs are the point, the window size, the strip height, the edge width
+(`kResizeEdge` 6 px, corners `kResizeCorner` 12 px along the edge), whether the window is
+maximised, and a `DragMap` (the strip's gap columns in pixels). Order: (1) the edge or corner
+(none when maximised: the window manager owns a maximised window), (2) the strip row over a gap
+column is `Drag`, (3) everything else is `Normal`, so tabs and buttons get their clicks. SDL may
+call the hit test from another thread: the callback reads a mutex-guarded copy of the `DragMap`
+(and the size) that the main loop refreshes after each frame plan; it never touches the view.
+Window to drawable coordinates (high DPI) are scaled once when the map is stored.
+
+**Fallback: no half modes.** The window is created borderless; if `SDL_SetWindowHitTest` fails
+(Wayland/libdecor and the dummy driver say "not supported") the frame is given back
+(`SDL_SetWindowBordered(TRUE)`), `windowButtons` stays off, a line goes to stderr
+(`matterm: --borderless is not available (<reason>); using the system frame`) and a note is
+written to the first pane like the daemon fallback note. `chooseFrame()` (windowhit.h) is that
+decision as a function, tested. Without the hit test a borderless window could not be moved or
+resized, which is why it is never kept.
+
+**`matterm --window-test`.** Opens a small window, prints the video driver and one line per call
+(`ok` or `FAILED: <SDL error>`): create borderless, set the hit test, toggle bordered, maximise,
+restore, minimise, restore, window flags. For the owner to run on GNOME, X11 and Wayland, and
+paste back. It never starts a terminal.
+
+**GNOME / Wayland.** On X11 (also GNOME on Xorg, XWayland) the hit test starts a window-manager
+move or resize, so edges and dragging behave like a normal window; SDL starts the drag itself, so
+a double click on the handle may not reach the app (the loop handles it if it does; otherwise use
+the maximise button). On native Wayland SDL 2.26 cannot set a hit test, so `--borderless`
+falls back to the system frame: GNOME draws it (libdecor) and `--window-test` shows the
+failing call. Forcing XWayland for a borderless window: `SDL_VIDEODRIVER=x11 matterm --borderless`.
+Mutter has no server-side decorations, so a borderless client-drawn window is the only
+option there; the fallback is the compromise. Not run on a real display in the sandbox; see the
+task's acceptance notes.
+
+**Tests.** `test/windowhit_test.cpp` (edges, corners, maximised, drag over gaps only, strip height,
+tiny windows, high-DPI scale, `chooseFrame`), `test/tabstrip_test.cpp` (the three buttons, their
+regions, narrow rows drop them), `test/workspaceview_test.cpp` (clicks give the actions, double
+click on a gap, no buttons without the option), `test/clioptions_test.cpp` (the new flags).

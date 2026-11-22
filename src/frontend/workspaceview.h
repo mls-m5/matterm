@@ -54,6 +54,7 @@ struct ViewConfig {
     bool showStripWithOneTab = true;
     bool shareButton = false;    // a Share button in the strip (needs a share probe; panes in the daemon)
     bool paletteButton = false;  // a button at the end of the strip that opens the command palette
+    bool windowButtons = false;  // a borderless window: minimise, maximise and close end the strip (section 16)
     bool prefixKeys = true;      // Ctrl+B ... (browser)
     bool desktopShortcuts = true; // Ctrl+Shift+T ... (native)
     PrefixKeys::Config prefix;
@@ -179,6 +180,8 @@ public:
         refreshSpec();
     }
     const WindowMetrics &window() const { return metrics_; }
+    // The native window is maximised: the middle window button shows "restore" (borderless only).
+    void setWindowMaximized(bool maximized) { windowMaximized_ = maximized; }
 
     // The frame to draw now (applies nothing; call sync() first).
     FramePlan plan(bool withLayers = true) const {
@@ -188,7 +191,8 @@ public:
         if (stripH > 0) {
             out.stripRect = {0, 0, metrics_.width, stripH};
             out.strip = buildTabStrip(pulsed(workspace_.tabInfos(titleOf)), stripColumns(), config_.palette, stripFirst_,
-                                  config_.paletteButton, ShareButton{config_.shareButton && probeShared_, sharedInActiveTab()});
+                                  config_.paletteButton, ShareButton{config_.shareButton && probeShared_, sharedInActiveTab()},
+                                  WindowButtons{config_.windowButtons, windowMaximized_});
         }
         const Layout layout = activeLayout();
         out.dividers = layout.dividers;
@@ -421,7 +425,20 @@ public:
                 stripFirst_ = std::max(stripFirst_, p.strip.firstVisible) + 1;
                 r.changed = true;
                 break;
+            case StripHit::Kind::Minimize:
+                r.action = "window.minimize";
+                break;
+            case StripHit::Kind::Maximize:
+                r.action = "window.maximize";
+                break;
+            case StripHit::Kind::CloseWindow:
+                r.action = "window.close";
+                break;
             case StripHit::Kind::None:
+                // A double click on the handle of a borderless window toggles maximise.
+                if (config_.windowButtons && in.clicks == 2 && in.button == MouseInput::Button::Left) {
+                    r.action = "window.maximize";
+                }
                 break;
             }
             return r;
@@ -1023,6 +1040,7 @@ private:
     PaneId dragPane_ = 0;
     PixelRect dragTrack_;
     int stripFirst_ = 0;
+    bool windowMaximized_ = false;
     std::int64_t lastSyncMs_ = -1000000;
     bool pending_ = false;
     bool flush_ = false;

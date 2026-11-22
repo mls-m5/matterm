@@ -389,4 +389,51 @@ TEST_CASE("A share button sits before the palette button: grey when nothing is s
     EXPECT(buildTabStrip(makeTabs(3, 0), 80).regions.back().hit.kind != Kind::Share);
 }
 
+TEST_CASE("Window buttons close the row: minimise, maximise or restore, close") {
+    for (int columns = 0; columns <= 200; ++columns) {
+        for (const int tabs : {0, 1, 3, 50}) {
+            for (const bool maximized : {false, true}) {
+                const auto strip = buildTabStrip(makeTabs(tabs, 0), columns, Palette(), 0, true, ShareButton{true, 1},
+                                                 WindowButtons{true, maximized});
+                EXPECT(sound(strip, columns, std::size_t(tabs)));
+                const bool found = !strip.regions.empty() && strip.regions.back().hit.kind == Kind::CloseWindow;
+                if (!found) {
+                    for (const auto &r : strip.regions) {
+                        EXPECT(r.hit.kind != Kind::Minimize && r.hit.kind != Kind::Maximize);
+                    }
+                    continue;
+                }
+                const std::size_t n = strip.regions.size();
+                EXPECT(n >= 6);
+                const auto &min = strip.regions[n - 3];
+                const auto &max = strip.regions[n - 2];
+                const auto &close = strip.regions[n - 1];
+                EXPECT(min.hit.kind == Kind::Minimize && max.hit.kind == Kind::Maximize);
+                EXPECT_EQ(min.end, max.begin);
+                EXPECT_EQ(max.end, close.begin);
+                EXPECT_EQ(close.end, columns);
+                EXPECT_EQ(close.end - min.begin, 9);
+                // Share and the palette button come before them.
+                EXPECT(strip.regions[n - 4].hit.kind == Kind::Palette);
+                EXPECT(strip.regions[n - 5].hit.kind == Kind::Share);
+                auto glyph = [&](const StripRegion &r) { return strip.cells[std::size_t(r.begin + 1)].codePoint; };
+                EXPECT(glyph(min) == kMinimizeIcon);
+                EXPECT(glyph(max) == (maximized ? kRestoreIcon : kMaximizeIcon));
+                EXPECT(glyph(close) == kCloseWindowIcon);
+            }
+        }
+    }
+    // The buttons alone (no Share, no palette) still end the row, and they are off by default.
+    const auto alone = buildTabStrip(makeTabs(2, 0), 80, Palette(), 0, false, ShareButton{}, WindowButtons{true, false});
+    EXPECT(alone.regions.back().hit.kind == Kind::CloseWindow);
+    EXPECT_EQ(alone.regions.back().end, 80);
+    for (const auto &r : buildTabStrip(makeTabs(2, 0), 80, Palette(), 0, true, ShareButton{true, 0}).regions) {
+        EXPECT(r.hit.kind != Kind::CloseWindow);
+    }
+    // Too narrow: the tabs win and the buttons are dropped, whole.
+    for (const auto &r : buildTabStrip(makeTabs(2, 0), 11, Palette(), 0, true, ShareButton{true, 0}, WindowButtons{true, false}).regions) {
+        EXPECT(r.hit.kind != Kind::Minimize);
+    }
+}
+
 TEST_SUIT_END

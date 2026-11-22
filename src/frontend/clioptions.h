@@ -45,6 +45,8 @@ inline const std::vector<Program> &programs() {
              {"--snap-scroll", "", Value::None, "", "Scrolling comes to rest on whole rows", false},
              {"--tab-activity", "", Value::Choices, "icon pulse off", "What a working tab shows", false},
              {"--no-tab-pulse", "", Value::None, "", "Same as tab-activity off", false},
+             {"--borderless", "", Value::None, "", "Draw the window frame in the tab strip", false},
+             {"--window-test", "", Value::None, "", "Print which window calls work here", false},
              {"--smooth-cursor", "", Value::None, "", "Animate cursor movement", false},
              {"--record-output", "", Value::File, "", "Record raw PTY output to a new file", false},
              {"--input", "", Value::File, "", "Play a VT file without a shell", false},

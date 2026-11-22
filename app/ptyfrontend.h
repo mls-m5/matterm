@@ -15,6 +15,7 @@ struct DaemonOptions {
     bool installAlways = false; // --daemon-install: use our own copy of matterm-daemon there.
     bool assumeYes = false;     // --yes: copy it without asking.
     std::string tabActivity = "icon"; // --tab-activity icon|pulse|off (--no-tab-pulse = off)
+    bool borderless = false;          // --borderless: the tab strip is the window frame (docs/TABS_PLAN.md section 16)
 };
 
 // Native entry-point adapter; owns SDL lifecycle after starting the PTY.

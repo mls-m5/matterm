@@ -1,3 +1,4 @@
+#include "borderless.h"
 #include "clioptions.h"
 #include "tabtypes.h"
 #include "fontpath.h"
@@ -14,6 +15,8 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -22,6 +25,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -75,6 +79,12 @@ void printUsage(std::ostream &out, const char *program) {
            "  --snap-scroll        Let scrolling come to rest on whole rows (default: "
            "smooth\n"
            "                       pixel scrolling, which may stop inside a row).\n"
+           "  --borderless         Draw the window frame in the tab strip: drag the empty part,\n"
+           "                       resize at the edges, minimise / maximise / close at the right\n"
+           "                       (the system frame comes back where SDL cannot do that, e.g.\n"
+           "                       Wayland; see docs/TABS_PLAN.md section 16).\n"
+           "  --window-test        Print the video driver and which window calls work here, for\n"
+           "                       trying --borderless on a new desktop. Opens a window briefly.\n"
            "  --smooth-cursor      Animate cursor movement (native PTY only; "
            "default: off).\n"
            "  --record-output FILE Record raw PTY output to a new file (max 64 "
@@ -330,6 +340,87 @@ int run(const char *font, int fontSize, const char *inputPath, bool smokeTest) {
     }
     return 0;
 }
+
+// `matterm --window-test`: what this desktop lets a borderless window do (docs/TABS_PLAN.md
+// section 16). One line per call; paste the output when something is wrong.
+int windowTest() {
+    const auto env = [](const char *name) {
+        const char *value = std::getenv(name);
+        return std::string(value && *value ? value : "(unset)");
+    };
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        std::cout << "SDL_Init(VIDEO): FAILED: " << SDL_GetError() << '\n';
+        return 1;
+    }
+    SDL_version linked;
+    SDL_GetVersion(&linked);
+    std::cout << "SDL " << int(linked.major) << '.' << int(linked.minor) << '.' << int(linked.patch)
+              << ", video driver: " << (SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "(none)") << '\n'
+              << "XDG_SESSION_TYPE=" << env("XDG_SESSION_TYPE") << " XDG_CURRENT_DESKTOP=" << env("XDG_CURRENT_DESKTOP")
+              << " WAYLAND_DISPLAY=" << env("WAYLAND_DISPLAY") << " DISPLAY=" << env("DISPLAY")
+              << " SDL_VIDEODRIVER=" << env("SDL_VIDEODRIVER") << '\n';
+    bool failed = false;
+    const auto line = [&](const char *name, bool ok, const std::string &detail = std::string()) {
+        std::cout << "  " << name << ": " << (ok ? "ok" : "FAILED") << (detail.empty() ? "" : ": " + detail) << '\n';
+        return ok;
+    };
+    std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(
+        SDL_CreateWindow("matterm --window-test",
+                         SDL_WINDOWPOS_CENTERED,
+                         SDL_WINDOWPOS_CENTERED,
+                         480,
+                         200,
+                         SDL_WINDOW_RESIZABLE | SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALLOW_HIGHDPI),
+        SDL_DestroyWindow);
+    if (!line("create a borderless window", window != nullptr, window ? "" : SDL_GetError())) {
+        SDL_Quit();
+        return 1;
+    }
+    // The flag may be accepted and then ignored: the window's flags say what the driver kept.
+    const auto flagSet = [&](Uint32 flag) { return (SDL_GetWindowFlags(window.get()) & flag) != 0; };
+    // Window managers answer asynchronously: wait up to a second for a flag to change.
+    const auto settles = [&](Uint32 flag, bool wanted) {
+        for (int i = 0; i < 20; ++i) {
+            SDL_PumpEvents();
+            if (flagSet(flag) == wanted) {
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        return flagSet(flag) == wanted;
+    };
+    line("window has no frame (SDL_WINDOW_BORDERLESS kept)", flagSet(SDL_WINDOW_BORDERLESS));
+    borderless::HitState state;
+    frontend::WindowGeometry geometry;
+    geometry.width = 480;
+    geometry.height = 200;
+    geometry.stripHeight = 20;
+    geometry.drag = {{0, 480}};
+    state.set(geometry);
+    const bool hitTest = borderless::install(window.get(), state) == 0;
+    const std::string hitError = hitTest ? std::string() : std::string(SDL_GetError());
+    line("SDL_SetWindowHitTest (edges and drag)", hitTest, hitError);
+    SDL_SetWindowBordered(window.get(), SDL_TRUE);
+    line("SDL_SetWindowBordered(true) (the fallback)", settles(SDL_WINDOW_BORDERLESS, false));
+    SDL_SetWindowBordered(window.get(), SDL_FALSE);
+    line("SDL_SetWindowBordered(false)", settles(SDL_WINDOW_BORDERLESS, true));
+    SDL_MaximizeWindow(window.get());
+    line("SDL_MaximizeWindow", settles(SDL_WINDOW_MAXIMIZED, true));
+    SDL_RestoreWindow(window.get());
+    line("SDL_RestoreWindow", settles(SDL_WINDOW_MAXIMIZED, false));
+    SDL_MinimizeWindow(window.get());
+    line("SDL_MinimizeWindow", settles(SDL_WINDOW_MINIMIZED, true));
+    SDL_RestoreWindow(window.get());
+    line("SDL_RestoreWindow", settles(SDL_WINDOW_MINIMIZED, false));
+    failed = !hitTest;
+    const frontend::FrameChoice choice = frontend::chooseFrame(true, hitTest, hitError);
+    std::cout << (choice.mode == frontend::FrameMode::Own
+                      ? "--borderless would draw its own frame here.\n"
+                      : choice.note + "\n");
+    window.reset();
+    SDL_Quit();
+    return failed ? 1 : 0;
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -342,6 +433,8 @@ int main(int argc, char **argv) {
     bool useDaemon = true; // Default; --no-daemon turns it off.
     bool daemonExplicit = false;
     bool snapScroll = false;
+    bool useBorderless = false;
+    bool windowTestOnly = false;
     std::string tabActivity = "icon";
     std::string daemonSocket;
     std::string daemonHost;
@@ -398,6 +491,12 @@ int main(int argc, char **argv) {
             }
             std::cout << script;
             return 0;
+        }
+        else if (arg == "--borderless") {
+            useBorderless = true;
+        }
+        else if (arg == "--window-test") {
+            windowTestOnly = true;
         }
         else if (arg == "--snap-scroll") {
             snapScroll = true;
@@ -489,12 +588,28 @@ int main(int argc, char **argv) {
         return 1;
     }
 #ifndef MATTERM_HAS_PTY
+    if (useBorderless) {
+        std::cerr << "--borderless requires a build with native PTY support\n";
+        return 1;
+    }
     if (smoothCursor) {
         std::cerr
             << "--smooth-cursor requires a build with native PTY support\n";
         return 1;
     }
 #endif
+    if (windowTestOnly) {
+        if (inputPath || recordPath || smokeTest || showcase || ptySmokeTest || ptyTabsSmokeTest || !command.empty()) {
+            std::cerr << "--window-test is a test of its own: do not combine it with other modes\n";
+            return 1;
+        }
+        return windowTest();
+    }
+    if (useBorderless && (inputPath || smokeTest || showcase)) {
+        std::cerr << "--borderless is for the native terminal window: do not combine it with --input, "
+                     "--showcase or --smoke-test\n";
+        return 1;
+    }
     if (!valid || (inputPath && smokeTest) ||
         (recordPath && (inputPath || smokeTest || showcase || ptySmokeTest ||
                         ptyTabsSmokeTest)) ||
@@ -521,7 +636,7 @@ int main(int argc, char **argv) {
                                   recordPath,
                                   smoothCursor,
                                   ptyTabsSmokeTest,
-                                  DaemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll, daemonHost, sshArguments, daemonInstall, assumeYes, tabActivity});
+                                  DaemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll, daemonHost, sshArguments, daemonInstall, assumeYes, tabActivity, useBorderless});
         }
         catch (const std::exception &error) {
             std::cerr << error.what() << '\n';

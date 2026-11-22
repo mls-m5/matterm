@@ -30,13 +30,19 @@ namespace frontend {
 // The mark of a tab whose terminals are busy on their own (a fisheye: unlike the amber ● that says
 // something happened while you were away).
 inline constexpr char32_t kWorkingIcon = U'◉';
-inline constexpr char32_t kStripGlyphs[] = {U'●', U'×', U'…', U'≡', kWorkingIcon};
+// The window buttons of a borderless window (docs/TABS_PLAN.md section 16).
+inline constexpr char32_t kMinimizeIcon = U'–';
+inline constexpr char32_t kMaximizeIcon = U'□';
+inline constexpr char32_t kRestoreIcon = U'◫'; // U+25EB (the font has no overlapping-squares glyph)
+inline constexpr char32_t kCloseWindowIcon = U'✕';
+inline constexpr char32_t kStripGlyphs[] = {U'●', U'×', U'…', U'≡', kWorkingIcon,
+                                            kMinimizeIcon, kMaximizeIcon, kRestoreIcon, kCloseWindowIcon};
 
 inline constexpr int kMaxTitle = 20; // Columns of a title at most.
 inline constexpr int kMinTitle = 4;  // Shrinking stops here.
 
 struct StripHit {
-    enum class Kind { None, Tab, Close, NewTab, ScrollLeft, ScrollRight, Palette, Share };
+    enum class Kind { None, Tab, Close, NewTab, ScrollLeft, ScrollRight, Palette, Share, Minimize, Maximize, CloseWindow };
     Kind kind = Kind::None;
     int tab = -1; // Index into the TabInfo list for Tab and Close.
     bool operator==(const StripHit &o) const {
@@ -264,22 +270,31 @@ inline std::u32string shareLabel(const ShareButton &share) {
     return text;
 }
 
+// The window buttons at the very end of the row of a borderless window: " – " " □ " " ✕ ".
+struct WindowButtons {
+    bool shown = false;
+    bool maximized = false; // The middle button then restores (kRestoreIcon).
+};
+
 inline TabStrip buildTabStrip(const std::vector<TabInfo> &tabs,
                               int columns,
                               const Palette &palette = Palette(),
                               int firstVisible = 0,
                               bool paletteButton = false,
-                              ShareButton share = {}) {
+                              ShareButton share = {},
+                              WindowButtons window = {}) {
     using namespace tabstrip_detail;
     constexpr int kButtonWidth = 3;
     const std::u32string shareText = shareLabel(share);
     const int shareWidth = share.shown ? int(shareText.size()) : 0;
     const int paletteWidth = paletteButton ? kButtonWidth : 0;
-    if ((share.shown || paletteButton) && columns >= 12 + shareWidth + paletteWidth) {
-        // Buttons close the row after everything else: " Share " then " ≡ ".
-        TabStrip strip = buildTabStrip(tabs, columns - shareWidth - paletteWidth, palette, firstVisible, false);
+    const int windowWidth = window.shown ? 3 * kButtonWidth : 0;
+    if ((share.shown || paletteButton || window.shown) && columns >= 12 + shareWidth + paletteWidth + windowWidth) {
+        // Buttons close the row after everything else: " Share ", " ≡ ", then the window buttons.
+        TabStrip strip =
+            buildTabStrip(tabs, columns - shareWidth - paletteWidth - windowWidth, palette, firstVisible, false);
         const Colors col = colors(palette);
-        int at = columns - shareWidth - paletteWidth;
+        int at = columns - shareWidth - paletteWidth - windowWidth;
         if (share.shown) {
             const bool on = share.shared > 0;
             const Rgb8 fg = on ? Rgb8{255, 255, 255} : col.dim;
@@ -294,7 +309,23 @@ inline TabStrip buildTabStrip(const std::vector<TabInfo> &tabs,
             strip.cells.push_back(FChar{U' ', col.dim, col.stripBg});
             strip.cells.push_back(FChar{U'≡', col.dim, col.stripBg});
             strip.cells.push_back(FChar{U' ', col.dim, col.stripBg});
-            strip.regions.push_back({at, columns, {StripHit::Kind::Palette, -1}});
+            strip.regions.push_back({at, at + kButtonWidth, {StripHit::Kind::Palette, -1}});
+            at += kButtonWidth;
+        }
+        if (window.shown) {
+            const struct {
+                char32_t icon;
+                StripHit::Kind kind;
+            } buttons[] = {{kMinimizeIcon, StripHit::Kind::Minimize},
+                           {window.maximized ? kRestoreIcon : kMaximizeIcon, StripHit::Kind::Maximize},
+                           {kCloseWindowIcon, StripHit::Kind::CloseWindow}};
+            for (const auto &button : buttons) {
+                strip.cells.push_back(FChar{U' ', col.dim, col.stripBg});
+                strip.cells.push_back(FChar{button.icon, col.dim, col.stripBg});
+                strip.cells.push_back(FChar{U' ', col.dim, col.stripBg});
+                strip.regions.push_back({at, at + kButtonWidth, {button.kind, -1}});
+                at += kButtonWidth;
+            }
         }
         return strip;
     }

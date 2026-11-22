@@ -749,6 +749,67 @@ TEST_CASE("The strip can end in a button that asks for the palette") {
            plain.plan().strip.regions.back().hit.kind != StripHit::Kind::Palette);
 }
 
+TEST_CASE("The window buttons of a borderless window give actions; a double click on a gap maximises") {
+    int made = 0;
+    Space space{[&made]() { return std::make_unique<Pane>("t" + std::to_string(++made)); }};
+    ViewConfig config;
+    config.windowButtons = true;
+    View view(space, config);
+    view.setWindow({1200, 800, 8, 16});
+    const auto click = [&view](int column, int clicks = 1) {
+        MouseInput in;
+        in.x = column * 8 + 2;
+        in.y = 4;
+        in.type = MouseInput::Type::Down;
+        in.button = MouseInput::Button::Left;
+        in.clicks = clicks;
+        return view.mouse(in);
+    };
+    const auto columnOf = [&view](StripHit::Kind kind) {
+        const FramePlan plan = view.plan(); // Not a temporary in the range-for: it would dangle.
+        for (const auto &region : plan.strip.regions) {
+            if (region.hit.kind == kind) return region.begin;
+        }
+        return -1;
+    };
+    // The strip shows with one tab: it is the window's handle.
+    EXPECT_NE(view.plan().stripRect.h, 0);
+    EXPECT_EQ(click(columnOf(StripHit::Kind::Minimize)).action, "window.minimize");
+    EXPECT_EQ(click(columnOf(StripHit::Kind::Maximize)).action, "window.maximize");
+    EXPECT_EQ(click(columnOf(StripHit::Kind::CloseWindow)).action, "window.close");
+    EXPECT(click(columnOf(StripHit::Kind::CloseWindow)).consumed);
+    // The middle button shows the restore mark while the window is maximised.
+    const int maxAt = columnOf(StripHit::Kind::Maximize);
+    EXPECT(view.plan().strip.cells[std::size_t(maxAt + 1)].codePoint == kMaximizeIcon);
+    view.setWindowMaximized(true);
+    EXPECT(view.plan().strip.cells[std::size_t(maxAt + 1)].codePoint == kRestoreIcon);
+    view.setWindowMaximized(false);
+    // A double click in the gap toggles; a single one or one on a tab does not.
+    int gap = -1;
+    const FramePlan plan = view.plan();
+    for (int c = 0; c < int(plan.strip.cells.size()) && gap < 0; ++c) {
+        if (plan.strip.hit(c).kind == StripHit::Kind::None && c > 20) gap = c;
+    }
+    EXPECT_GT(gap, 0);
+    EXPECT_EQ(click(gap, 2).action, "window.maximize");
+    EXPECT_EQ(click(gap, 1).action, "");
+    EXPECT_EQ(click(1, 2).action, "");
+    // Without the option: no buttons, and a double click does nothing.
+    View plain(space, ViewConfig{});
+    plain.setWindow({1200, 800, 8, 16});
+    const FramePlan plainPlan = plain.plan();
+    for (const auto &region : plainPlan.strip.regions) {
+        EXPECT(region.hit.kind != StripHit::Kind::CloseWindow);
+    }
+    MouseInput in;
+    in.x = 500;
+    in.y = 4;
+    in.type = MouseInput::Type::Down;
+    in.button = MouseInput::Button::Left;
+    in.clicks = 2;
+    EXPECT_EQ(plain.mouse(in).action, "");
+}
+
 TEST_CASE("The Share button shows the shared panes of the active tab and asks for the right action") {
     int made = 0;
     Space space{[&made]() { return std::make_unique<Pane>("t" + std::to_string(++made)); }};

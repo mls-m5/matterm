@@ -1,5 +1,7 @@
 #include "ptyfrontend.h"
 
+#include "borderless.h"
+
 #include "cellbuffer.h"
 #include "cursorglide.h"
 #include "daemoncommands.h"
@@ -592,6 +594,7 @@ int runPtyFrontend(const char *font,
                          960,
                          640,
                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
+                             (daemonOptions.borderless ? SDL_WINDOW_BORDERLESS : 0) |
                              (tabsSmoke ? SDL_WINDOW_HIDDEN : 0)),
         SDL_DestroyWindow);
     if (!window) {
@@ -600,7 +603,30 @@ int runPtyFrontend(const char *font,
     SdlBackend backend(*window, font, fontSize, tabsSmoke);
     backend.setReserveScrollbarStrip(true);
 
+    // --borderless (docs/TABS_PLAN.md section 16): the strip is the frame, if the hit test works;
+    // otherwise the system frame comes back, and the window says so. No half modes.
+    borderless::HitState hitState;
+    bool ownFrame = false;
+    if (daemonOptions.borderless) {
+        const bool installed = borderless::install(window.get(), hitState) == 0;
+        const frontend::FrameChoice frame =
+            frontend::chooseFrame(true, installed, installed ? std::string() : std::string(SDL_GetError()));
+        ownFrame = frame.mode == frontend::FrameMode::Own;
+        if (!ownFrame) {
+            SDL_SetWindowBordered(window.get(), SDL_TRUE);
+            std::cerr << frame.note << '\n';
+            if (NativePane *first = workspace.focusedPane()) {
+                std::u32string text;
+                for (const char c : frame.note + "\r\n") {
+                    text += static_cast<char32_t>(static_cast<unsigned char>(c));
+                }
+                first->v.model().write(text);
+            }
+        }
+    }
+
     ViewConfig viewConfig;
+    viewConfig.windowButtons = ownFrame;
     viewConfig.scrollbarStrip = SdlBackend::scrollbarStrip();
     // Ctrl+B is readline's backward-char; the native app has the desktop
     // shortcuts instead (the browser uses the prefix keys).
@@ -1095,7 +1121,16 @@ int runPtyFrontend(const char *font,
         const auto colon = action.find(':');
         const std::string id = action.substr(0, colon);
         const std::string argument = colon == std::string::npos ? std::string() : action.substr(colon + 1);
-        if (id == "close.confirm" || id == "close.cancel") {
+        if (id == "window.close") {
+            requestQuit(); // The same question as the window's own close button.
+        }
+        else if (id == "window.minimize") {
+            SDL_MinimizeWindow(window.get());
+        }
+        else if (id == "window.maximize") {
+            borderless::toggleMaximize(window.get());
+        }
+        else if (id == "close.confirm" || id == "close.cancel") {
             const auto pending = wv.pendingClose();
             const auto result = wv.answerClose(id == "close.confirm" ? CloseAnswer::Close : CloseAnswer::Cancel);
             if (id == "close.confirm") {
@@ -2245,7 +2280,14 @@ int runPtyFrontend(const char *font,
         // Blinking stops (visible) after ten seconds without input or change, like GNOME's
         // gtk-cursor-blink-timeout: a resting window then draws nothing at all.
         const bool blinkOn = now >= lastActivity + kBlinkTimeoutMs || (now / 500) % 2 == 0;
+        if (ownFrame) {
+            wv.setWindowMaximized((SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MAXIMIZED) != 0);
+        }
         const FramePlan plan = wv.plan();
+        if (ownFrame) { // What SDL's hit test reads: the handle is the strip's gaps.
+            hitState.set(borderless::geometryOf(
+                window.get(), plan.strip, plan.stripRect.h, backend.cellWidth(), wv.window().width));
+        }
         const Palette stripPalette;
         std::optional<CellBuffer> stripBuffer;
         std::optional<RenderFrame> stripFrame;
