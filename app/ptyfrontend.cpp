@@ -275,9 +275,19 @@ struct NativePane {
         }
     }
     // A pane whose terminal lives in the daemon: a new one (empty `sessionId`) or an existing one.
-    NativePane(const std::string &socketPath, std::string sessionId, int columns, int rows)
+    // A new terminal starts in `cwd` (empty: the daemon's folder).
+    NativePane(const std::string &socketPath, std::string sessionId, const std::string &cwd, int columns, int rows)
         : socket(socketPath)
         , v(daemonViewConfig(columns, rows)) {
+        if (sessionId.empty()) {
+            std::string error;
+            const auto reply = askDaemon(
+                socket, mtd::CreateSession{cwd, std::uint16_t(columns), std::uint16_t(rows)}, error);
+            if (const auto *created = reply ? std::get_if<mtd::SessionCreated>(&*reply) : nullptr) {
+                sessionId = created->id;
+            }
+            // Otherwise attach without an id: the daemon makes the terminal itself (its own folder).
+        }
         daemon = attachToDaemon(v, socket, std::move(sessionId), 0, daemonClock);
     }
     ~NativePane() {
@@ -434,6 +444,7 @@ int runPtyFrontend(const char *font,
             throw std::runtime_error("--daemon: " + error);
         }
     }
+    Uint64 lastSharedPoll = 0;
     bool keepTerminals = false;           // Leave the programs running in the daemon when we go.
     std::uint32_t daemonStopCount = 0;    // What the "Stop daemon" question named.
     OutputRecording recording(recordPath);
@@ -441,6 +452,9 @@ int runPtyFrontend(const char *font,
     int hintColumns = 80, hintRows = 24; // size of a new pane until the layout says
     // Folder the next pane's shell should start in (a restored session), else empty.
     std::string nextCwd;
+    // Where a new daemon terminal starts: the saved folder, else the folder of the pane in focus
+    // (as the daemon sees it), else this program's folder.
+    std::function<std::string()> daemonCwd;
     // The first pane is made before SDL and its threads exist (fork); later ones
     // are made on demand, see docs/TABS_PLAN.md.
     Space workspace([&]() -> std::unique_ptr<NativePane> {
@@ -459,7 +473,7 @@ int runPtyFrontend(const char *font,
             command.insert(command.end(), arguments.begin(), arguments.end());
         }
         auto pane = daemonOptions.enabled
-                        ? std::make_unique<NativePane>(daemonPath, std::string(), hintColumns, hintRows)
+                        ? std::make_unique<NativePane>(daemonPath, std::string(), daemonCwd(), hintColumns, hintRows)
                         : std::make_unique<NativePane>(command, term, hintColumns, hintRows, std::move(record));
         pane->v.glide() = CursorGlide([&] {
             CursorGlide::Config c;
@@ -674,9 +688,35 @@ int runPtyFrontend(const char *font,
     bool smokeBusy = false; // --pty-tabs-smoke-test: pretend every pane runs a program
     const auto paneState = [&](NativePane &pane) {
         if (!pane.link) {
-            return PaneState{}; // The program is in the daemon: nothing of it can be probed here.
+            // The program is in the daemon, which reads /proc for us.
+            PaneState state;
+            if (!pane.daemon || pane.daemon->sessionId().empty()) {
+                return state;
+            }
+            std::string error;
+            const auto reply = askDaemon(daemonPath, mtd::GetSessionInfo{pane.daemon->sessionId()}, error, 500);
+            if (const auto *info = reply ? std::get_if<mtd::SessionInfo>(&*reply) : nullptr) {
+                state.cwd = info->cwd;
+                state.busy = info->busy;
+                state.command = info->command;
+            }
+            return state;
         }
         return probePane(procSource, pane.link ? pane.link->childPid() : 0, pane.link ? pane.link->foregroundProcessGroup() : 0);
+    };
+    daemonCwd = [&]() -> std::string {
+        if (!nextCwd.empty()) {
+            return nextCwd;
+        }
+        if (const NativePane *focused = workspace.focusedPane(); focused && focused->daemon) {
+            const auto cwd = paneState(const_cast<NativePane &>(*focused)).cwd;
+            if (!cwd.empty()) {
+                return cwd;
+            }
+        }
+        std::error_code ec;
+        const auto here = std::filesystem::current_path(ec);
+        return ec ? std::string() : here.string();
     };
     {
         // Closing a pane, tab or the window asks when a program other than the shell runs there.
@@ -1539,6 +1579,24 @@ int runPtyFrontend(const char *font,
             }
         }
         guarded([&] { wv.sync(nowMs); });
+        if (daemonOptions.enabled && SDL_GetTicks64() - lastSharedPoll >= 2000) {
+            // The shared marks are the daemon's; another tool may have changed them.
+            lastSharedPoll = SDL_GetTicks64();
+            std::string error;
+            const auto reply = askDaemon(daemonPath, mtd::ListSessions{}, error, 200);
+            if (const auto *list = reply ? std::get_if<mtd::SessionList>(&*reply) : nullptr) {
+                workspace.forEachPane([&](PaneId, NativePane &pane, bool) {
+                    if (!pane.daemon) {
+                        return;
+                    }
+                    for (const auto &entry : list->sessions) {
+                        if (entry.id == pane.daemon->sessionId()) {
+                            pane.shared = entry.shared;
+                        }
+                    }
+                });
+            }
+        }
         // Every process keeps being served, shown or not; ended ones close their pane.
         std::vector<PaneId> ended;
         workspace.forEachPane([&](PaneId id, NativePane &pane, bool) {

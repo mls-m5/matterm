@@ -196,6 +196,42 @@ TEST_CASE("Marking a terminal shared shows in the daemon's list, and back") {
     askDaemon(socket, mtd::Shutdown{1}, stop);
 }
 
+TEST_CASE("A terminal can be created in a folder and asked what it runs") {
+    ::setenv("SHELL", "/bin/sh", 1);
+    TempDir dir;
+    const std::string socket = dir.path + "/d.sock";
+    EXPECT_EQ(ensureDaemon(socket, MATTERM_DAEMON_BIN), "");
+    std::string error;
+    const auto created =
+        askDaemon(socket, mtd::CreateSession{dir.path, 60, 10}, error);
+    const auto *made =
+        created ? std::get_if<mtd::SessionCreated>(&*created) : nullptr;
+    EXPECT(made != nullptr);
+    if (!made) {
+        return;
+    }
+    auto view = makeView();
+    auto link = attachToDaemon(view, socket, made->id, 0, clockNow);
+    EXPECT(link != nullptr);
+    EXPECT(until([&] {
+        link->tick();
+        return link->sessionId() == made->id;
+    }));
+    std::string cwd;
+    EXPECT(until([&] {
+        const auto reply =
+            askDaemon(socket, mtd::GetSessionInfo{made->id}, error);
+        const auto *info =
+            reply ? std::get_if<mtd::SessionInfo>(&*reply) : nullptr;
+        cwd = info ? info->cwd : std::string();
+        return !cwd.empty();
+    }));
+    EXPECT_EQ(cwd, dir.path);
+    view.detach();
+    std::string stop;
+    askDaemon(socket, mtd::Shutdown{1}, stop);
+}
+
 TEST_CASE("No daemon: asking says so") {
     TempDir dir;
     std::string error;
