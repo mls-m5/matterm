@@ -47,6 +47,8 @@ public:
     // changed when the memory is full: the oldest row would have to go. Row indices of
     // every retained row grow by one. For rebuilding history lazily (docs/SCROLLING_AND_REFLOW.md).
     bool prepend(FStringView text, FChar fill = {});
+    // Drops the newest `count` rows (at most all).
+    void popBack(std::size_t count) noexcept;
     void clear() noexcept;
 
     // Explicit O(retained cells) operation. Preserve rows, clip/fill columns,

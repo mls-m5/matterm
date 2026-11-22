@@ -143,9 +143,10 @@ TEST_CASE("Alternate screen isolates text history style cursor and viewport") {
     EXPECT(model.cell(0, 0).codePoint == U' ');
 }
 
-TEST_CASE("Resize preserves both buffers, clips the live screen, lays saved rows out again and "
+TEST_CASE("Resize preserves both buffers, lays the primary rows out again, clips the alternate screen and "
           "keeps bottom rows on shrink") {
     TerminalModel model(4, 3, 5);
+    model.setLiveReflow(TerminalModel::LiveReflow::All);
     model.write(U"aaaa\r\nbbbb\r\ncccc");
     model.setAlternateScreen(true);
     model.write(U"AAAA\r\nBBBB\r\nCCCC");
@@ -154,20 +155,23 @@ TEST_CASE("Resize preserves both buffers, clips the live screen, lays saved rows
     EXPECT(model.cell(2, 1).codePoint == U'C');
     EXPECT_EQ(model.historySize(), std::size_t(0));
     model.setAlternateScreen(false);
-    EXPECT(model.cell(0, 0).codePoint == U'b');
-    EXPECT(model.cell(2, 1).codePoint == U'c');
-    // The saved line "aaaa" is laid out again at width 3: "aaa" and "a".
-    EXPECT_EQ(model.historySize(), std::size_t(2));
+    // Lines "aaaa", "bbbb", "cccc" at width 3: aaa|a bbb|b ccc|c; the screen shows the last two rows.
+    EXPECT(model.cell(0, 0).codePoint == U'c');
+    EXPECT(model.cell(2, 0).codePoint == U'c');
+    EXPECT(model.cell(0, 1).codePoint == U'c');
+    EXPECT_EQ(model.historySize(), std::size_t(4));
     EXPECT_EQ(model.cursor().row, 1);
-    EXPECT_EQ(model.cursor().column, 2);
+    EXPECT_EQ(model.cursor().column, 1); // After the fourth "c".
     model.resize(5, 4);
-    // Growth reveals the two saved rows as they are (clipped or padded, not joined again).
+    // Wider again: three lines, the cursor behind "cccc", the rest of the screen blank.
     EXPECT(model.cell(0, 0).codePoint == U'a');
-    EXPECT(model.cell(3, 0).codePoint == U' ');
-    EXPECT(model.cell(0, 1).codePoint == U'a');
-    EXPECT(model.cell(0, 2).codePoint == U'b');
-    EXPECT(model.cell(0, 3).codePoint == U'c');
+    EXPECT(model.cell(3, 0).codePoint == U'a');
+    EXPECT(model.cell(0, 1).codePoint == U'b');
+    EXPECT(model.cell(0, 2).codePoint == U'c');
+    EXPECT(model.cell(0, 3).codePoint == U' ');
     EXPECT_EQ(model.historySize(), std::size_t(0));
+    EXPECT_EQ(model.cursor().row, 2);
+    EXPECT_EQ(model.cursor().column, 4);
 }
 
 TEST_CASE("Height growth pulls saved primary rows back in exact order") {
@@ -304,15 +308,17 @@ TEST_CASE("Switching screens preserves a pending primary wrap") {
 
 TEST_CASE("Resize retains the insertion position after a full-width write") {
     TerminalModel model(3, 2, 2);
+    model.setLiveReflow(TerminalModel::LiveReflow::All);
     model.write(U"abc");
     model.resize(5, 2);
     model.write(U"X");
     EXPECT(model.cell(2, 0).codePoint == U'c');
     EXPECT(model.cell(3, 0).codePoint == U'X');
     model.write(U"Y");
-    model.resize(4, 2);
+    model.resize(4, 2); // "abcXY" is one line: abcX|Y, the cursor behind the Y.
     model.write(U"Z");
-    EXPECT(model.cell(0, 1).codePoint == U'Z');
+    EXPECT(model.cell(0, 1).codePoint == U'Y');
+    EXPECT(model.cell(1, 1).codePoint == U'Z');
 }
 
 TEST_CASE("Single-cell screens and zero scrollback handle wrap and erasure") {

@@ -483,3 +483,64 @@ Drag (history of N lines, capacity 20000 rows; mean per `resize()`+`advanceViewp
 
 The cost per step is the allocation of the new ring (as before) plus about 1000 rows of layout;
 the rest (settle) is spread over frames after the drag, 1000 rows per frame.
+
+## Implemented: reflow of the live rows of the primary screen (2026-11-22, agent2)
+
+Owner: the visible screen should be reflowed like GNOME Terminal, not clipped. Alternate screen
+unchanged (clipped, no history). `TerminalModel::setLiveReflow(Off | AboveCursor | All)`, default
+`AboveCursor`. Code: `Impl::resizedLive` in `terminalmodel.cpp`, `reflow::Anchor` in `reflow.h`.
+
+### Model
+
+The saved rows and the screen rows are one stream of lines; a width change lays all of it out again
+and the last `height` rows (counting from the end of the content) are the new screen. Rows below the
+cursor that are blank are not content: they are added again after the last row. So narrowing sends
+rows to the history, widening pulls them back, a screen that is only partly used keeps its content at
+the top. If more non-blank rows follow the cursor than fit, the cursor stays on the screen and the
+rows after it are dropped (rare: full-screen programs use the alternate screen).
+
+Followed through the layout by their place in their logical line (`reflow::Anchor`, cell index in the
+line, so the same code serves the lazy path): the cursor, the saved cursor (DECSC) and the first row
+the reader scrolled to. A cursor behind the text of its line (a prompt ending in a blank, typed text
+followed by padding) keeps the padding in front of it; a cursor far out in an empty row is pulled
+back into the last row of its line (no rows are made for it); a cursor directly behind a full row is
+the pending-wrap position (`wrapPending`) of that row.
+
+### The shell problem, measured with real bash
+
+Shells redraw their prompt when the size changes (SIGWINCH) and assume the terminal did not reflow:
+bash/readline goes to column 0, clears and writes prompt and input again, moving up as many rows as
+the prompt had at the *old* width. I recorded bash 5 on a pty (prompt 30 and 50 characters, typed
+input, 80→20→80 and 40→80→25 columns) and played the bytes into the model:
+
+* `All` (VTE-like, the cursor's line is reflowed too): after narrowing the prompt line is already two
+  or three rows; bash writes at the cursor row, below those rows: **a copy of the prompt stays above
+  the new one** (two prompts after 80→20, four rows). Widening merges the rows and bash moves up by
+  its old row count into earlier output.
+* `AboveCursor`: the logical line the cursor is in and the rows below it are clipped and padded as
+  before (their flags are kept); only what is above it is reflowed. bash redraws over its own rows
+  and the result is exactly one prompt, at 80→20→80 and 40→80→25. This is the default. The test
+  "a shell that redraws its prompt after the resize leaves no copy behind" does the same with
+  CR/EL/ED and asserts the copy for `All` by design, so a change of default shows up.
+* `Off`: only the saved rows are laid out again (the earlier implementation).
+
+Cost of `AboveCursor`: a long line being edited or a program that printed a long line without a
+newline and waits stays clipped on narrowing until it redraws. A terminal that wants VTE behaviour
+sets `All` and accepts the copy (or recognises prompts, which needs shell integration, not done).
+
+### Cost
+
+Steady state is unchanged: nothing was added to the write path or to scrolling (modelbench, Release:
+80 columns 30.1 ms against 31.0 ms on main, 200 columns 35.8 against 38.6, i.e. noise). A drag step
+lays out the newest 1000 saved rows plus the screen rows (lazy rest as before): narrow 200→80 with
+1000/5000/10000 lines 14.0/13.9/10.3 ms against 13.3/11.6/7.4 ms on main, widen 5.3/5.1/5.4 ms
+against 4.7/6.4/8.5 ms (the cost is dominated by allocating the new ring in both). The rest of a
+10000-line history settles in 19 ms (narrow) and 48 ms (widen) in total, 1000 rows per frame.
+
+### Tests
+
+`test/terminalreflow_test.cpp` (40 cases): cursor placement (mid-line, behind a prompt, far out in an
+empty row, pending wrap), saved cursor, blank rows below the cursor, rows to and from the history,
+reader anchoring, content longer than the screen below the cursor, random output/width/height mixes
+in both modes, "all text survives any width in order" in both modes, the bash-like redraw, flags of
+the clipped cursor line. `terminalmodel_test` states the mode it relies on.

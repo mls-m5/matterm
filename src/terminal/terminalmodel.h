@@ -96,6 +96,17 @@ public:
     // Preserves both buffers; resets margins/origin to full screen. Allocation
     // failure leaves both unchanged.
     void resize(std::size_t columns, std::size_t rows);
+    // What a width change does to the live rows of the primary screen (the saved rows are always laid
+    // out again; the alternate screen is always clipped and padded).
+    //   Off          the live rows are clipped and padded.
+    //   AboveCursor  (default) the rows above the logical line the cursor is in are laid out again, that
+    //                line and the rows below it are clipped and padded. Shells such as bash redraw their
+    //                prompt on SIGWINCH assuming the terminal did not reflow it: reflowing the prompt line
+    //                leaves a copy of it behind, or makes the shell redraw over the wrong rows.
+    //   All          like VTE: the cursor's line is laid out again too, the cursor keeps its place in it.
+    enum class LiveReflow { Off, AboveCursor, All };
+    void setLiveReflow(LiveReflow mode) noexcept;
+    LiveReflow liveReflow() const noexcept;
     // Older saved rows still wait to be laid out after a width change; advanceViewport() works through
     // them once the size has been quiet for a moment. finishReflow() does all of it now.
     bool reflowPending() const noexcept;

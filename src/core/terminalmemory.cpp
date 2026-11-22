@@ -130,6 +130,11 @@ bool TerminalMemory::prepend(FStringView text, FChar fill) {
     return true;
 }
 
+void TerminalMemory::popBack(std::size_t count) noexcept {
+    size_ -= std::min(count, size_);
+    visibleRows_.clear();
+}
+
 void TerminalMemory::clear() noexcept {
     head_ = 0;
     size_ = 0;

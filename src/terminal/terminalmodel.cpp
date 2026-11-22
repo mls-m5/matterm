@@ -53,6 +53,11 @@ struct TerminalModel::Impl {
             --firstRow;
             return true;
         }
+        void popBack(std::size_t count) {
+            count = std::min(count, softWrap.size());
+            memory.popBack(count);
+            softWrap.resize(softWrap.size() - count);
+        }
         // Never-written cells use the default colors, like cleared ones, so a
         // theme change recolors both the same way.
         static FChar defaultCell() {
@@ -111,6 +116,7 @@ struct TerminalModel::Impl {
     static constexpr double kQuietSeconds = 0.1;
     std::vector<Segment> segments;
     double quiet = 0; // Seconds since the last resize.
+    TerminalModel::LiveReflow liveMode = TerminalModel::LiveReflow::AboveCursor;
     bool useAlternate = false;
     std::size_t selectionEpoch = 0;
     std::vector<bool> tabStops;
@@ -252,12 +258,39 @@ struct TerminalModel::Impl {
         std::size_t segmentRows = 0; // Old rows [0, segmentRows) were left unreflowed (see segments).
     };
 
+    // Where the older rows that wait (see segments) end: always at the start of a logical line.
+    // Returns `firstOld` when nothing is deferred.
+    std::size_t segmentCut(const Screen &old,
+                           std::size_t firstOld,
+                           std::size_t historyRows,
+                           bool reading,
+                           std::size_t readerRow) const {
+        if (segments.size() >= kMaxSegments || historyRows <= kImmediateRows + kMinSegmentRows) {
+            return firstOld;
+        }
+        std::size_t cut = firstOld + historyRows - kImmediateRows;
+        if (reading) {
+            cut = std::min(cut, readerRow); // The rows being read are laid out at once.
+        }
+        std::size_t steps = 0;
+        while (cut > firstOld && old.softWrap[cut - 1] && steps++ < 100000) {
+            --cut;
+        }
+        if ((cut > firstOld && old.softWrap[cut - 1]) || cut - firstOld < kMinSegmentRows) {
+            return firstOld;
+        }
+        return cut;
+    }
+
     Resized resized(const Screen &old,
                     std::size_t width,
                     std::size_t height,
                     std::size_t history,
                     bool discardHistory = false,
                     bool reflowHistory = false) const {
+        if (reflowHistory && liveMode != TerminalModel::LiveReflow::Off && width != columns && !discardHistory) {
+            return resizedLive(old, width, height, history);
+        }
         auto result =
             std::make_unique<Screen>(width, height, history, blank(old));
         result->memory.clear();
@@ -291,31 +324,14 @@ struct TerminalModel::Impl {
         const std::size_t readerRow = old.viewport.firstRow();
         std::size_t appended = 0; // Rows appended to the result, evicted ones included.
         std::size_t segmentRows = 0;
-        bool anchorFound = false;
-        std::size_t anchorIndex = 0;
+        reflow::Anchor readerAnchor;
+        readerAnchor.row = readerRow;
         std::size_t liveFirst = firstOld; // First old row that is copied (clipped or padded) as it is.
         if (reflowing) {
-            std::size_t cut = firstOld;
-            if (segments.size() < kMaxSegments && historyRows > kImmediateRows + kMinSegmentRows) {
-                cut = firstOld + historyRows - kImmediateRows;
-                if (reading) {
-                    cut = std::min(cut, readerRow); // The rows being read are laid out at once.
-                }
-                // A segment ends where a logical line ends.
-                std::size_t steps = 0;
-                while (cut > firstOld && old.softWrap[cut - 1] && steps++ < 100000) {
-                    --cut;
-                }
-                if (cut > firstOld && old.softWrap[cut - 1]) {
-                    cut = firstOld;
-                }
-                if (cut - firstOld < kMinSegmentRows) {
-                    cut = firstOld;
-                }
-            }
+            const std::size_t cut = segmentCut(old, firstOld, historyRows, reading, readerRow);
             segmentRows = cut - firstOld;
             const auto empty = blank(old);
-            const auto laid = reflow::layout(
+            reflow::layout(
                 cut,
                 firstOld + historyRows,
                 width,
@@ -326,9 +342,8 @@ struct TerminalModel::Impl {
                     ++appended;
                 },
                 [&](const FChar &cell) { return paddingCell(cell, empty); },
-                reading ? readerRow : static_cast<std::size_t>(-1));
-            anchorFound = laid.anchorFound;
-            anchorIndex = laid.anchorRow;
+                &readerAnchor,
+                reading ? 1 : 0);
             liveFirst = firstOld + historyRows;
         }
         for (std::size_t y = liveFirst; y < endOld; ++y) {
@@ -381,12 +396,159 @@ struct TerminalModel::Impl {
             if (readerRow >= liveFirst) {
                 first = liveStart + (readerRow - liveFirst);
             }
-            else if (anchorFound && anchorIndex >= evicted) {
-                first = anchorIndex - evicted;
+            else if (readerAnchor.found && readerAnchor.outRow >= evicted) {
+                first = readerAnchor.outRow - evicted;
             }
             result->viewport.reanchor(first, result->memory.size(), height);
         }
         return {std::move(result), segmentRows};
+    }
+
+    // Width change on the primary screen with the live rows reflowed too: the saved rows and the screen
+    // rows are one stream of lines. With LiveReflow::All the cursor line is laid out again as well (like
+    // VTE); a shell that redraws its prompt on SIGWINCH assumes it was not, and leaves a copy of a wrapped
+    // prompt behind, so by default the logical line the cursor is in and the rows below it are clipped and
+    // padded as before and only what is above it is reflowed. Followed by their place in their line: the
+    // cursor, the saved cursor and the reader's first row. Blank rows below the cursor are not content.
+    Resized resizedLive(const Screen &old, std::size_t width, std::size_t height, std::size_t history) const {
+        auto result = std::make_unique<Screen>(width, height, history, blank(old));
+        result->memory.clear();
+        result->softWrap.clear();
+        const bool all = liveMode == TerminalModel::LiveReflow::All;
+        const std::size_t oldHistory = start(old);
+        const std::size_t cursorAbs = oldHistory + std::size_t(old.cursor.row);
+        std::size_t end = old.memory.size();
+        while (end > cursorAbs + 1 && blankRow(old, end - 1)) {
+            --end;
+        }
+        const bool reading = !old.viewport.atTail();
+        const std::size_t readerRow = old.viewport.firstRow();
+        const std::size_t cut = segmentCut(old, 0, oldHistory, reading, readerRow);
+        std::size_t split = end; // Rows [split, end) are clipped or padded as they are.
+        if (!all) {
+            split = cursorAbs;
+            std::size_t steps = 0;
+            while (split > cut && old.softWrap[split - 1] && steps++ < 100000) {
+                --split;
+            }
+            if (split > cut && old.softWrap[split - 1]) {
+                split = cut;
+            }
+        }
+        const std::size_t savedAbs = oldHistory + std::size_t(std::max(0, old.savedCursor.row));
+        const bool saved = old.hasSavedCursor && std::size_t(std::max(0, old.savedCursor.row)) < rows;
+        reflow::Anchor anchors[3];
+        std::size_t count = 0;
+        std::size_t cursorIndex = 3;
+        if (all) {
+            anchors[count].row = cursorAbs;
+            anchors[count].column = std::size_t(old.cursor.column);
+            anchors[count].after = old.wrapPending;
+            anchors[count].keep = true;
+            cursorIndex = count++;
+        }
+        std::size_t readerIndex = 3;
+        if (reading && readerRow >= cut && readerRow < split) {
+            anchors[count].row = readerRow;
+            readerIndex = count++;
+        }
+        std::size_t savedIndex = 3;
+        if (saved && savedAbs < split) {
+            anchors[count].row = savedAbs;
+            anchors[count].column = std::size_t(std::max(0, old.savedCursor.column));
+            anchors[count].keep = true;
+            savedIndex = count++;
+        }
+        std::size_t appended = 0;
+        const auto empty = blank(old);
+        reflow::layout(
+            cut,
+            split,
+            width,
+            [&](std::size_t y) { return old.memory.row(y); },
+            [&](std::size_t y) { return old.softWrap[y]; },
+            [&](const FChar *cells, std::size_t n, bool wraps) {
+                result->append(FStringView(cells, n), empty, wraps);
+                ++appended;
+            },
+            [&](const FChar &cell) { return paddingCell(cell, empty); },
+            anchors,
+            count);
+        const std::size_t splitOut = appended; // Emitted index of the first clipped row.
+        for (std::size_t y = split; y < end; ++y) {
+            result->append(old.memory.row(y), empty, old.softWrap[y]);
+            ++appended;
+        }
+        const std::size_t evicted = appended - result->memory.size();
+        const auto retained = [&](std::size_t index) { return index >= evicted ? index - evicted : 0; };
+        // Where the cursor is, as an emitted row index.
+        std::size_t cursorOut = splitOut + (cursorAbs - split);
+        int cursorColumn = std::min(old.cursor.column, int(width) - 1);
+        bool pending = old.wrapPending;
+        if (all) {
+            cursorOut = anchors[cursorIndex].outRow;
+            cursorColumn = int(anchors[cursorIndex].outColumn);
+            pending = anchors[cursorIndex].outPending;
+        }
+        else if (pending && width > columns) {
+            cursorColumn = old.cursor.column + 1; // Widening exposes the position after the last cell.
+            pending = false;
+        }
+        const std::size_t cursorRow = retained(cursorOut);
+        std::size_t windowStart = 0;
+        if (result->memory.size() > height) {
+            windowStart = result->memory.size() - height;
+            if (cursorRow < windowStart) {
+                // More content below the cursor than the screen holds: the cursor stays on screen.
+                windowStart = cursorRow;
+                result->popBack(result->memory.size() - (cursorRow + height));
+            }
+        }
+        while (result->memory.size() < windowStart + height) {
+            result->append(FStringView{}, empty);
+        }
+        result->style = old.style;
+        result->savedStyle = old.savedStyle;
+        result->savedWrap = old.savedWrap && !all;
+        result->hasSavedCursor = old.hasSavedCursor;
+        result->savedOrigin = old.savedOrigin;
+        result->savedAutoWrap = old.savedAutoWrap;
+        result->autoWrap = old.autoWrap;
+        result->insert = old.insert;
+        result->cursor = old.cursor;
+        result->cursor.row = int(std::min(cursorRow - windowStart, height - 1));
+        result->cursor.column = cursorColumn;
+        result->wrapPending = pending;
+        result->savedCursor = old.savedCursor;
+        const auto place = [&](std::size_t emitted) {
+            const std::size_t row = retained(emitted);
+            return int(row >= windowStart ? std::min(row - windowStart, height - 1) : 0);
+        };
+        if (saved && savedIndex < count && anchors[savedIndex].found) {
+            result->savedCursor.row = place(anchors[savedIndex].outRow);
+            result->savedCursor.column = int(anchors[savedIndex].outColumn);
+        }
+        else if (saved && savedAbs >= split && savedAbs < end) {
+            result->savedCursor.row = place(splitOut + (savedAbs - split));
+            result->savedCursor.column = std::min(old.savedCursor.column, int(width) - 1);
+        }
+        else {
+            result->savedCursor.row = std::min(old.savedCursor.row, int(height) - 1);
+            result->savedCursor.column = std::min(old.savedCursor.column, int(width) - 1);
+        }
+        result->viewport = old.viewport;
+        result->viewport.setGeometry(result->memory.size(), height);
+        if (reading) {
+            std::size_t first = result->memory.size() - height;
+            if (readerIndex < count && anchors[readerIndex].found) {
+                first = std::min(retained(anchors[readerIndex].outRow), first);
+            }
+            else if (readerRow >= split && readerRow < end) {
+                first = std::min(retained(splitOut + (readerRow - split)), first);
+            }
+            result->viewport.reanchor(first, result->memory.size(), height);
+        }
+        return {std::move(result), cut};
     }
 
     // Lays out the next slice of the waiting rows (newest first) above the saved rows.
@@ -872,6 +1034,13 @@ void TerminalModel::resize(std::size_t columns, std::size_t rows) {
     impl_->columns = columns;
     impl_->rows = rows;
     ++impl_->selectionEpoch;
+}
+
+void TerminalModel::setLiveReflow(LiveReflow mode) noexcept {
+    impl_->liveMode = mode;
+}
+TerminalModel::LiveReflow TerminalModel::liveReflow() const noexcept {
+    return impl_->liveMode;
 }
 
 std::size_t TerminalModel::firstRetainedRow() const noexcept {

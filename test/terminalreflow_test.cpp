@@ -15,7 +15,7 @@ struct Row {
     bool wraps;
 };
 std::vector<Row> lay(const std::vector<std::pair<std::u32string, bool>> &input, std::size_t width,
-                     std::size_t anchor = static_cast<std::size_t>(-1), reflow::Result *out = nullptr) {
+                     std::size_t anchor = static_cast<std::size_t>(-1), reflow::Anchor *out = nullptr) {
     // Input rows are padded to their width with spaces like stored rows.
     std::vector<std::vector<FChar>> rows;
     for (const auto &[text, wraps] : input) {
@@ -28,7 +28,9 @@ std::vector<Row> lay(const std::vector<std::pair<std::u32string, bool>> &input, 
         rows.push_back(std::move(r));
     }
     std::vector<Row> result;
-    const auto laid = reflow::layout(
+    reflow::Anchor a;
+    a.row = anchor;
+    reflow::layout(
         0, rows.size(), width,
         [&](std::size_t i) { return FStringView(rows[i].data(), rows[i].size()); },
         [&](std::size_t i) { return input[i].second; },
@@ -37,8 +39,8 @@ std::vector<Row> lay(const std::vector<std::pair<std::u32string, bool>> &input, 
             for (std::size_t i = 0; i < n; ++i) t.push_back(cells[i].codePoint);
             result.push_back({t, wraps});
         },
-        [](const FChar &c) { return c.codePoint == U' '; }, anchor);
-    if (out) *out = laid;
+        [](const FChar &c) { return c.codePoint == U' '; }, &a, 1);
+    if (out) *out = a;
     return result;
 }
 
@@ -142,17 +144,17 @@ TEST_CASE("layout: the last row never wraps, and a trailing full row is not mark
 }
 
 TEST_CASE("layout: anchors map an input row to its place in the new rows") {
-    reflow::Result r;
+    reflow::Anchor r;
     // Rows 0..2 form one line of 12 cells at width 4; row 2 starts at cell 8: new row 2 at width 4.
     lay({{U"aaaa", true}, {U"bbbb", true}, {U"cccc", false}, {U"dd", false}}, 4, 2, &r);
-    EXPECT(r.anchorFound);
-    EXPECT_EQ(r.anchorRow, std::size_t(2));
+    EXPECT(r.found);
+    EXPECT_EQ(r.outRow, std::size_t(2));
     lay({{U"aaaa", true}, {U"bbbb", true}, {U"cccc", false}, {U"dd", false}}, 6, 2, &r);
-    EXPECT_EQ(r.anchorRow, std::size_t(1)); // Cell 8 is in the second row of six.
+    EXPECT_EQ(r.outRow, std::size_t(1)); // Cell 8 is in the second row of six.
     lay({{U"aaaa", true}, {U"bbbb", true}, {U"cccc", false}, {U"dd", false}}, 6, 3, &r);
-    EXPECT_EQ(r.anchorRow, std::size_t(2)); // Next line starts after two rows.
+    EXPECT_EQ(r.outRow, std::size_t(2)); // Next line starts after two rows.
     lay({{U"a", false}}, 4, 5, &r);
-    EXPECT(!r.anchorFound);
+    EXPECT(!r.found);
 }
 
 TEST_CASE("layout: memory stays bounded for a very long line") {
@@ -315,8 +317,9 @@ TEST_CASE("Styles survive a reflow cell by cell") {
     EXPECT(!hasAttribute(frame.cells.row(2).data()[0].attributes, CellAttribute::Bold));
 }
 
-TEST_CASE("The live screen and the alternate screen still clip and pad") {
+TEST_CASE("With live reflow off, the live screen clips and pads; the alternate screen always does") {
     TerminalModel m(10, 3, 100);
+    m.setLiveReflow(TerminalModel::LiveReflow::Off);
     m.write(U"0123456789"); // Full live row, deferred wrap.
     m.carriageReturn();
     m.lineFeed();
@@ -325,6 +328,7 @@ TEST_CASE("The live screen and the alternate screen still clip and pad") {
     EXPECT_EQ(m.historySize(), std::size_t(0));
     EXPECT(m.cell(3, 0).codePoint == U'3');
     EXPECT(m.cell(3, 1).codePoint == U'd');
+    m.setLiveReflow(TerminalModel::LiveReflow::All);
     m.setAlternateScreen(true);
     m.write(U"ALTE");
     m.resize(6, 3);
@@ -348,14 +352,205 @@ TEST_CASE("Resizing while the alternate screen is active lays out the primary hi
     EXPECT_EQ(canon(m), before);
 }
 
-TEST_CASE("Soft-wrap flags survive a width change on the live rows") {
+TEST_CASE("Live rows: wrapped rows are one line, they follow the width both ways") {
     TerminalModel m(6, 4, 100);
-    m.write(U"abcdefghi"); // Row 0 wraps into row 1.
+    m.setLiveReflow(TerminalModel::LiveReflow::All);
+    m.write(U"abcdefghi"); // abcdef|ghi
     EXPECT(m.textRowWrapped(m.firstRetainedRow()));
-    m.resize(4, 4);
+    m.resize(4, 4); // abcd|efgh|i
     EXPECT(m.textRowWrapped(m.firstRetainedRow()));
-    m.resize(9, 4);
+    EXPECT(m.textRowWrapped(m.firstRetainedRow() + 1));
+    EXPECT(!m.textRowWrapped(m.firstRetainedRow() + 2));
+    EXPECT_EQ(m.cursor().row, 2);
+    EXPECT_EQ(m.cursor().column, 1);
+    m.resize(9, 4); // One row, the cursor behind the i; the row is full: the cursor is pending.
+    EXPECT(!m.textRowWrapped(m.firstRetainedRow()));
+    EXPECT_EQ(m.cursor().row, 0);
+    EXPECT_EQ(m.cursor().column, 8);
+    m.write(U"j"); // Written behind the i: the line goes on in the next row.
     EXPECT(m.textRowWrapped(m.firstRetainedRow()));
+    EXPECT(m.cell(0, 1).codePoint == U'j');
+}
+
+TEST_CASE("Live rows: the cursor keeps its place in its line") {
+    TerminalModel m(10, 4, 100);
+    m.setLiveReflow(TerminalModel::LiveReflow::All);
+    m.write(U"0123456789ABCDEF"); // 0123456789|ABCDEF, cursor behind F: row 1, column 6.
+    m.moveCursor(2, 1);          // On the C.
+    m.resize(4, 4);              // 0123|4567|89AB|CDEF: the C starts the fourth row.
+    EXPECT_EQ(m.cursor().row, 3);
+    EXPECT_EQ(m.cursor().column, 0);
+    EXPECT(m.cell(m.cursor().column, std::size_t(m.cursor().row)).codePoint == U'C');
+    m.resize(7, 4);
+    EXPECT(m.cell(m.cursor().column, std::size_t(m.cursor().row)).codePoint == U'C');
+    m.resize(30, 4);
+    EXPECT_EQ(m.cursor().row, 0);
+    EXPECT_EQ(m.cursor().column, 12);
+}
+
+TEST_CASE("Live rows: a cursor behind the text of a prompt line stays behind it") {
+    TerminalModel m(20, 4, 100);
+    m.setLiveReflow(TerminalModel::LiveReflow::All);
+    m.write(U"user@host:~$ "); // The blank at the end is padding to the rule, the cursor is behind it.
+    EXPECT_EQ(m.cursor().column, 13);
+    m.resize(8, 4);
+    // "user@hos|t:~$ " : the cursor is behind the blank, in the second row.
+    EXPECT_EQ(m.cursor().row, 1);
+    EXPECT_EQ(m.cursor().column, 5);
+    m.write(U"ls");
+    EXPECT(m.cell(5, 1).codePoint == U'l');
+    m.resize(30, 4);
+    EXPECT_EQ(m.cursor().row, 0);
+    EXPECT(m.cell(13, 0).codePoint == U'l');
+    EXPECT_EQ(m.cursor().column, 15);
+}
+
+TEST_CASE("Live rows: a cursor far out on an empty row does not make rows") {
+    TerminalModel m(20, 4, 100);
+    m.setLiveReflow(TerminalModel::LiveReflow::All);
+    m.moveCursor(15, 2);
+    m.resize(8, 4);
+    EXPECT_EQ(m.historySize(), std::size_t(0));
+    EXPECT_EQ(m.cursor().row, 2);
+    EXPECT(m.cursor().column <= 7);
+}
+
+TEST_CASE("Live rows: rows that no longer fit go to the history, saved rows come back") {
+    TerminalModel m(10, 3, 100);
+    m.setLiveReflow(TerminalModel::LiveReflow::All);
+    m.write(U"0123456789ABCDE\r\nxy\r\nz"); // 3 rows of text, the first line wraps: 4 rows.
+    EXPECT_EQ(m.historySize(), std::size_t(1));
+    m.resize(5, 3); // 01234|56789|ABCDE|xy|z : 5 rows, 2 in the history.
+    EXPECT_EQ(m.historySize(), std::size_t(2));
+    EXPECT(m.cell(0, 2).codePoint == U'z');
+    EXPECT_EQ(m.cursor().row, 2);
+    m.resize(40, 3); // 0123456789ABCDE|xy|z: all fit, no history, rows at the top.
+    EXPECT_EQ(m.historySize(), std::size_t(0));
+    EXPECT(m.cell(0, 0).codePoint == U'0');
+    EXPECT(m.cell(0, 1).codePoint == U'x');
+    EXPECT(m.cell(0, 2).codePoint == U'z');
+    EXPECT_EQ(m.cursor().row, 2);
+    EXPECT_EQ(m.cursor().column, 1);
+}
+
+TEST_CASE("Live rows: blank rows below the cursor are not content") {
+    TerminalModel m(10, 6, 100);
+    m.setLiveReflow(TerminalModel::LiveReflow::All);
+    m.write(U"abcdefghijkl"); // Two rows, the cursor in the second.
+    m.resize(5, 6);          // abcde|fghij|kl: three rows at the top, three blank rows below.
+    EXPECT_EQ(m.historySize(), std::size_t(0));
+    EXPECT_EQ(m.cursor().row, 2);
+    EXPECT_EQ(m.cursor().column, 2);
+    EXPECT(m.cell(0, 3).codePoint == U' ');
+}
+
+TEST_CASE("Live rows: the saved cursor follows its text") {
+    TerminalModel m(10, 4, 100);
+    m.setLiveReflow(TerminalModel::LiveReflow::All);
+    m.write(U"abcdefghijklmno");
+    m.moveCursor(2, 1);
+    m.saveCursor(); // On the "m".
+    m.moveCursor(0, 3);
+    m.resize(6, 4);
+    m.restoreCursor();
+    EXPECT(m.cell(m.cursor().column, std::size_t(m.cursor().row)).codePoint == U'm');
+}
+
+TEST_CASE("Live rows: a scrolled-back reader keeps reading the same text") {
+    TerminalModel m(20, 5, 400);
+    m.setLiveReflow(TerminalModel::LiveReflow::All);
+    for (int i = 0; i < 60; ++i) {
+        m.write(U"line-" + std::u32string(1, char32_t(U'A' + i % 26)) + U"-" + std::u32string(10, char32_t(U'a' + i % 26)));
+        m.carriageReturn();
+        m.lineFeed();
+    }
+    m.scrollBy(3);
+    m.advanceViewport(10);
+    const auto before = m.frame(16);
+    EXPECT(before.cells.rows() > 0);
+    const char32_t key = before.cells.row(0).data()[5].codePoint;
+    m.resize(11, 5);
+    m.advanceViewport(10);
+    const auto after = m.frame(16);
+    std::u32string top;
+    for (std::size_t x = 0; x < 11; ++x) top.push_back(after.cells.row(0).data()[x].codePoint);
+    EXPECT(top.find(key) != std::u32string::npos);
+    EXPECT(!m.viewport().atTail());
+}
+
+TEST_CASE("Live rows: a long content below the cursor keeps the cursor on the screen") {
+    TerminalModel m(20, 4, 100);
+    m.setLiveReflow(TerminalModel::LiveReflow::All);
+    for (int i = 0; i < 4; ++i) {
+        m.moveCursor(0, i);
+        m.write(std::u32string(20, char32_t(U'a' + i)));
+    }
+    m.moveCursor(3, 0); // Cursor on the first row, text below.
+    m.resize(3, 4);
+    EXPECT(m.cursor().row >= 0 && m.cursor().row <= 3);
+    EXPECT(m.cell(m.cursor().column, std::size_t(m.cursor().row)).codePoint == U'a');
+}
+
+TEST_CASE("Live rows: the model stays consistent under a random mix of output and sizes") {
+    std::mt19937 rng(7);
+    for (int round = 0; round < 40; ++round) {
+        TerminalModel m(8 + rng() % 40, 3 + rng() % 8, 2000);
+        m.setLiveReflow(round % 2 ? TerminalModel::LiveReflow::All : TerminalModel::LiveReflow::AboveCursor);
+    m.setLiveReflow(TerminalModel::LiveReflow::All);
+        std::string typed; // Text of the lines written, to check what the history shows.
+        for (int step = 0; step < 40; ++step) {
+            switch (rng() % 4) {
+            case 0: {
+                std::u32string l;
+                for (std::size_t k = 0, n = rng() % 70; k < n; ++k) l += char32_t(U'a' + rng() % 26);
+                m.write(l);
+                break;
+            }
+            case 1:
+                m.carriageReturn();
+                m.lineFeed();
+                break;
+            case 2:
+                m.resize(1 + rng() % 70, m.rows());
+                break;
+            default:
+                m.resize(m.columns(), 2 + rng() % 10);
+                break;
+            }
+            EXPECT(m.cursor().row >= 0 && std::size_t(m.cursor().row) < m.rows());
+            EXPECT(m.cursor().column >= 0 && std::size_t(m.cursor().column) < m.columns());
+            if (rng() % 5 == 0) m.advanceViewport(0.2);
+        }
+        m.finishReflow();
+        const auto f = m.frame(16);
+        EXPECT(f.cells.rows() <= m.rows() + 1);
+    }
+}
+
+TEST_CASE("Live rows: all the text survives any width, in order") {
+    for (const auto mode : {TerminalModel::LiveReflow::AboveCursor, TerminalModel::LiveReflow::All}) {
+    TerminalModel m(30, 6, 5000);
+    m.setLiveReflow(mode);
+    m.setLiveReflow(TerminalModel::LiveReflow::All);
+    std::string expected;
+    std::mt19937 rng(3);
+    for (int i = 0; i < 60; ++i) {
+        std::u32string l;
+        for (std::size_t k = 0, n = 1 + rng() % 90; k < n; ++k) l += char32_t(U'a' + rng() % 26);
+        l += char32_t(U'0' + i % 10);
+        for (const char32_t c : l) expected += char(c);
+        expected += "\n";
+        m.write(l);
+        m.carriageReturn();
+        m.lineFeed();
+    }
+    expected.pop_back(); // The newline before the cursor's (empty) last line is trimmed by canon.
+    for (const std::size_t w : {13u, 7u, 3u, 29u, 80u, 11u, 30u, 2u, 45u}) {
+        m.resize(w, 6);
+        m.finishReflow();
+        EXPECT_EQ(canon(m, true), expected + "\n");
+    }
+    }
 }
 
 TEST_CASE("History capacity: the oldest physical rows go, never more") {
@@ -583,6 +778,75 @@ TEST_CASE("Property: random writes and widths never break the text of the histor
         m.finishReflow();
         EXPECT_EQ(canon(m), before);
     }
+}
+
+TEST_CASE("AboveCursor (default): the rows above the cursor's line are laid out again, its own rows are clipped") {
+    TerminalModel m(10, 6, 100);
+    EXPECT(m.liveReflow() == TerminalModel::LiveReflow::AboveCursor);
+    m.write(U"0123456789ABCDE"); // Wrapped line above.
+    m.carriageReturn();
+    m.lineFeed();
+    m.write(U"pr$ ty"); // The cursor's line: one row.
+    m.resize(5, 6);
+    // Above: 01234|56789|ABCDE (3 rows). The prompt row is clipped to "promp", not joined or cut in two.
+    const auto first = m.firstRetainedRow();
+    const auto rows = m.historySize() + m.rows();
+    std::size_t promptRow = rows;
+    for (std::size_t r = 0; r < rows; ++r) {
+        if (m.textCodePoint({first + r, 0}) == std::optional<char32_t>(U'p')) promptRow = r;
+    }
+    EXPECT_EQ(promptRow, std::size_t(3));
+    EXPECT(!m.textRowWrapped(first + 3));
+    EXPECT_EQ(std::size_t(m.cursor().row), promptRow - m.historySize());
+    EXPECT_EQ(m.cursor().column, 4);
+    EXPECT(m.textRowWrapped(first + 1)); // The lines above follow the new width.
+}
+
+TEST_CASE("AboveCursor: a shell that redraws its prompt after the resize leaves no copy behind") {
+    // What bash does on SIGWINCH: carriage return, erase to the end of the line, write prompt and input again.
+    const auto count = [](TerminalModel &m, char32_t c) {
+        std::size_t n = 0;
+        const auto first = m.firstRetainedRow();
+        for (std::size_t r = 0; r < m.historySize() + m.rows(); ++r)
+            for (std::size_t x = 0; x < m.columns(); ++x)
+                if (m.textCodePoint({first + r, x}) == std::optional<char32_t>(c)) ++n;
+        return n;
+    };
+    const std::u32string line = std::u32string(29, U'P') + U"$ echo hello";
+    for (const auto mode : {TerminalModel::LiveReflow::AboveCursor, TerminalModel::LiveReflow::All}) {
+        TerminalModel m(80, 8, 100);
+        m.setLiveReflow(mode);
+        m.write(line);
+        m.resize(20, 8);
+        m.carriageReturn();
+        m.eraseLine();
+        m.write(line);
+        if (mode == TerminalModel::LiveReflow::AboveCursor) {
+            EXPECT_EQ(count(m, U'P'), std::size_t(29));
+        }
+        else {
+            EXPECT(count(m, U'P') > 29); // VTE-like behaviour shows the copy: the reason for the default.
+        }
+        // The same when widening again: the shell knows its prompt took three rows, goes up two and
+        // clears from there (it does not know about reflow).
+        m.resize(80, 8);
+        m.moveCursor(0, m.cursor().row - 2);
+        m.eraseDisplay();
+        m.write(line);
+        if (mode == TerminalModel::LiveReflow::AboveCursor) {
+            EXPECT_EQ(count(m, U'P'), std::size_t(29));
+        }
+    }
+}
+
+TEST_CASE("AboveCursor: a wrapped cursor line keeps its rows when the width grows, its flags stay") {
+    TerminalModel m(6, 5, 100);
+    m.write(U"abcdefghi"); // abcdef|ghi, cursor behind the i.
+    m.resize(12, 5);
+    EXPECT(m.textRowWrapped(m.firstRetainedRow()));
+    EXPECT(m.cell(0, 1).codePoint == U'g');
+    EXPECT_EQ(m.cursor().row, 1);
+    EXPECT_EQ(m.cursor().column, 3);
 }
 
 TEST_SUIT_END
