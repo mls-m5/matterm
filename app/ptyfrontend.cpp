@@ -475,7 +475,12 @@ int runPtyFrontend(const char *font,
     std::string nextCwd;
     // Where a new daemon terminal starts: the saved folder, else the folder of the pane in focus
     // (as the daemon sees it), else this program's folder.
-    std::function<std::string()> daemonCwd;
+    // Replaced below once the probe exists; the first pane is made before that.
+    std::function<std::string()> daemonCwd = [] {
+        std::error_code ec;
+        const auto here = std::filesystem::current_path(ec);
+        return ec ? std::string() : here.string();
+    };
     // The first pane is made before SDL and its threads exist (fork); later ones
     // are made on demand, see docs/TABS_PLAN.md.
     Space workspace([&]() -> std::unique_ptr<NativePane> {
