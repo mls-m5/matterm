@@ -239,3 +239,17 @@ Open items noted by the owner:
 - The scrollbar of the left pane (in the divider gutter) is hard to see: in the browser
   run of 2026-11-22 it is a thin sliver (about 3 px) next to the divider and takes
   the divider's grey, while the pane at the window edge has the full 12 px bar.
+
+### Naming a tab (owner request, 2026-11-22)
+
+- A tab has an optional **user title**. Shown title = user title, else the title the
+  program set (OSC 0/2, already sanitized by the strip), else "Tab N". An empty input
+  clears the user title and returns to the automatic one.
+- Ways to set it: double-click on the tab (an inline text input in the strip, Enter
+  accepts, Esc cancels); prefix `,` in the browser (as in tmux); a "Rename tab" entry
+  in the command palette and the mouse menu; a desktop shortcut (F2 on the tab).
+- Stored in the layout snapshot (`LayoutSnapshot`), so it survives a reload. It is
+  untrusted text on restore: same limits and sanitizing as program titles, length cap.
+- Needs: a `RenameTab` command with a text argument (the palette's text input is the
+  first widget that produces it), a title field in `Workspace`'s tab, the snapshot
+  format change (bump its version, keep reading the old one).
