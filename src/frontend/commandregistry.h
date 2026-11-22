@@ -123,26 +123,30 @@ struct RankedEntry {
 };
 
 // The entries for a query, best first; with an empty query all entries in list order.
-// Searches the name first, then the id and the description at a lower score.
+// Searches the names and ids; the descriptions only when nothing else matches.
 inline std::vector<RankedEntry> searchCommands(const std::vector<CommandEntry> &entries,
                                                std::string_view query) {
-    std::vector<RankedEntry> found;
+    std::vector<RankedEntry> named, described;
     for (const auto &e : entries) {
         RankedEntry r{&e, fuzzyMatch(query, e.name)};
-        if (!r.match.matched) {
-            auto other = fuzzyMatch(query, e.id);
-            if (!other.matched) other = fuzzyMatch(query, e.description);
-            if (!other.matched) continue;
-            r.match = other;
-            r.match.score -= 50;
-            r.match.offsets.clear();
+        if (r.match.matched) {
+            named.push_back(std::move(r));
+            continue;
         }
-        found.push_back(std::move(r));
+        auto other = fuzzyMatch(query, e.id);
+        const bool byId = other.matched;
+        if (!other.matched) other = fuzzyMatch(query, e.description);
+        if (!other.matched) continue;
+        r.match = other;
+        r.match.offsets.clear();
+        (byId ? named : described).push_back(std::move(r));
     }
+    // Descriptions only help when no name or id matches: otherwise they add noise.
+    auto &found = named.empty() ? described : named;
     std::stable_sort(found.begin(), found.end(), [](const RankedEntry &a, const RankedEntry &b) {
         return a.match.score > b.match.score;
     });
-    return found;
+    return std::move(found);
 }
 
 } // namespace frontend

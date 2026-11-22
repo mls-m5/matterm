@@ -113,6 +113,9 @@ TEST_CASE("Search: forgiving, ranked, and the extra actions are included") {
     EXPECT_EQ(first(all, "zzzz"), std::string("<none>"));
     EXPECT_EQ(searchCommands(all, "").size(), all.size()); // empty: everything, list order
     EXPECT_EQ(searchCommands(all, "").front().entry->id, std::string("tab.new"));
+    // A query that matches a name does not drag in entries that match only a description.
+    const auto nt = searchCommands(all, "new tab");
+    for (const auto &r : nt) EXPECT(r.entry->id == "tab.new" || r.entry->id == "tab.rename" || r.entry->id.find("tab") != std::string::npos);
     // Matched in the description only: still found, ranked below name matches.
     const auto r = searchCommands(all, "fresh terminal");
     EXPECT(!r.empty());
