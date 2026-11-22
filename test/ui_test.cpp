@@ -1,6 +1,7 @@
 #include "mls-unit-test/unittest.h"
 #include "ui/commandpalette.h"
 #include "ui/dialogs.h"
+#include "ui/shortcuts.h"
 
 #include <string>
 #include <vector>
@@ -189,7 +190,7 @@ TEST_CASE("The palette draws its query, the matches and the keys, and a cursor")
     EXPECT_EQ(cursor.column, 3 + 3);
     const auto first = rowText(cells, 2);
     EXPECT(first.find("New tab") != std::string::npos);
-    EXPECT(first.find("Ctrl+B C") != std::string::npos); // Its key, right aligned.
+    EXPECT(first.find("Ctrl+B c") != std::string::npos); // Its key, right aligned.
     // The selected row stands out from the next one.
     EXPECT(cells.at(2, 2).background.b != cells.at(2, 3).background.b ||
            cells.at(2, 2).background.g != cells.at(2, 3).background.g);
@@ -358,5 +359,109 @@ TEST_CASE("The wheel scrolls the list") {
         EXPECT(rowText(c2, 2).find("No saved sessions") != std::string::npos);
         EXPECT(!none.key({keys::Enter, false, false, false}).close);
     }
+
+TEST_CASE("The palette shows each command's keys, also in a narrow window, and cuts the name instead") {
+    for (const bool desktop : {true, false}) {
+        CommandPalette p(buildCommandRegistry(), desktop);
+        const auto size = p.wanted(40, 20);
+        p.resize(size.columns, size.rows);
+        CellBuffer cells(std::size_t(size.columns), std::size_t(size.rows));
+        CursorState cursor;
+        p.render(cells, cursor);
+        int withKeys = 0;
+        for (int row = 2; row < size.rows - 1; ++row) {
+            const auto text = rowText(cells, row);
+            if (text.find("Ctrl+") != std::string::npos) ++withKeys;
+        }
+        EXPECT(withKeys >= 5);
+    }
+    // Wide enough for everything: "Keyboard shortcuts" and its keys on one line.
+    CommandPalette p(buildCommandRegistry(), true);
+    p.resize(64, 12);
+    for (const char c : std::string("keyboard sh")) p.key({c, false, false, false});
+    CellBuffer cells(64, 12);
+    CursorState cursor;
+    p.render(cells, cursor);
+    EXPECT(rowText(cells, 2).find("Keyboard shortcuts") != std::string::npos);
+    EXPECT(rowText(cells, 2).find("Ctrl+Shift+H") != std::string::npos);
+}
+
+TEST_CASE("The shortcut view lists commands with desktop and prefix keys, scrolls and closes") {
+    ShortcutsView v(buildCommandRegistry(), true, true);
+    const auto size = v.wanted(80, 24);
+    v.resize(size.columns, size.rows);
+    CellBuffer cells(std::size_t(size.columns), std::size_t(size.rows));
+    CursorState cursor;
+    v.render(cells, cursor);
+    EXPECT(rowText(cells, 1).find("Keyboard shortcuts") != std::string::npos);
+    std::string all;
+    for (int row = 2; row < size.rows - 1; ++row) all += rowText(cells, row) + "\n";
+    EXPECT(all.find("New tab") != std::string::npos);
+    EXPECT(all.find("Ctrl+Shift+T") != std::string::npos);
+    EXPECT(all.find("Ctrl+B c") != std::string::npos);
+    EXPECT(v.rowCount() > std::size_t(size.rows - 3)); // more than fits: it scrolls
+    v.key({keys::PageDown, false, false, false});
+    EXPECT(v.firstVisible() > 0);
+    // The last page holds copy mode.
+    v.key({keys::End, false, false, false});
+    v.render(cells, cursor);
+    all.clear();
+    for (int row = 2; row < size.rows - 1; ++row) all += rowText(cells, row) + "\n";
+    EXPECT(all.find("Leave") != std::string::npos);
+    v.wheel(1);
+    EXPECT(!v.key({'x', false, false, false}).close);
+    EXPECT(v.key({keys::Escape, false, false, false}).close);
+    EXPECT(ShortcutsView(buildCommandRegistry(), true, true).key({'q', false, false, false}).close);
+    // Without desktop keys only prefix ones are listed.
+    ShortcutsView prefixOnly(buildCommandRegistry(), false, true);
+    for (const auto &row : shortcutRows(buildCommandRegistry(), false, true)) {
+        EXPECT(row.desktop.empty());
+    }
+    // A tiny window never breaks it.
+    for (int c = 1; c <= 20; ++c) {
+        for (int r = 1; r <= 8; ++r) {
+            ShortcutsView s(buildCommandRegistry(), true, true);
+            const auto sz = s.wanted(c, r);
+            s.resize(sz.columns, sz.rows);
+            CellBuffer grid(std::size_t(sz.columns), std::size_t(sz.rows));
+            CursorState cs;
+            s.render(grid, cs);
+            s.key({keys::PageDown, false, false, false});
+            s.render(grid, cs);
+        }
+    }
+}
+
+TEST_CASE("The which-key box lists the keys after the prefix, one line per command") {
+    const auto lines = whichKeyLines(PrefixKeys::Config{});
+    auto has = [&](const std::string &text) {
+        for (const auto &l : lines) {
+            if (l == text) return true;
+        }
+        return false;
+    };
+    EXPECT(has("c  New tab"));
+    EXPECT(has("1-0  Go to tab"));
+    EXPECT(has("?  Keyboard shortcuts"));
+    EXPECT(has("%  Split side by side"));
+    WhichKey box{PrefixKeys::Config{}};
+    const auto size = box.wanted(80, 24);
+    box.resize(size.columns, size.rows);
+    CellBuffer cells(std::size_t(size.columns), std::size_t(size.rows));
+    CursorState cursor;
+    box.render(cells, cursor);
+    EXPECT(rowText(cells, 1).find("Ctrl+B then") != std::string::npos);
+    EXPECT(rowText(cells, 2).find("New tab") != std::string::npos);
+    for (int c = 1; c <= 20; ++c) {
+        for (int r = 1; r <= 8; ++r) {
+            WhichKey w{PrefixKeys::Config{}};
+            const auto sz = w.wanted(c, r);
+            w.resize(sz.columns, sz.rows);
+            CellBuffer grid(std::size_t(sz.columns), std::size_t(sz.rows));
+            CursorState cs;
+            w.render(grid, cs);
+        }
+    }
+}
 
 TEST_SUIT_END

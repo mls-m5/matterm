@@ -45,6 +45,8 @@ private Unix socket, so they survive closing the window or a crash of the GUI.
 
 - The socket is `$XDG_RUNTIME_DIR/matterm/daemon.sock` (directory 0700, socket 0600, only your
   user can connect); the daemon runs your `$SHELL` and ends itself after 60 s with nothing in it.
+- Ctrl+Shift+H (browser: Ctrl+B ?) lists all keyboard shortcuts; in the browser, waiting half a
+  second after Ctrl+B shows which keys can follow.
 - Ctrl+Shift+P opens the command palette: **Daemon status**, **Stop daemon** (asks, and says how
   many programs end), **Quit and keep running** (closes the window, the programs stay).
   Closing a pane or quitting normally ends its terminal; SIGTERM/SIGHUP and *Quit and keep

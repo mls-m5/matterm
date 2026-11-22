@@ -498,3 +498,21 @@ retained text; the program gets no keys while the mode is on, and keeps running.
   feed it the keys that would have gone to the program and draw `apply()` + the badge.
 - **Scrolling feel:** the wheel and touch scroll in pixels (a view may rest inside a row);
   `--snap-scroll` / `?snap=1` make it settle on whole rows after the input pauses.
+
+## 13. Keyboard shortcut help and which-key (agent3)
+
+- **Help view:** `ui::ShortcutsView` (`src/frontend/ui/shortcuts.h`), a scrollable layer listing
+  every command that has keys, desktop and prefix columns, then Copy and Paste and the fixed keys
+  of copy mode. Built from `buildCommandRegistry()`, so it cannot disagree with the keys. Opened
+  by the palette entry **Keyboard shortcuts** (`app.shortcuts`), Ctrl+B `?` (browser) and
+  Ctrl+Shift+H (native, `Command::ShowShortcuts`); `WorkspaceView` creates the layer itself.
+  Up/Down/PgUp/PgDn/Home/End/wheel scroll, Esc, q or Enter close.
+- **Which-key:** `ViewConfig::whichKeyDelayMs` (500, 0 = never) after the prefix key,
+  `WorkspaceView::plan()` adds a small non-interactive layer at the bottom right listing the keys
+  that can follow (`ui::WhichKey`, from the same bindings). `tick()` reports `changed` when it
+  appears; `nextWakeMs()` includes the moment. It goes away with the next key or the prefix
+  timeout.
+- **Palette keys:** a long name is cut so that the keys are always shown; the key colour is
+  lighter. Prefix keys read "Ctrl+B c" (the second key as typed), not "Ctrl+B C".
+- **Daemon fallback (native):** when the daemon was wanted and cannot start, the first terminal
+  prints a two-line note (`daemonFallbackNote`) before the shell, besides stderr.

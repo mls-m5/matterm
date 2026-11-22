@@ -99,9 +99,12 @@ public:
             const auto &r = results_[index];
             const auto keysText = keyString(*r.entry);
             const int keyWidth = int(keysText.size());
-            const bool showKeys = keyWidth > 0 && int(r.entry->name.size()) + 3 + keyWidth <= width;
+            // The keys win over the end of a long name: a name is cut, the keys are not.
+            const bool showKeys = keyWidth > 0 && keyWidth + 8 <= width;
+            const int nameLimit = showKeys ? std::min(int(r.entry->name.size()), width - keyWidth - 3)
+                                           : int(r.entry->name.size());
             std::size_t offset = 0;
-            for (std::size_t i = 0; i < r.entry->name.size() && 2 + int(i) < columns_ - 1; ++i) {
+            for (std::size_t i = 0; int(i) < nameLimit && 2 + int(i) < columns_ - 1; ++i) {
                 const bool hit = offset < r.match.offsets.size() && r.match.offsets[offset] == i;
                 if (hit) {
                     ++offset;
@@ -208,7 +211,7 @@ private:
     static constexpr Rgb8 kBackground{28, 32, 40};
     static constexpr Rgb8 kSelected{52, 66, 98};
     static constexpr Rgb8 kFg{230, 230, 230};
-    static constexpr Rgb8 kDim{140, 148, 160};
+    static constexpr Rgb8 kDim{170, 178, 190};
     static constexpr Rgb8 kAccent{120, 190, 255};
 
     static void put(CellBuffer &cells, int x, int y, std::u32string_view text, Rgb8 fg, Rgb8 bg) {

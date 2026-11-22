@@ -26,6 +26,7 @@
 #include "tabtypes.h"
 #include "terminalview.h"
 #include "ui/layer.h"
+#include "ui/shortcuts.h"
 #include "workspace.h"
 
 #include <algorithm>
@@ -55,6 +56,7 @@ struct ViewConfig {
     bool prefixKeys = true;      // Ctrl+B ... (browser)
     bool desktopShortcuts = true; // Ctrl+Shift+T ... (native)
     PrefixKeys::Config prefix;
+    std::int64_t whichKeyDelayMs = 500; // after the prefix key, a box lists what can follow (0: never)
     int touchSlop = 16;          // extra pixels around dividers and below the strip for a finger
     // Windows narrower than this many columns show only the focused pane of a
     // tab (0: never); the other panes keep running and come back when the window
@@ -226,6 +228,7 @@ public:
                 lp.cells = std::move(cells);
                 out.layers.push_back(std::move(lp));
             }
+            if (whichKey_ && prefix_.waiting() && layers_.empty()) out.layers.push_back(whichKeyPlan());
         }
         return out;
     }
@@ -302,6 +305,10 @@ public:
             return r;
         }
         const KeyOutcome o = prefix_.feed(chord, nowMs);
+        if (whichKey_ && !prefix_.waiting()) {
+            whichKey_ = false;
+            r.changed = true;
+        }
         r.forwardPrefix = o.forwardPrefix;
         r.forwardKey = o.forwardKey;
         if (o.command) run(*o.command, r);
@@ -311,11 +318,17 @@ public:
     KeyResult tick(std::int64_t nowMs) {
         KeyResult r;
         r.forwardPrefix = prefix_.tick(nowMs).forwardPrefix;
+        const bool show = prefix_.waiting() && config_.whichKeyDelayMs > 0 && nowMs >= whichKeyAt();
+        if (show != whichKey_) {
+            whichKey_ = show;
+            r.changed = true;
+        }
         return r;
     }
     // When tick() or sync() next has something to do (prefix deadline, drag throttle).
     std::optional<std::int64_t> nextWakeMs() const {
         std::optional<std::int64_t> t = prefix_.deadline();
+        if (t && !whichKey_ && config_.whichKeyDelayMs > 0) t = std::min(*t, whichKeyAt());
         if (pending_ && drag_ == Drag::Divider) {
             const std::int64_t due = lastSyncMs_ + config_.resizeIntervalMs;
             t = t ? std::min(*t, due) : due;
@@ -497,6 +510,7 @@ public:
 
     // A key press is pending after the prefix key (the next printable key is a command).
     bool prefixWaiting() const { return prefix_.waiting(); }
+    bool whichKeyShown() const { return whichKey_ && prefix_.waiting(); }
 
     // The pane under a point and where in it, without changing anything (hover, wheel).
     std::optional<PaneMouse> pointerPane(int x, int y) const {
@@ -585,6 +599,35 @@ public:
 private:
     enum class Drag { None, Divider, Scrollbar, Selecting };
 
+    // When the which-key box appears for the prefix now waiting.
+    std::int64_t whichKeyAt() const {
+        return prefix_.deadline().value_or(0) - config_.prefix.timeoutMs + config_.whichKeyDelayMs;
+    }
+    void showShortcuts() {
+        // Desktop keys only where they work; the prefix ones likewise.
+        layers_.push_back(std::make_unique<ui::ShortcutsView>(buildCommandRegistry(config_.prefix),
+                                                              config_.desktopShortcuts, config_.prefixKeys));
+    }
+    // The which-key box: bottom right, above the last row.
+    LayerPlan whichKeyPlan() const {
+        ui::WhichKey box(config_.prefix);
+        const int windowColumns = std::max(metrics_.width / metrics_.cellWidth, 1);
+        const int windowRows = std::max(metrics_.height / metrics_.cellHeight, 1);
+        const ui::CellSize size = box.wanted(windowColumns, windowRows);
+        const int columns = std::clamp(size.columns, 1, windowColumns);
+        const int rows = std::clamp(size.rows, 1, windowRows);
+        box.resize(columns, rows);
+        auto cells = std::make_shared<CellBuffer>(std::size_t(columns), std::size_t(rows));
+        LayerPlan lp;
+        lp.cursor.visible = false;
+        box.render(*cells, lp.cursor);
+        lp.cells = std::move(cells);
+        lp.rect = {(windowColumns - columns) * metrics_.cellWidth,
+                   std::max(windowRows - rows - 1, 0) * metrics_.cellHeight, columns * metrics_.cellWidth,
+                   rows * metrics_.cellHeight};
+        return lp;
+    }
+
     struct Placed {
         PixelRect rect;
         int columns = 0;
@@ -620,6 +663,10 @@ private:
         }
         if (o.call->command == Command::CopyMode) {
             r.copyMode = true;
+            return;
+        }
+        if (o.call->command == Command::ShowShortcuts) {
+            showShortcuts();
             return;
         }
         applyCall(*o.call, r);
@@ -755,6 +802,12 @@ private:
             r.commands.push_back(call);
             return;
         }
+        if (call.command == Command::ShowShortcuts) {
+            showShortcuts();
+            r.changed = true;
+            r.commands.push_back(call);
+            return;
+        }
         if (call.command == Command::CloseTab || call.command == Command::ClosePane) {
             auto req = call.command == Command::CloseTab ? guardTab(workspace_.activeIndex())
                                                          : guardPane(workspace_.focusedPaneId());
@@ -872,6 +925,7 @@ private:
     bool probeShared_ = false;
     std::optional<CloseRequest> pendingClose_;
     ViewConfig config_;
+    bool whichKey_ = false; // the which-key box is showing
     mutable std::vector<std::unique_ptr<ui::Layer>> layers_; // bottom first; resized by place()
     PrefixKeys prefix_;
     WindowMetrics metrics_;

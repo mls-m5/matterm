@@ -220,6 +220,7 @@ public:
             return focusToward(FocusDirection::Down);
         case Command::OpenPalette:
         case Command::CopyMode:
+        case Command::ShowShortcuts:
             return Outcome::Ignored; // The owner of the view handles it.
         case Command::EvenOut:
             if (tabs_.empty()) return Outcome::Ignored;

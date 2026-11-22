@@ -82,6 +82,8 @@ inline const std::vector<Info> &layoutInfo() {
          "Search all commands and run one"},
         {Command::CopyMode, 0, "pane.copy-mode", "Copy / scroll mode",
          "Move a cursor through the text with the keyboard, select and copy it"},
+        {Command::ShowShortcuts, 0, "app.shortcuts", "Keyboard shortcuts",
+         "List every command with its keys"},
     };
     return table;
 }
@@ -96,8 +98,12 @@ inline std::vector<CommandEntry> buildCommandRegistry(
     auto keysFor = [&](Command c, int arg, CommandEntry &e) {
         for (const auto &b : prefix.bindings) {
             if (b.call.command == c && b.call.argument == arg) {
-                e.prefixKeys.push_back(formatChord(prefix.prefix) + " " +
-                                       formatChord({b.key, b.ctrl, false, false}));
+                // The key after the prefix is typed as it is: "Ctrl+B c", not "Ctrl+B C".
+                auto second = formatChord({b.key, b.ctrl, false, false});
+                if (!b.ctrl && second.size() == 1 && second[0] >= 'A' && second[0] <= 'Z') {
+                    second[0] = char(second[0] - 'A' + 'a');
+                }
+                e.prefixKeys.push_back(formatChord(prefix.prefix) + " " + second);
             }
         }
         for (const auto &d : desktopShortcuts()) {

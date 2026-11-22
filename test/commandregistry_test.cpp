@@ -65,7 +65,7 @@ TEST_CASE("Registry: names, ids unique, keys come from the binding tables") {
     EXPECT(tab);
     EXPECT(tab->call.has_value());
     EXPECT_EQ(tab->prefixKeys.size(), 1u);
-    EXPECT_EQ(tab->prefixKeys[0], std::string("Ctrl+B C"));
+    EXPECT_EQ(tab->prefixKeys[0], std::string("Ctrl+B c"));
     EXPECT_EQ(tab->desktopKeys.size(), 1u);
     EXPECT_EQ(tab->desktopKeys[0], std::string("Ctrl+Shift+T"));
     const auto *split = byId(all, "pane.split-right");

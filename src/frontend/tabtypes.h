@@ -68,6 +68,7 @@ enum class Command {
     FocusDown,
     EvenOut, // snap every split to whole cells
     OpenPalette, // the command palette (an overlay the owner of the view creates)
+    ShowShortcuts, // the keyboard shortcut help view (the view creates it itself)
     CopyMode,    // copy / scroll mode in the focused pane (the owner of the view enters it)
 };
 

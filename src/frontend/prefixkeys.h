@@ -83,6 +83,7 @@ inline std::vector<PrefixBinding> defaultPrefixBindings() {
     add('=', Command::EvenOut);
     add(':', Command::OpenPalette);
     add('[', Command::CopyMode);
+    add('?', Command::ShowShortcuts);
     return b;
 }
 
@@ -205,6 +206,7 @@ inline const std::vector<DesktopShortcut> &desktopShortcuts() {
         layout({'e', false, yes, yes}, Command::EvenOut);
         layout({'p', yes, yes, false}, Command::OpenPalette);
         layout({' ', yes, yes, false}, Command::CopyMode);
+        layout({'h', yes, yes, false}, Command::ShowShortcuts);
         return t;
     }();
     return table;

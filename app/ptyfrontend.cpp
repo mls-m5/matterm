@@ -453,6 +453,7 @@ int runPtyFrontend(const char *font,
     }
     // The daemon is found (or started) before SDL and its threads exist.
     const std::string daemonPath = daemonSocket(daemonOptions.socketPath);
+    std::optional<std::string> daemonFallbackReason; // set: the daemon was wanted and is not there
     if (daemonOptions.enabled) {
         const auto error = ensureDaemon(daemonOptions.socketPath);
         if (!error.empty()) {
@@ -461,6 +462,7 @@ int runPtyFrontend(const char *font,
             }
             std::cerr << "matterm: no daemon (" << error << "); running the programs here\n";
             daemonOptions.enabled = false;
+            daemonFallbackReason = error;
         }
     }
     Uint64 lastSharedPoll = 0;
@@ -502,6 +504,12 @@ int runPtyFrontend(const char *font,
         return pane;
     });
     workspace.apply(Command::NewTab);
+    if (daemonFallbackReason) {
+        // Said in the first terminal, where it is seen (the window title and stderr are not enough).
+        if (NativePane *first = workspace.focusedPane()) {
+            first->v.model().write(daemonFallbackNote(*daemonFallbackReason));
+        }
+    }
     SdlRuntime runtime;
     {
         // After SDL_Init, which installs its own SIGTERM handler (a plain quit): ours saves first.

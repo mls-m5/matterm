@@ -31,6 +31,27 @@ inline constexpr const char *shareTab = "share.tab";
 inline constexpr const char *shareTabStop = "share.tab.stop";
 } // namespace daemonaction
 
+// What the first terminal says when the app wanted the daemon and could not have it, so it
+// is visible in the window and not only on stderr. Plain text, one line per sentence.
+inline std::u32string daemonFallbackNote(const std::string &error) {
+    std::string clean;
+    for (const char c : error) {
+        clean += (static_cast<unsigned char>(c) < 32 || c == 127) ? ' ' : c;
+    }
+    if (clean.size() > 160) {
+        clean.resize(160);
+    }
+    std::string text = "matterm: the background daemon could not be started" +
+                       (clean.empty() ? std::string() : " (" + clean + ")") + ".\r\n" +
+                       "matterm: terminals run in this window only and end with it. "
+                       "--no-daemon hides this note.\r\n";
+    std::u32string out;
+    for (const char c : text) {
+        out += static_cast<char32_t>(static_cast<unsigned char>(c));
+    }
+    return out;
+}
+
 // Entries for the palette's `extra` list. Without a daemon (the default) there
 // are none, so nobody is offered an action that cannot work.
 inline std::vector<CommandEntry> daemonCommandEntries(bool usingDaemon) {

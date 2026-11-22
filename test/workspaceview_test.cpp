@@ -817,4 +817,59 @@ TEST_CASE("The prefix and [ ask the owner to enter copy mode; so does the deskto
     EXPECT(r.copyMode);
 }
 
+TEST_CASE("Keyboard shortcuts: Ctrl+B ?, Ctrl+Shift+H and the palette open the view; Esc closes it") {
+    Rig r;
+    r.view.key(kPrefix, 0);
+    auto k = r.view.key({'?', false, true, false}, 10);
+    EXPECT(k.changed && r.view.hasLayer());
+    EXPECT(r.view.plan().layers.size() == 1);
+    EXPECT(r.view.key({keys::Escape, false, false, false}, 20).changed);
+    EXPECT(!r.view.hasLayer());
+    EXPECT(r.view.key({'h', true, true, false}, 30).changed && r.view.hasLayer());
+    r.view.closeLayers();
+    r.view.pushLayer(std::make_unique<ui::CommandPalette>(buildCommandRegistry(ViewConfig{}.prefix)));
+    for (const char c : std::string("keyboard shortcuts")) r.view.key({c, false, false, false}, 40);
+    r.view.key({keys::Enter, false, false, false}, 41);
+    EXPECT(r.view.hasLayer()); // the palette closed, the help view is there
+    EXPECT(r.view.plan().layers.size() == 1);
+    EXPECT(!r.view.key({'x', false, false, false}, 50).forwardKey); // it takes the keys
+}
+
+TEST_CASE("Which-key: the box appears half a second after the prefix and goes with it") {
+    Rig r;
+    r.view.key(kPrefix, 1000);
+    EXPECT(!r.view.whichKeyShown());
+    EXPECT_EQ(r.view.nextWakeMs().value(), std::int64_t(1500)); // the box is next, then the timeout
+    EXPECT(!r.view.tick(1400).changed);
+    EXPECT(r.view.plan().layers.empty());
+    const auto shown = r.view.tick(1500);
+    EXPECT(shown.changed && !shown.forwardPrefix);
+    EXPECT(r.view.whichKeyShown());
+    const auto plan = r.view.plan();
+    EXPECT_EQ(plan.layers.size(), std::size_t(1));
+    EXPECT(plan.layers[0].rect.x + plan.layers[0].rect.w <= 1200);
+    EXPECT(plan.layers[0].rect.y + plan.layers[0].rect.h <= 800);
+    EXPECT_EQ(r.view.nextWakeMs().value(), std::int64_t(3000)); // only the timeout is left
+    EXPECT(!r.view.tick(1600).changed);
+    // A bound key runs the command and hides the box (a redraw is due).
+    const auto k = r.view.key({'c', false, false, false}, 1700);
+    EXPECT(k.changed && !r.view.whichKeyShown());
+    EXPECT(r.view.plan().layers.empty());
+    // The timeout hides it too.
+    r.view.key(kPrefix, 5000);
+    r.view.tick(5600);
+    EXPECT(r.view.whichKeyShown());
+    EXPECT(r.view.tick(7000).forwardPrefix);
+    EXPECT(!r.view.whichKeyShown());
+    // Off when the delay is 0.
+    Space space([] { return std::make_unique<Pane>(); });
+    ViewConfig c;
+    c.whichKeyDelayMs = 0;
+    View v(space, c);
+    v.setWindow({800, 480, 8, 16});
+    v.key(kPrefix, 0);
+    v.tick(900);
+    EXPECT(!v.whichKeyShown());
+}
+
 TEST_SUIT_END

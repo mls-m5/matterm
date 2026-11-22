@@ -5,6 +5,17 @@ using namespace frontend;
 
 TEST_SUIT_BEGIN(DaemonCommands)
 
+TEST_CASE("The fallback note names the reason on plain lines") {
+    const auto note = daemonFallbackNote("cannot connect\x1b[31m\n");
+    std::string s;
+    for (const auto c : note) s += c < 128 ? char(c) : '?';
+    EXPECT(s.find("could not be started (cannot connect [31m )") != std::string::npos);
+    EXPECT(s.find("\x1b") == std::string::npos);
+    EXPECT(s.find("end with it") != std::string::npos);
+    EXPECT(daemonFallbackNote("").size() > 20);
+    EXPECT(daemonFallbackNote(std::string(1000, 'x')).size() < 400);
+}
+
 TEST_CASE("The palette offers the daemon actions only when a daemon is used") {
     EXPECT(daemonCommandEntries(false).empty());
     const auto offered = daemonCommandEntries(true);

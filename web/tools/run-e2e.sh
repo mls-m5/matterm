@@ -23,6 +23,7 @@ node "$here/e2e-link.js" "$url" "$password"
 node "$here/e2e-lifecycle.js" "$url" "$password" "$out"
 node "$here/e2e-touch.js" "$url" "$out/touch.png" "$password"
 node "$here/e2e-gestures.js" "$url" "$password" "$out/gestures.png"
+node "$here/e2e-shortcuts.js" "$url" "$password" "$out"
 node "$here/e2e-frame.js" "$url" "$password" "$out"
 # Tabs and panes: a second server that keeps its terminals (persistent
 # sessions), so that a reload can attach to them again.
