@@ -43,17 +43,24 @@ async function samples(page, n, gap, out, name) {
 (async () => {
   const [url, pw, out] = process.argv.slice(2);
   const browser = await chromium.launch({ args: ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist','--no-sandbox'] });
-  const page = await open(browser, url, pw);
+  const icon = await open(browser, url, pw); // default: a static icon
+  await setup(icon);
+  const iconWorking = await samples(icon, 3, 1000, out, 'icon-working');
+  check('default: the working tab shows a static icon (no alternating)', new Set(iconWorking).size === 1, JSON.stringify(iconWorking));
+  await icon.waitForTimeout(9000);
+  const iconCalm = await samples(icon, 1, 0, out, 'icon-calm');
+  check('the icon goes away after silence', iconCalm[0] !== iconWorking[0], JSON.stringify([iconWorking[0], iconCalm[0]]));
+  const page = await open(browser, url + '?tabactivity=pulse', pw);
   await setup(page);
   const working = await samples(page, 4, 1000, out, 'pulse-working'); // ~3 s apart: both phases
   check('a working tab alternates its colour', new Set(working).size >= 2, JSON.stringify(working));
   await page.waitForTimeout(9000); // the loop ends 14 s after typing; 3 s later nothing works
   const calm = await samples(page, 3, 1100, out, 'pulse-calm');
   check('after silence the strip rests', new Set(calm).size === 1, JSON.stringify(calm));
-  const off = await open(browser, url + '?pulse=0', pw);
+  const off = await open(browser, url + '?tabactivity=off', pw);
   await setup(off);
   const none = await samples(off, 4, 1000, out, 'pulse-off');
-  check('?pulse=0: no alternating', new Set(none).size === 1, JSON.stringify(none));
+  check('?tabactivity=off: no alternating, no icon', new Set(none).size === 1, JSON.stringify(none));
   await browser.close();
   console.log(fails.length ? `${fails.length} failed` : 'all passed');
   process.exit(fails.length ? 1 : 0);
