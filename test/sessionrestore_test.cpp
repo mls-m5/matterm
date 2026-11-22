@@ -194,8 +194,16 @@ TEST_CASE("Policy: Save as suggests the tab's name, or the saved name once there
     EXPECT_EQ(p.suggestion(""), std::string("default"));
     EXPECT_EQ(p.suggestion("???"), std::string("default"));
     EXPECT_EQ(p.suggestion(std::string(200, 'a')).size(), std::size_t(SessionSnapshot::kMaxName));
+    EXPECT(p.shouldSave(SessionPolicy::Event::TabNamed)); // Saving by itself does not fix the name.
+    EXPECT_EQ(p.suggestion("build server"), std::string("build-server"));
+    EXPECT(!p.named());
     p.adopt("work");
+    EXPECT(p.named());
     EXPECT_EQ(p.suggestion("build server"), std::string("work"));
+    p.forget();
+    EXPECT(!p.persistent() && !p.named());
+    EXPECT(!p.shouldSave(SessionPolicy::Event::Shutdown));
+    EXPECT_EQ(p.suggestion("other"), std::string("other"));
 }
 
 TEST_CASE("A user title wins over the program's title in the strip; empty clears it") {

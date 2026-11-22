@@ -526,6 +526,13 @@ retained text; the program gets no keys while the mode is on, and keeps running.
   (`attachCommandEntries`, `attachItems`, `takeOverDialog`, `attachAllDialog`; tests in
   `test/daemoncommands_test.cpp`); the app glue (`daemonSessions`, `attachSession`) is in
   `app/ptyfrontend.cpp` and is not covered by a test (needs a window).
-- **Session names:** *Save session as...* suggests the saved name once the session has one, else
-  the active tab's name made into a file name (`SessionPolicy::suggestion`), else "default". A
-  saved session's name is shown in the window title ("| session work").
+- **Session names:** a window's session is named after its first tab (made into a file name) until
+  the owner chooses a name with *Save session as...* or opens a saved session; "default" while
+  that tab has none. It is saved when a tab is named and at quit, and the file follows the first
+  tab's name (the file of the old automatic name is removed). *Save session as...* offers the
+  current name; the window title shows "| session <name>" once a session is being saved
+  (`SessionPolicy::suggestion`, `named()`, `forget()`).
+- **Delete session...** (native palette): a list of the saved sessions, then a question (Cancel is
+  the default; it says so when it is the session this window saves into, which then is not
+  written again until a tab is named). `src/frontend/sessioncommands.h`. The browser has no
+  saved sessions, so nothing there.

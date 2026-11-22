@@ -3,6 +3,7 @@
 #include "cellbuffer.h"
 #include "cursorglide.h"
 #include "daemoncommands.h"
+#include "sessioncommands.h"
 #include "daemonclient.h"
 #include "daemonlink.h"
 #include "inputencoder.h"
@@ -855,6 +856,11 @@ int runPtyFrontend(const char *font,
         }
     };
     // The window's session as it is now. Screen text only for a shutdown checkpoint.
+    // This window's session: the owner's choice, else the name of the first tab.
+    const auto sessionName = [&] {
+        return sessionPolicy.suggestion(workspace.tabCount() > 0 ? workspace.userTitle(0) : std::string());
+    };
+    std::string autoSavedName; // The file this window wrote by itself (not chosen by the owner).
     const auto saveSession = [&](const std::string &name, bool withText) {
         const auto snapshot = captureSession(
             workspace, name, std::int64_t(std::time(nullptr)), [&](PaneId, const NativePane &pane) {
@@ -876,6 +882,18 @@ int runPtyFrontend(const char *font,
             return false;
         }
         return true;
+    };
+    // Writes this window's session under its name (see sessionName). A name the owner did not
+    // choose follows the first tab: the file of the old name goes away.
+    const auto autoSave = [&](bool withText) {
+        const std::string name = sessionName();
+        if (!sessionPolicy.named() && !autoSavedName.empty() && autoSavedName != name) {
+            sessionFiles.remove(autoSavedName);
+            autoSavedName.clear();
+        }
+        if (saveSession(name, withText) && !sessionPolicy.named()) {
+            autoSavedName = name;
+        }
     };
     const auto restoreByName = [&](const std::string &name) {
         const auto snapshot = sessionFiles.load(name);
@@ -971,6 +989,9 @@ int runPtyFrontend(const char *font,
             {"session.save", "Save session as...", "Save the tabs and panes under a name", std::nullopt, {}, {}},
             {"tab.rename", "Rename tab...", "Give the tab a name that stays", std::nullopt, {}, {}},
         };
+        for (auto &entry : sessionCommandEntries()) {
+            extra.push_back(std::move(entry));
+        }
         for (auto &entry : daemonCommandEntries(daemonOptions.enabled)) {
             extra.push_back(std::move(entry));
         }
@@ -1028,16 +1049,51 @@ int runPtyFrontend(const char *font,
             restoreByName(argument);
         }
         else if (id == "session.save" && colon == std::string::npos) {
-            wv.pushLayer(std::make_unique<ui::TextPrompt>("Save session as", sessionPolicy.suggestion(workspace.userTitle(workspace.activeIndex())), "session.save:", false));
+            wv.pushLayer(std::make_unique<ui::TextPrompt>("Save session as", sessionName(), "session.save:", false));
         }
         else if (id == "session.save") {
             if (!SessionSnapshot::validName(argument)) {
                 notify("session names use letters, digits, '.', '_' and '-'");
             }
             else {
+                if (!autoSavedName.empty() && autoSavedName != argument) {
+                    sessionFiles.remove(autoSavedName); // Its own name now: the automatic file goes.
+                }
+                autoSavedName.clear();
                 sessionPolicy.adopt(argument);
                 saveSession(argument, false);
             }
+        }
+        else if (id == sessionaction::remove && colon == std::string::npos) {
+            std::vector<ui::PickList::Item> items;
+            for (const auto &info : sessionFiles.list()) {
+                items.push_back({info.name,
+                                 std::to_string(info.tabs) + (info.tabs == 1 ? " tab, " : " tabs, ") +
+                                     std::to_string(info.panes) + (info.panes == 1 ? " pane" : " panes"),
+                                 std::string(sessionaction::remove) + ":" + info.name});
+            }
+            wv.pushLayer(std::make_unique<ui::PickList>("Delete session", std::move(items), "No saved sessions"));
+        }
+        else if (id == sessionaction::remove) {
+            wv.pushLayer(deleteSessionDialog(argument, sessionPolicy.persistent() && sessionName() == argument));
+        }
+        else if (id == sessionaction::removeConfirm) {
+            if (!SessionSnapshot::validName(argument)) {
+                notify("not a session name");
+            }
+            else if (!sessionFiles.remove(argument)) {
+                notify("session '" + argument + "' could not be deleted");
+            }
+            else {
+                if (sessionPolicy.persistent() && sessionName() == argument) {
+                    sessionPolicy.forget(); // Not written again (at quit, say) until a tab is named.
+                    autoSavedName.clear();
+                }
+                notify("session '" + argument + "' deleted");
+            }
+        }
+        else if (id == sessionaction::removeCancel) {
+            // The dialog closed; nothing else to do.
         }
         else if (id == daemonaction::stop || id == daemonaction::status) {
             std::string error;
@@ -1154,7 +1210,7 @@ int runPtyFrontend(const char *font,
         else if (id == "tab.rename") {
             workspace.setUserTitle(workspace.activeIndex(), SessionSnapshot::cleanTitle(argument));
             if (sessionPolicy.shouldSave(SessionPolicy::Event::TabNamed)) {
-                saveSession(sessionPolicy.name(), false);
+                autoSave(false);
             }
         }
     };
@@ -1953,7 +2009,7 @@ int runPtyFrontend(const char *font,
             title += " | " + focused->v.title();
         }
         if (sessionPolicy.persistent()) {
-            title += " | session " + sessionPolicy.name();
+            title += " | session " + sessionName();
         }
         if (rejectedInput) {
             title += " | input queue full/closed";
@@ -1978,7 +2034,7 @@ int runPtyFrontend(const char *font,
     // of a window the owner made persistent, with a checkpoint of what is on the screens. Nothing
     // is written for a window whose session was never saved, and nothing is ever restored on start.
     if (sessionPolicy.shouldSave(SessionPolicy::Event::Shutdown)) {
-        saveSession(sessionPolicy.name(), sessionPolicy.withScreenText(SessionPolicy::Event::Shutdown));
+        autoSave(sessionPolicy.withScreenText(SessionPolicy::Event::Shutdown));
     }
     if (tabsSmoke) {
         if (!scriptDone) {

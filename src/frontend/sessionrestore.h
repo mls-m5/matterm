@@ -168,9 +168,17 @@ public:
     const std::string &name() const { return name_; }
     // Naming a tab marks this window's session as one worth keeping.
     bool persistent() const { return persistent_; }
+    // The owner chose this name (saved, or opened a saved session): it stays until forget().
     void adopt(std::string name) {
         name_ = std::move(name);
         persistent_ = true;
+        named_ = true;
+    }
+    bool named() const { return named_; }
+    // The window's session was deleted: nothing is written again until a tab is named.
+    void forget() {
+        persistent_ = false;
+        named_ = false;
     }
     // True when the session should be written now. Shutdown (quit, SIGTERM, SIGHUP) writes
     // only a session the owner made persistent, and then with the screen text checkpoint.
@@ -183,11 +191,11 @@ public:
     }
     bool withScreenText(Event event) const { return event == Event::Shutdown && persistent_; }
 
-    // The name "Save session as" offers: the name this window's session already has once
-    // it is saved; otherwise the name of the tab (made into a file name: other characters
-    // become '-'), and "default" when the tab has none.
+    // The name of this window's session: the one the owner chose (adopt), else the name of the
+    // first tab (made into a file name: other characters become '-'), and "default" when that
+    // tab has none. It follows the first tab until the owner chooses. "Save session as" offers it.
     std::string suggestion(const std::string &tabTitle) const {
-        if (persistent_) return name_;
+        if (named_) return name_;
         std::string s;
         for (const char c : tabTitle) {
             const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
@@ -205,6 +213,7 @@ public:
 private:
     std::string name_;
     bool persistent_ = false;
+    bool named_ = false;
 };
 
 } // namespace frontend

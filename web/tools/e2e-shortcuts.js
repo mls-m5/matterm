@@ -24,22 +24,29 @@ const hash = (buf) => crypto.createHash('sha1').update(buf).digest('hex');
   await page.click('button');
   await page.waitForTimeout(3500);
   const marker = path.join(os.tmpdir(), `matterm-shortcuts-${process.pid}-${Date.now()}`);
-  const shot = async (name) => { const b = await page.screenshot({ path: `${out}/${name}.png` }); return hash(b); };
+  // The bottom right corner only: the text cursor blinks at the top left and the shell may redraw
+  // there, but the which-key box lives in this corner.
+  const corner = { x: 640, y: 330, width: 360, height: 270 };
+  const shot = async (name, whole) => {
+    const b = await page.screenshot({ path: `${out}/${name}.png`, ...(whole ? {} : { clip: corner }) });
+    return hash(b);
+  };
   const plain = await shot('shortcuts-plain');
+  const plainWhole = await shot('shortcuts-plain-whole', true);
   // The palette lists commands with their keys.
   await page.keyboard.press('Control+b');
   await page.waitForTimeout(150);
   await page.keyboard.press(':');
   await page.waitForTimeout(500);
-  const palette = await shot('shortcuts-palette');
-  check('the palette opens', palette !== plain);
+  const palette = await shot('shortcuts-palette', true);
+  check('the palette opens', palette !== plainWhole);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
   // Which-key: the prefix alone, held for a moment.
   await page.keyboard.press('Control+b');
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(100);
   const early = await shot('shortcuts-early');
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(700);
   const whichKey = await shot('shortcuts-whichkey');
   check('no box right after the prefix', early === plain);
   check('the which-key box appears after about half a second', whichKey !== plain);
@@ -51,11 +58,11 @@ const hash = (buf) => crypto.createHash('sha1').update(buf).digest('hex');
   await page.waitForTimeout(150);
   await page.keyboard.type('?', { delay: 20 });
   await page.waitForTimeout(500);
-  const help = await shot('shortcuts-help');
-  check('Ctrl+B ? opens the shortcut view', help !== plain && help !== whichKey);
+  const help = await shot('shortcuts-help', true);
+  check('Ctrl+B ? opens the shortcut view', help !== plainWhole);
   await page.keyboard.press('PageDown');
   await page.waitForTimeout(300);
-  const scrolled = await shot('shortcuts-help-scrolled');
+  const scrolled = await shot('shortcuts-help-scrolled', true);
   check('PageDown scrolls the list', scrolled !== help);
   await page.keyboard.type(`touch ${marker}`, { delay: 15 }); // goes to the view, not the shell
   await page.keyboard.press('Escape');

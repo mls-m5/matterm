@@ -1,5 +1,6 @@
 #include "daemoncommands.h"
 #include "mls-unit-test/unittest.h"
+#include "sessioncommands.h"
 
 using namespace frontend;
 
@@ -108,6 +109,13 @@ TEST_CASE("Sharing entries follow what is shared now") {
     EXPECT_EQ(ids({2, 1, false}), "share.pane share.tab share.tab.stop ");
     EXPECT_EQ(shareCommandEntries({1, 0, false})[0].name,
               "Share this terminal");
+}
+
+TEST_CASE("Deleting a saved session asks first, defaults to Cancel and warns when it is in use") {
+    EXPECT_EQ(sessionCommandEntries().size(), std::size_t(1));
+    EXPECT_EQ(sessionCommandEntries()[0].name, std::string("Delete session..."));
+    EXPECT_EQ(deleteSessionDialog("work", false)->selected(), std::size_t(1));
+    EXPECT_EQ(deleteSessionDialog("work\x1b", true)->selected(), std::size_t(1));
 }
 
 TEST_SUIT_END
