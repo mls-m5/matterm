@@ -69,4 +69,52 @@ TEST_CASE(
            windowSignature({a.input()}, {}, 2, 1)); // The window size.
 }
 
+TEST_CASE("Blinking changes the drawn signature but not the steady one (a resting window sleeps)") {
+    Pane p;
+    p.frame.cursor.visible = true;
+    p.frame.cursor.blink = true;
+    const auto signatures = [&](bool blinkOn, bool cursorShown) {
+        p.frame.textBlinkVisible = blinkOn;
+        p.frame.cursor.visible = cursorShown;
+        frontend::PaneSignatureInputEx in;
+        in.frame = &p.frame;
+        in.palette = &p.palette;
+        in.rect = {0, 0, 40, 20};
+        in.steadyCursorVisible = true; // The cursor is there; blinking only hides it for a moment.
+        return frontend::windowSignatures({in}, {});
+    };
+    const auto on = signatures(true, true);
+    const auto off = signatures(false, false);
+    EXPECT(on.full != off.full);     // The pixels differ: draw.
+    EXPECT_EQ(on.steady, off.steady); // Nothing happened: no reason to stay awake.
+    // A cell change is a change of both.
+    p.cells.at(2, 0).codePoint = U'q';
+    const auto typed = signatures(true, true);
+    EXPECT(typed.full != on.full);
+    EXPECT(typed.steady != on.steady);
+    // A cursor that moved, or that is hidden by the program, is a change of the steady one too.
+    p.frame.cursor.column = 3;
+    EXPECT(signatures(true, true).steady != typed.steady);
+    frontend::PaneSignatureInputEx hidden;
+    hidden.frame = &p.frame;
+    hidden.palette = &p.palette;
+    hidden.rect = {0, 0, 40, 20};
+    hidden.steadyCursorVisible = false;
+    EXPECT(frontend::windowSignatures({hidden}, {}).steady != signatures(true, true).steady);
+}
+
+TEST_CASE("The hash sees every byte of a long row, also the tail that is not a whole word") {
+    frontend::FrameSignature a, b;
+    std::vector<unsigned char> bytes(37, 7);
+    a.bytes(bytes.data(), bytes.size());
+    bytes[36] = 8;
+    b.bytes(bytes.data(), bytes.size());
+    EXPECT(a.value() != b.value());
+    bytes[36] = 7;
+    bytes[0] = 9;
+    frontend::FrameSignature c;
+    c.bytes(bytes.data(), bytes.size());
+    EXPECT(c.value() != a.value());
+}
+
 TEST_SUIT_END

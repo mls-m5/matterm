@@ -14,6 +14,7 @@
 #include "ptylink.h"
 #include "procinfo.h"
 #include "sessionfiles.h"
+#include "framesignature.h"
 #include "sessionrestore.h"
 #include "sshtunnel.h"
 #include "terminalview.h"
@@ -28,6 +29,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <deque>
 #include <csignal>
 #include <ctime>
 #include <fcntl.h>
@@ -1511,7 +1513,16 @@ int runPtyFrontend(const char *font,
         }
     };
 
+    constexpr Uint64 kActiveMs = 500, kBlinkTimeoutMs = 10000;
+    Uint64 lastActivity = SDL_GetTicks64();
+    Uint64 activeUntil = SDL_GetTicks64() + kActiveMs;
+    std::uint64_t lastSteadySignature = 0, lastDrawnSignature = 0;
+    bool forceRedraw = true; // The first frame; again after anything that may have disturbed the window.
+    std::string shownTitle;
+    std::uint64_t framesDrawn = 0, iterations = 0;
+    const Uint64 loopStarted = SDL_GetTicks64();
     while (running) {
+        ++iterations;
         skipText = false;
         if (gShutdownSignal != 0) {
             keepTerminals = true; // The terminal or session went away, not the owner's wish to end them.
@@ -1524,6 +1535,11 @@ int runPtyFrontend(const char *font,
         script();
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
+            activeUntil = SDL_GetTicks64() + kActiveMs;
+            lastActivity = SDL_GetTicks64();
+            if (event.type == SDL_WINDOWEVENT) {
+                forceRedraw = true; // Exposed, resized, shown: the window's contents may be gone.
+            }
             const std::int64_t now = std::int64_t(SDL_GetTicks64());
             const auto mod = modifiers(SDL_GetModState());
             if (event.type == SDL_QUIT) {
@@ -1948,25 +1964,24 @@ int runPtyFrontend(const char *font,
         const double seconds = double(now - lastFrame) / 1000;
         lastFrame = now;
 
-        // Draw: strip, panes, gutters.
+        // Everything that is drawn is collected first, so that a window where nothing changed is not
+        // drawn at all (an idle terminal costs no CPU; see docs/CPU.md).
+        // Blinking stops (visible) after ten seconds without input or change, like GNOME's
+        // gtk-cursor-blink-timeout: a resting window then draws nothing at all.
+        const bool blinkOn = now >= lastActivity + kBlinkTimeoutMs || (now / 500) % 2 == 0;
         const FramePlan plan = wv.plan();
         const Palette stripPalette;
-        backend.beginFrame(stripPalette.background);
+        std::optional<CellBuffer> stripBuffer;
+        std::optional<RenderFrame> stripFrame;
         if (plan.stripRect.h > 0) {
-            CellBuffer buffer(plan.strip.cells.size(), 1);
+            stripBuffer.emplace(plan.strip.cells.size(), 1);
             for (std::size_t i = 0; i < plan.strip.cells.size(); ++i) {
-                buffer.at(i, 0) = plan.strip.cells[i];
+                stripBuffer->at(i, 0) = plan.strip.cells[i];
             }
-            RenderFrame frame;
-            frame.cells = buffer.view();
-            frame.cursor.visible = false;
-            frame.palette = &stripPalette;
-            backend.render(frame,
-                           PaneArea{{plan.stripRect.x,
-                                     plan.stripRect.y,
-                                     plan.stripRect.w,
-                                     plan.stripRect.h},
-                                    {}});
+            stripFrame.emplace();
+            stripFrame->cells = stripBuffer->view();
+            stripFrame->cursor.visible = false;
+            stripFrame->palette = &stripPalette;
         }
         int pointerX = 0, pointerY = 0;
         {
@@ -1976,6 +1991,17 @@ int runPtyFrontend(const char *font,
         }
         const auto mouseMod = modifiers(SDL_GetModState());
         std::optional<UrlMatch> shownLink;
+        struct Drawn {
+            const PanePlan *plan = nullptr;
+            RenderFrame frame;
+            const Palette *palette = nullptr;
+            bool steadyCursorVisible = true;
+            std::unique_ptr<CellBuffer> badge; // Copy mode: COPY / SELECT and where the cursor is.
+            RenderFrame badgeFrame;
+            PixelRect badgeRect;
+            Palette badgePalette;
+        };
+        std::deque<Drawn> drawn; // Stable addresses: the frames point into their buffers.
         for (const auto &pp : plan.panes) {
             NativePane *pane = workspace.pane(pp.id);
             if (!pane) {
@@ -2009,7 +2035,7 @@ int runPtyFrontend(const char *font,
                     }
                 }
             }
-            frame.textBlinkVisible = (now / 500) % 2 == 0;
+            frame.textBlinkVisible = blinkOn;
             auto &glide = pane->v.glide();
             glide.update(frame.cursor.column,
                          frame.cursor.row,
@@ -2017,56 +2043,32 @@ int runPtyFrontend(const char *font,
                          double(now) / 1000);
             glide.apply(frame.cursor);
             frame.cursor.focused = windowFocused && pp.focused;
+            const bool steadyCursorVisible = frame.cursor.visible;
             frame.cursor.visible = frame.cursor.visible &&
                                    (!frame.cursor.focused ||
                                     !frame.cursor.blink ||
-                                    (now / 500) % 2 == 0);
+                                    blinkOn);
             if (pane->v.copyMode) {
                 pane->v.copyMode->apply(model, frame); // The virtual cursor replaces the real one.
             }
-            backend.render(frame,
-                           PaneArea{{pp.rect.x, pp.rect.y, pp.rect.w, pp.rect.h},
-                                    {pp.scrollbar.x,
-                                     pp.scrollbar.y,
-                                     pp.scrollbar.w,
-                                     pp.scrollbar.h}});
+            Drawn &d = drawn.emplace_back();
+            d.plan = &pp;
+            d.frame = std::move(frame);
+            d.palette = &pane->v.palette();
+            d.steadyCursorVisible = steadyCursorVisible;
             if (pane->v.copyMode) {
-                // The badge in the top right corner: COPY / SELECT and where the cursor is.
                 const std::string text = pane->v.copyMode->badge(model);
-                CellBuffer badge(text.size(), 1);
+                d.badge = std::make_unique<CellBuffer>(text.size(), 1);
                 for (std::size_t i = 0; i < text.size(); ++i) {
-                    badge.at(i, 0) = FChar{char32_t(text[i]), Rgb8{20, 20, 20}, Rgb8{255, 190, 60}};
+                    d.badge->at(i, 0) = FChar{char32_t(text[i]), Rgb8{20, 20, 20}, Rgb8{255, 190, 60}};
                 }
-                RenderFrame badgeFrame;
-                badgeFrame.cells = badge.view();
-                badgeFrame.cursor.visible = false;
-                const Palette badgePalette;
-                badgeFrame.palette = &badgePalette;
+                d.badgeFrame.cells = d.badge->view();
+                d.badgeFrame.cursor.visible = false;
+                d.badgeFrame.palette = &d.badgePalette;
                 const int width = int(text.size()) * backend.cellWidth();
                 const int x = pp.rect.x + pp.rect.w - width - SdlBackend::scrollbarStrip();
-                if (x >= pp.rect.x) {
-                    backend.render(badgeFrame,
-                                   PaneArea{{x, pp.rect.y, width, backend.cellHeight()}, {}});
-                }
+                d.badgeRect = x >= pp.rect.x ? PixelRect{x, pp.rect.y, width, backend.cellHeight()} : PixelRect{};
             }
-            if (pp.shared) {
-                // Shared with browsers: a small red square in the pane's corner.
-                const int side = std::max(4, backend.cellHeight() / 3);
-                backend.drawRect({pp.rect.x + pp.rect.w - side - 2, pp.rect.y + 2, side, side}, Rgb8{210, 40, 40});
-            }
-        }
-        for (const auto &d : plan.dividers) {
-            backend.drawRect({d.rect.x, d.rect.y, d.rect.w, d.rect.h},
-                             Rgb8{46, 51, 60});
-        }
-        for (const auto &layer : plan.layers) {
-            RenderFrame frame;
-            frame.cells = layer.cells->view();
-            frame.cursor = layer.cursor;
-            frame.cursor.focused = true;
-            frame.palette = &stripPalette;
-            backend.render(frame,
-                           PaneArea{{layer.rect.x, layer.rect.y, layer.rect.w, layer.rect.h}, {}});
         }
         std::string title = "matterm";
         if (const auto *focused = workspace.focusedPane();
@@ -2088,10 +2090,111 @@ int runPtyFrontend(const char *font,
         if (shownLink) {
             title += " | " + shownLink->text;
         }
-        SDL_SetWindowTitle(window.get(), title.c_str());
-        backend.present();
+        // Did anything change? `full` is every pixel (the blink phase too); `steady` leaves the blink out,
+        // so a blinking cursor alone lets the loop rest between its two redraws a second.
+        std::vector<frontend::PaneSignatureInputEx> inputs;
+        const auto addInput = [&](const RenderFrame &frame, const Palette *palette, const PixelRect &rect,
+                                  const PixelRect &scrollbar, bool steadyCursor) {
+            frontend::PaneSignatureInputEx in;
+            in.frame = &frame;
+            in.palette = palette;
+            in.rect = rect;
+            in.scrollbar = scrollbar;
+            in.steadyCursorVisible = steadyCursor;
+            inputs.push_back(in);
+        };
+        if (stripFrame) {
+            addInput(*stripFrame, &stripPalette, plan.stripRect, PixelRect{}, false);
+        }
+        std::vector<RenderFrame> layerFrames;
+        layerFrames.reserve(plan.layers.size());
+        for (const auto &layer : plan.layers) {
+            RenderFrame frame;
+            frame.cells = layer.cells->view();
+            frame.cursor = layer.cursor;
+            frame.cursor.focused = true;
+            frame.palette = &stripPalette;
+            layerFrames.push_back(std::move(frame));
+        }
+        for (const auto &d : drawn) {
+            addInput(d.frame, d.palette, d.plan->rect, d.plan->scrollbar, d.steadyCursorVisible);
+            if (d.badge) {
+                addInput(d.badgeFrame, &d.badgePalette, d.badgeRect, PixelRect{}, false);
+            }
+        }
+        for (std::size_t i = 0; i < layerFrames.size(); ++i) {
+            addInput(layerFrames[i], &stripPalette, plan.layers[i].rect, PixelRect{}, layerFrames[i].cursor.visible);
+        }
+        std::uint64_t extra = std::hash<std::string>{}(title);
+        for (const auto &d : drawn) {
+            extra = extra * 31 + (d.plan->shared ? 1u : 0u);
+        }
+        {
+            int w = 0, h = 0;
+            SDL_GetRendererOutputSize(SDL_GetRenderer(window.get()), &w, &h);
+            extra = extra * 31 + std::uint64_t(w) * 65537 + std::uint64_t(h);
+        }
+        const auto signatures = frontend::windowSignatures(inputs, plan.dividers, extra);
+        if (signatures.steady != lastSteadySignature) {
+            lastSteadySignature = signatures.steady;
+            activeUntil = now + kActiveMs;
+            lastActivity = now;
+        }
+        if (forceRedraw || signatures.full != lastDrawnSignature) {
+            forceRedraw = false;
+            lastDrawnSignature = signatures.full;
+            if (title != shownTitle) {
+                shownTitle = title;
+                SDL_SetWindowTitle(window.get(), title.c_str());
+            }
+            backend.beginFrame(stripPalette.background);
+            if (stripFrame) {
+                backend.render(*stripFrame,
+                               PaneArea{{plan.stripRect.x, plan.stripRect.y, plan.stripRect.w, plan.stripRect.h}, {}});
+            }
+            for (const auto &d : drawn) {
+                const auto &pp = *d.plan;
+                backend.render(d.frame,
+                               PaneArea{{pp.rect.x, pp.rect.y, pp.rect.w, pp.rect.h},
+                                        {pp.scrollbar.x, pp.scrollbar.y, pp.scrollbar.w, pp.scrollbar.h}});
+                if (d.badge && d.badgeRect.w > 0) {
+                    backend.render(d.badgeFrame,
+                                   PaneArea{{d.badgeRect.x, d.badgeRect.y, d.badgeRect.w, d.badgeRect.h}, {}});
+                }
+                if (pp.shared) {
+                    // Shared with browsers: a small red square in the pane's corner.
+                    const int side = std::max(4, backend.cellHeight() / 3);
+                    backend.drawRect({pp.rect.x + pp.rect.w - side - 2, pp.rect.y + 2, side, side}, Rgb8{210, 40, 40});
+                }
+            }
+            for (const auto &d : plan.dividers) {
+                backend.drawRect({d.rect.x, d.rect.y, d.rect.w, d.rect.h}, Rgb8{46, 51, 60});
+            }
+            for (std::size_t i = 0; i < layerFrames.size(); ++i) {
+                const auto &layer = plan.layers[i];
+                backend.render(layerFrames[i], PaneArea{{layer.rect.x, layer.rect.y, layer.rect.w, layer.rect.h}, {}});
+            }
+            backend.present();
+            ++framesDrawn;
+            // At most about 120 frames a second even where presenting does not wait for the display.
+            if (const auto spent = SDL_GetTicks64() - now; spent < 8) {
+                SDL_WaitEventTimeout(nullptr, int(8 - spent));
+            }
+        }
+        else {
+            // Nothing to draw: rest until something can happen. Input wakes us at once; output of the
+            // programs is picked up by the next round (4 ms while things are happening, 100 ms when it
+            // has been quiet for half a second).
+            SDL_WaitEventTimeout(nullptr, now < activeUntil ? 4 : 100);
+        }
     }
     SDL_StopTextInput();
+    if (std::getenv("MATTERM_LOOP_STATS")) {
+        // For finding out why a window uses CPU: rounds of the loop and frames actually drawn.
+        const double seconds = double(SDL_GetTicks64() - loopStarted) / 1000;
+        std::cerr << "matterm: " << iterations << " loop rounds, " << framesDrawn << " frames drawn in " << seconds
+                  << " s\n";
+    }
     if (keepTerminals) {
         workspace.forEachPane([](PaneId, NativePane &pane, bool) { pane.endInDaemon = false; });
     }
