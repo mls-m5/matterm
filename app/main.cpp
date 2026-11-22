@@ -58,6 +58,10 @@ void printUsage(std::ostream &out, const char *program) {
            "                       Use the daemon of another computer through an ssh tunnel\n"
            "                       (started there if missing; needs ssh keys, no questions are\n"
            "                       asked; see docs/REMOTE_DAEMON.md).\n"
+           "  --daemon-install     With --daemon-host: use our own matterm-daemon there, copied to\n"
+           "                       ~/.local/share/matterm/bin/ when missing (asks first; without\n"
+           "                       this it is copied only if the other computer has none on PATH).\n"
+           "  --yes                Copy without asking.\n"
            "  --ssh-arg ARG        An extra argument for ssh (repeatable), e.g. -p / 2222.\n"
            "  --snap-scroll        Let scrolling come to rest on whole rows (default: "
            "smooth\n"
@@ -332,6 +336,8 @@ int main(int argc, char **argv) {
     std::string daemonSocket;
     std::string daemonHost;
     std::vector<std::string> sshArguments;
+    bool daemonInstall = false;
+    bool assumeYes = false;
     bool showcase = false;
     std::string term = "xterm-256color";
     std::vector<std::string> command;
@@ -386,6 +392,12 @@ int main(int argc, char **argv) {
             useDaemon = true;
             daemonExplicit = true;
         }
+        else if (arg == "--daemon-install") {
+            daemonInstall = true;
+        }
+        else if (arg == "--yes") {
+            assumeYes = true;
+        }
         else if (arg == "--ssh-arg" && i + 1 < argc) {
             sshArguments.emplace_back(argv[++i]);
         }
@@ -427,6 +439,10 @@ int main(int argc, char **argv) {
                       ptyTabsSmokeTest)) {
         std::cerr << "--daemon runs the daemon's shell ($SHELL); it cannot be combined with a "
                      "command, --input, --showcase or the smoke tests\n";
+        return 1;
+    }
+    if ((daemonInstall || assumeYes) && daemonHost.empty()) {
+        std::cerr << "--daemon-install and --yes are for --daemon-host\n";
         return 1;
     }
     if (!daemonHost.empty() && (!daemonSocket.empty() || !useDaemon)) {
@@ -471,7 +487,7 @@ int main(int argc, char **argv) {
                                   recordPath,
                                   smoothCursor,
                                   ptyTabsSmokeTest,
-                                  DaemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll, daemonHost, sshArguments});
+                                  DaemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll, daemonHost, sshArguments, daemonInstall, assumeYes});
         }
         catch (const std::exception &error) {
             std::cerr << error.what() << '\n';

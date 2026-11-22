@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """A stand-in for ssh in sshtunnel_test: no network, no sshd.
 
-  fakessh.py [options] -- HOST COMMAND...   runs COMMAND here (matterm-daemon is $FAKE_SSH_DAEMON)
+  fakessh.py [options] -- HOST COMMAND...   runs COMMAND with /bin/sh here, as the other computer's shell would
+                                            (HOME is $FAKE_SSH_HOME; with $FAKE_SSH_DAEMON_ON_PATH, matterm-daemon is
+                                            $FAKE_SSH_DAEMON; $FAKE_SSH_UNAME replaces what `uname -sm` says)
   fakessh.py [options] -N -L LOCAL:REMOTE -- HOST   listens on the Unix socket LOCAL and relays every
                                                       connection to the Unix socket REMOTE until killed
 Every call appends its arguments (one line, JSON) to $FAKE_SSH_LOG. $FAKE_SSH_FAIL makes the command form
@@ -36,10 +38,17 @@ if forward is None:
     if os.environ.get("FAKE_SSH_FAIL"):
         sys.stderr.write(os.environ["FAKE_SSH_FAIL"] + "\n")
         sys.exit(255)
-    if command and command[0] == "matterm-daemon":
+    if command and command[0] == "matterm-daemon" and os.environ.get("FAKE_SSH_DAEMON_ON_PATH"):
         os.execv(os.environ["FAKE_SSH_DAEMON"], [os.environ["FAKE_SSH_DAEMON"]] + command[1:])
-    sys.stderr.write("fakessh: unknown command %r\n" % command)
-    sys.exit(127)
+    # Anything else: what the other computer's shell would do with the joined command line.
+    line = " ".join(command)
+    if os.environ.get("FAKE_SSH_UNAME"):
+        line = line.replace("uname -sm", 'echo "%s"' % os.environ["FAKE_SSH_UNAME"])
+    env = dict(os.environ)
+    if os.environ.get("FAKE_SSH_HOME"):
+        env["HOME"] = os.environ["FAKE_SSH_HOME"]
+    env.pop("FAKE_SSH_DAEMON", None)
+    os.execve("/bin/sh", ["sh", "-c", line], env)
 
 if os.environ.get("FAKE_SSH_NOFORWARD"):
     sys.stderr.write(os.environ["FAKE_SSH_NOFORWARD"] + "\n")

@@ -62,6 +62,51 @@ connection. Host, daemon name and socket path are checked against a short list o
 before anything runs (the remote command line goes through the remote shell, and a host starting
 with `-` would be an ssh option).
 
+### Copying the daemon there (`--daemon-install`, 2026-11-22)
+
+`matterm-daemon` has to exist on the other computer. By default `--daemon-host` uses the one on its
+PATH (a remote non-interactive shell often has no `~/.local/bin`, and `.bashrc` is not read); when there
+is none it offers to copy ours. `--daemon-install` always uses our own copy; `--yes` copies without asking.
+
+**What the binary needs.** The normal build links `libsodium.so.23`, `libstdc++`, `libgcc_s` and glibc
+dynamically (`ldd build/matterm-daemon`), so it only runs where those exist, in these versions. The
+option `-DMATTERM_STATIC_DAEMON=ON` links it fully static (`-static`, libsodium from `libsodium.a`; needs
+`libc.a`, in Debian `libc6-dev`, and `libsodium-dev`): one 1.7 MB file, "not a dynamic executable", that
+runs on any Linux of the same CPU architecture without packages. The daemon does no name lookups
+(no `getpwnam`, no DNS), which is what makes a static glibc safe here; musl was not needed. `sshtunnel_test`
+passes with the static build (`MATTERM_TEST_DAEMON=path ./test/sshtunnel_test`), including a terminal
+running in it. A copy of a dynamic binary is still made, with a note, and the check below shows if it runs.
+
+**Steps** (`SshTunnel::installRemote`, `src/frontend/sshtunnel.h`):
+
+1. Our file: `matterm-daemon` beside this program (else PATH); its SHA-256 and size (`sha256.h`).
+2. One ssh round trip: `uname -sm`, the folder (`$HOME/.local/share/matterm/bin`, created 0700) and whether
+   `matterm-daemon-<first 24 hex of the hash>` is there and executable there.
+3. Another OS or CPU architecture than ours is a plain error ("is Linux aarch64 and this matterm-daemon is
+   for Linux x86_64 ... build matterm-daemon on that computer and put it on its PATH"), nothing is copied.
+   Building there is the fallback: `cmake -DMATTERM_BUILD_SERVER=ON -DMATTERM_STATIC_DAEMON=ON` and
+   `cp build/matterm-daemon ~/.local/bin/` (it needs Boost headers and libsodium-dev to build).
+4. Present: nothing more. Missing: ask ("host has no matterm-daemon of this version. Copy ours (1745 KiB,
+   DIR/NAME) and start it there? [y/N]", on the terminal; with no terminal the answer is no unless `--yes`).
+5. Copy: the file is streamed as ssh's stdin into `DIR/.matterm-daemon.$$` (umask 077, mode 0700), checked
+   for size, SHA-256 (when `sha256sum` exists) and that it runs at all (`--print-socket`), and only then
+   `mv`-ed to the final name, atomically. Failure removes the temporary file. Errors carry hints: wrong
+   format (architecture), `noexec` or unwritable home, missing libraries of a dynamic binary.
+6. It is started by its full path (`DIR/NAME --ensure --print-socket`), so nothing depends on PATH or
+   `.bashrc`.
+
+**Versions.** The name is the content, so a new version is a new file and one that is running is never
+overwritten or killed. A daemon that already runs on the socket is reused whatever its version, and with
+sessions in it never restarted; the old file stays (about 1.7 MB each; delete old `matterm-daemon-*` by
+hand when no daemon runs from them). If the running daemon speaks an incompatible protocol the connection
+fails with the daemon's own `ControlHello` error: stop it (palette "Stop daemon", or kill it) when it has no
+sessions. There is no automatic restart.
+
+**Safety.** Only our own binary is ever sent; it is read from beside this program or PATH, never a path
+taken from the remote. No sudo, nothing outside `~/.local/share/matterm/bin` is written (the folder path is
+validated against a short character list, the remote shell only sees validated words and one fixed script),
+the first copy needs a yes, and the file is content-named, 0700, and renamed into place.
+
 ### Security
 
 * Remote side: sshd runs the forwarded connection as the account you logged in as, so the daemon's
@@ -86,8 +131,9 @@ with `-` would be an ssh option).
 * Blocking questions to the daemon (status, share) from the UI thread wait for the round trip; on
   a slow link that stutters. They should move to the link's own connection.
 * Version mismatch is only what `ControlHello` already reports; `matterm-daemon` must be on the
-  remote `PATH` (`--ssh-arg` cannot change that; a `--remote-daemon PATH` option is trivial to add).
+  remote `PATH` or be copied with `--daemon-install`.
 * Session restore and "new terminal in this folder" use local folders and are off for a remote daemon.
+* The copy is for Linux on the same CPU architecture as this computer (see above for the fallback).
 * Windows has no `ssh -L` for Unix sockets worth relying on, and no daemon.
 * Real `ssh` was not available where this was built: the tests run the whole chain against a fake
   `ssh` that relays Unix sockets (`test/fakessh.py`); the ssh options used are the documented ones

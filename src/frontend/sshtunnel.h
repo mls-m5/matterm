@@ -18,6 +18,7 @@
 //
 // Blocking calls, for startup; the tunnel object lives as long as the window does.
 #include "daemonclient.h"
+#include "sha256.h"
 
 #include <cerrno>
 #include <chrono>
@@ -25,18 +26,27 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <fstream>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <poll.h>
 #include <spawn.h>
 #include <string>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
 
 namespace frontend {
+
+// Where matterm-daemon comes from on the other computer.
+//   Never   the one on its PATH (`matterm-daemon`), as it is.
+//   Auto    that one; if it is not there, offer to copy ours (asks, see `confirm`).
+//   Always  our own copy, content-named under ~/.local/share/matterm/bin/ (copied when missing).
+enum class DaemonInstall { Never, Auto, Always };
 
 struct SshTunnelOptions {
     std::string host;                    // [user@]host as ssh reads it (ssh_config applies).
@@ -45,7 +55,44 @@ struct SshTunnelOptions {
     std::string remoteDaemon = "matterm-daemon"; // How the remote shell finds the daemon.
     std::string remoteSocket;            // Empty: the remote default ($XDG_RUNTIME_DIR/matterm/daemon.sock).
     int timeoutMs = 20000;               // For the whole startup.
+    DaemonInstall install = DaemonInstall::Never;
+    bool assumeYes = false;              // --yes: copy without asking.
+    // Asked before the first copy (nothing is copied when it says no or is not set and assumeYes is not).
+    std::function<bool(const std::string &question)> confirm;
+    std::function<void(const std::string &line)> progress; // Messages while copying.
+    std::string localDaemon;             // The file to copy; empty: the daemon beside this program.
+    std::string installDirectory;        // On the other computer, absolute; empty: $HOME/.local/share/matterm/bin.
+    int installTimeoutMs = 180000;       // For copying and checking.
 };
+
+// True when the file is a statically linked ELF executable (no interpreter): it runs on any Linux of
+// the same architecture, which is what makes copying it to another computer sensible.
+inline bool isStaticElf(const std::string &path) {
+    std::ifstream in(path, std::ios::binary);
+    unsigned char header[64];
+    if (!in.read(reinterpret_cast<char *>(header), sizeof header) || std::memcmp(header, "\177ELF", 4) != 0 ||
+        header[4] != 2 /* 64-bit */ || header[5] != 1 /* little endian */) {
+        return false;
+    }
+    std::uint64_t phoff = 0;
+    std::uint16_t phentsize = 0, phnum = 0;
+    std::memcpy(&phoff, header + 32, 8);
+    std::memcpy(&phentsize, header + 54, 2);
+    std::memcpy(&phnum, header + 56, 2);
+    for (std::uint16_t i = 0; i < phnum; ++i) {
+        unsigned char entry[8];
+        in.seekg(std::streamoff(phoff + std::uint64_t(i) * phentsize));
+        if (!in.read(reinterpret_cast<char *>(entry), sizeof entry)) {
+            return false;
+        }
+        std::uint32_t type = 0;
+        std::memcpy(&type, entry, 4);
+        if (type == 3 /* PT_INTERP */ || type == 2 /* PT_DYNAMIC */) {
+            return false;
+        }
+    }
+    return true;
+}
 
 // What may be handed to the remote shell or to ssh as a name: no spaces, quotes, `$`, `;` and so on,
 // and not starting with '-' (it would be an option).
@@ -80,20 +127,37 @@ public:
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(options.timeoutMs);
         auto tunnel = std::unique_ptr<SshTunnel>(new SshTunnel());
         // 1. Where is the socket, and is the daemon there?
-        std::vector<std::string> ask = baseArguments(options);
-        ask.push_back("--");
-        ask.push_back(options.host);
-        ask.push_back(options.remoteDaemon);
-        ask.push_back("--ensure");
-        ask.push_back("--print-socket");
-        if (!options.remoteSocket.empty()) {
-            ask.push_back("--daemon-socket");
-            ask.push_back(options.remoteSocket);
-        }
+        std::vector<std::string> ask;
         std::string output;
-        if (!runCapture(options.ssh, ask, deadline, output, error)) {
-            error = "ssh " + options.host + ": " + error;
-            return nullptr;
+        std::string daemonPath = options.remoteDaemon;
+        int status = 0;
+        if (options.install == DaemonInstall::Always) {
+            if (!installRemote(options, daemonPath, error)) {
+                return nullptr;
+            }
+        }
+        ask = commandArguments(options, daemonPath);
+        if (!runCapture(options.ssh, ask, deadline, output, error, {}, &status)) {
+            const bool missing = status == 127 || error.find("not found") != std::string::npos ||
+                                 error.find("No such file") != std::string::npos;
+            if (options.install == DaemonInstall::Auto && missing) {
+                // Not on its PATH: our own copy, if the owner agrees.
+                if (!installRemote(options, daemonPath, error)) {
+                    return nullptr;
+                }
+                ask = commandArguments(options, daemonPath);
+                error.clear();
+                output.clear();
+                if (!runCapture(options.ssh, ask, deadline, output, error, {}, &status)) {
+                    error = "ssh " + options.host + ": " + error;
+                    return nullptr;
+                }
+            }
+            else {
+                error = "ssh " + options.host + ": " + error +
+                        (missing ? " (matterm-daemon is not on its PATH: --daemon-install copies one there)" : "");
+                return nullptr;
+            }
         }
         const auto remote = lastLine(output);
         if (remote.empty() || remote.front() != '/' || !safeSshWord(remote, true)) {
@@ -184,6 +248,182 @@ public:
 private:
     SshTunnel() = default;
 
+    // `ssh ... -- host DAEMON --ensure --print-socket [--daemon-socket PATH]`.
+    static std::vector<std::string> commandArguments(const SshTunnelOptions &options, const std::string &daemon) {
+        std::vector<std::string> ask = baseArguments(options);
+        ask.push_back("--");
+        ask.push_back(options.host);
+        ask.push_back(daemon);
+        ask.push_back("--ensure");
+        ask.push_back("--print-socket");
+        if (!options.remoteSocket.empty()) {
+            ask.push_back("--daemon-socket");
+            ask.push_back(options.remoteSocket);
+        }
+        return ask;
+    }
+
+    // Copies our matterm-daemon to the other computer when it is not there yet and says where it is
+    // (`path`, absolute). The file is named after its SHA-256, so the name says which version it is: a
+    // new version is a new file, one that runs is never replaced, and a copy that is there is the right one.
+    static bool installRemote(const SshTunnelOptions &options, std::string &path, std::string &error) {
+        const auto say = [&](const std::string &line) {
+            if (options.progress) {
+                options.progress(line);
+            }
+        };
+        // Our file: beside this program, else on PATH.
+        std::string local = options.localDaemon.empty() ? daemonExecutable() : options.localDaemon;
+        if (local.find('/') == std::string::npos) {
+            const char *searchPath = std::getenv("PATH");
+            std::string rest = searchPath ? searchPath : "";
+            std::string found;
+            for (std::size_t from = 0; from <= rest.size();) {
+                const auto colon = rest.find(':', from);
+                const auto dir = rest.substr(from, colon == std::string::npos ? std::string::npos : colon - from);
+                if (!dir.empty() && ::access((dir + "/" + local).c_str(), X_OK) == 0) {
+                    found = dir + "/" + local;
+                    break;
+                }
+                if (colon == std::string::npos) {
+                    break;
+                }
+                from = colon + 1;
+            }
+            if (found.empty()) {
+                error = "cannot find our own matterm-daemon to copy (looked beside this program and on PATH)";
+                return false;
+            }
+            local = found;
+        }
+        std::string hash;
+        std::uint64_t size = 0;
+        {
+            std::ifstream in(local, std::ios::binary);
+            if (!in) {
+                error = "cannot read " + local;
+                return false;
+            }
+            Sha256 sha;
+            char buffer[65536];
+            while (in.read(buffer, sizeof buffer) || in.gcount() > 0) {
+                sha.update(buffer, std::size_t(in.gcount()));
+                size += std::uint64_t(in.gcount());
+            }
+            hash = sha.hex();
+        }
+        if (!isStaticElf(local)) {
+            say("note: " + local + " is not a static binary; it needs the libraries it was built with on " +
+                options.host + " (build with -DMATTERM_STATIC_DAEMON=ON to copy one that needs nothing)");
+        }
+        const std::string name = "matterm-daemon-" + hash.substr(0, 24);
+        const std::string directory = options.installDirectory.empty() ? "\"${HOME}/.local/share/matterm/bin\""
+                                                                       : options.installDirectory;
+        if (!options.installDirectory.empty() &&
+            (options.installDirectory.front() != '/' || !safeSshWord(options.installDirectory, true))) {
+            error = "--daemon-install: the install directory is not a safe absolute path";
+            return false;
+        }
+        struct utsname here {};
+        ::uname(&here);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(options.installTimeoutMs);
+        // One round trip: what and where is it, and is our version there?
+        const std::string probe = "umask 077; uname -sm; d=" + directory +
+                                  "; mkdir -p \"$d\" && echo \"$d\" && if [ -x \"$d/" + name +
+                                  "\" ]; then echo present; else echo missing; fi";
+        std::vector<std::string> arguments = baseArguments(options);
+        arguments.insert(arguments.end(), {"--", options.host, "sh -c '" + probe + "'"});
+        std::string output;
+        if (!runCapture(options.ssh, arguments, deadline, output, error)) {
+            error = "ssh " + options.host + ": " + error;
+            return false;
+        }
+        std::vector<std::string> lines;
+        for (std::size_t from = 0; from < output.size();) {
+            auto end = output.find('\n', from);
+            if (end == std::string::npos) {
+                end = output.size();
+            }
+            auto line = output.substr(from, end - from);
+            while (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            lines.push_back(line);
+            from = end + 1;
+        }
+        if (lines.size() < 3) {
+            error = "ssh " + options.host + ": unexpected answer from the other computer while preparing the copy";
+            return false;
+        }
+        const std::string remoteMachine = lines[lines.size() - 3];
+        const std::string remoteDirectory = lines[lines.size() - 2];
+        const std::string state = lines[lines.size() - 1];
+        const std::string localMachine = std::string(here.sysname) + " " + here.machine;
+        if (remoteMachine != localMachine) {
+            error = options.host + " is \"" + remoteMachine + "\" and this matterm-daemon is for \"" + localMachine +
+                    "\": it cannot run there. Build matterm-daemon on " + options.host +
+                    " (docs/REMOTE_DAEMON.md) and put it on its PATH";
+            return false;
+        }
+        if (remoteDirectory.empty() || remoteDirectory.front() != '/' || !safeSshWord(remoteDirectory, true)) {
+            error = options.host + ": the folder for matterm-daemon there (" + remoteDirectory +
+                    ") has characters that cannot be handled safely";
+            return false;
+        }
+        path = remoteDirectory + "/" + name;
+        if (state == "present") {
+            return true;
+        }
+        if (state != "missing") {
+            error = "ssh " + options.host + ": unexpected answer while checking for a copy";
+            return false;
+        }
+        if (!options.assumeYes) {
+            const std::string question = options.host + " has no matterm-daemon of this version. Copy ours (" +
+                                         std::to_string((size + 1023) / 1024) + " KiB, " + remoteDirectory +
+                                         "/" + name + ") and start it there?";
+            if (!options.confirm || !options.confirm(question)) {
+                error = "matterm-daemon is not installed on " + options.host +
+                        " and the copy was not confirmed (--yes copies without asking)";
+                return false;
+            }
+        }
+        say("copying matterm-daemon to " + options.host + ":" + path + " ...");
+        // Temporary file in the same folder, checked (size, SHA-256 when sha256sum exists, and that it runs
+        // at all), then renamed: nobody ever sees half a file under the final name.
+        const std::string copy =
+            "umask 077; d=\"" + remoteDirectory + "\"; t=\"$d/.matterm-daemon.$$\"; "
+            "if cat > \"$t\" && chmod 0700 \"$t\" && [ \"$(wc -c < \"$t\")\" -eq " + std::to_string(size) +
+            " ] && { s=$(sha256sum \"$t\" 2>/dev/null | cut -d\" \" -f1); [ -z \"$s\" ] || [ \"$s\" = " + hash +
+            " ]; } && \"$t\" --print-socket >/dev/null && mv -f \"$t\" \"$d/" + name +
+            "\"; then echo installed; else rm -f \"$t\"; echo failed; exit 1; fi";
+        arguments = baseArguments(options);
+        arguments.insert(arguments.end(), {"--", options.host, "sh -c '" + copy + "'"});
+        output.clear();
+        std::string copyError;
+        if (!runCapture(options.ssh, arguments, deadline, output, copyError, local)) {
+            std::string hint;
+            if (copyError.find("Exec format error") != std::string::npos) {
+                hint = " (wrong architecture or format for " + options.host + ")";
+            }
+            else if (copyError.find("Permission denied") != std::string::npos) {
+                hint = " (is " + remoteDirectory + " mounted noexec, or not writable?)";
+            }
+            else if (copyError.find("No such file") != std::string::npos || copyError.find("not found") != std::string::npos ||
+                     copyError.find("cannot open shared object") != std::string::npos) {
+                hint = " (a dynamically linked daemon needs its libraries there: build with -DMATTERM_STATIC_DAEMON=ON)";
+            }
+            error = "copying matterm-daemon to " + options.host + " failed: " + copyError + hint;
+            return false;
+        }
+        if (lastLine(output) != "installed") {
+            error = "copying matterm-daemon to " + options.host + " failed (the copy did not check out)";
+            return false;
+        }
+        say("matterm-daemon installed on " + options.host);
+        return true;
+    }
+
     static std::vector<std::string> baseArguments(const SshTunnelOptions &o) {
         std::vector<std::string> a = o.sshArguments;
         // No questions: this runs without a terminal as often as with one. Given first, a user's own
@@ -214,7 +454,9 @@ private:
                            std::vector<std::string> arguments,
                            std::chrono::steady_clock::time_point deadline,
                            std::string &out,
-                           std::string &error) {
+                           std::string &error,
+                           const std::string &stdinFile = {},
+                           int *exitStatus = nullptr) {
         arguments.insert(arguments.begin(), program);
         int outPipe[2], errPipe[2];
         if (::pipe(outPipe) != 0) {
@@ -231,7 +473,7 @@ private:
         posix_spawn_file_actions_init(&actions);
         posix_spawn_file_actions_adddup2(&actions, outPipe[1], 1);
         posix_spawn_file_actions_adddup2(&actions, errPipe[1], 2);
-        posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0);
+        posix_spawn_file_actions_addopen(&actions, 0, stdinFile.empty() ? "/dev/null" : stdinFile.c_str(), O_RDONLY, 0);
         for (const int fd : {outPipe[0], outPipe[1], errPipe[0], errPipe[1]}) {
             posix_spawn_file_actions_addclose(&actions, fd);
         }
@@ -284,6 +526,9 @@ private:
         }
         int status = 0;
         while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+        }
+        if (exitStatus) {
+            *exitStatus = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
         }
         if (timedOut) {
             error = "no answer in time";

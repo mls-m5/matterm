@@ -7,6 +7,12 @@ target_include_directories(matterm-daemon-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR
 target_link_libraries(matterm-daemon-core PUBLIC matterm-daemon-wire matterm-server-core sessionfiles)
 add_executable(matterm-daemon main.cpp)
 target_link_libraries(matterm-daemon PRIVATE matterm-daemon-core)
+if(MATTERM_STATIC_DAEMON)
+    # One file that runs on any Linux of the same architecture, no packages needed: this is what
+    # `matterm --daemon-host` copies to another computer (docs/REMOTE_DAEMON.md). libsodium is static
+    # too (src/server/CMakeLists.txt). The daemon uses no name service lookups (no getpwnam, no DNS).
+    target_link_options(matterm-daemon PRIVATE -static)
+endif()
 # Next to the matterm program, where it looks for the daemon (build/matterm-daemon).
 if(TARGET matterm OR EXISTS "${CMAKE_SOURCE_DIR}/app/main.cpp")
     set_target_properties(matterm-daemon PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})

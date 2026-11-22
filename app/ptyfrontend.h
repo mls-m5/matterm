@@ -12,6 +12,8 @@ struct DaemonOptions {
     // --daemon-host: the daemon of another computer through an ssh tunnel (docs/REMOTE_DAEMON.md).
     std::string host;
     std::vector<std::string> sshArguments; // --ssh-arg, before the ones the tunnel adds.
+    bool installAlways = false; // --daemon-install: use our own copy of matterm-daemon there.
+    bool assumeYes = false;     // --yes: copy it without asking.
 };
 
 // Native entry-point adapter; owns SDL lifecycle after starting the PTY.
