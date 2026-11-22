@@ -219,3 +219,15 @@ These describe much more functionality than matterm currently implements.
 - [ ] Animated text reveal: demo pacing first, then an opt-in renderer effect for the regular terminal. See docs/tasks/text-reveal-animation.md.
 - [x] Mattrix OS as a separate terminal program (`mattrix`, see docs/FAKEOS.md; original note:): a standalone binary (e.g. `mattrix`) running the fakeos core in a regular terminal, building on `matterm-demo --tty`. Name it "Mattrix OS" in its own text so it is not confused with matterm (the emulator); web and native-window demos can say "powered by matterm". Renderer-only effects (smooth cursor, fades) need simpler tty fallbacks (256-colour steps). Distribution (install target, static binary) undecided.
 - [ ] Session ideas after the tmux comparison (checkpoints, scrollback spill to disk, shell-integration marks): docs/MULTI_TERMINAL.md section 12. Not scheduled.
+- [ ] Start a web server from the command palette (owner's wish, 2026-11-22; not designed). The
+  palette gets an action that starts `matterm-server` for the running window. When the window
+  works over ssh (`--daemon-host`), a second action also opens a port on the computer you are
+  sitting at (forwarded to the remote machine), so a browser here reaches the terminals there.
+  It must also be possible to connect directly to the computer that runs the daemon (without the
+  forward). Open questions for the owner before building: which process runs the server (the
+  window, the daemon, a separate `matterm-server`) and who stops it; password and Origin handling
+  for a server started this way; bind address (loopback only vs LAN); which sessions are visible
+  (only shared ones, as with `--expose-local-sessions`); how the ssh forward is reused or
+  extended (`src/frontend/sshtunnel.h`); direct connection and TLS. Constraints already decided:
+  sharing is remote code execution, so private by default, explicit action, ssh forward or LAN
+  only; the repository is public, so no deployment instructions or secrets in it.
