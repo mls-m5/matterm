@@ -56,6 +56,11 @@ private Unix socket, so they survive closing the window or a crash of the GUI.
   small red square in its corner. Only shared terminals are ever offered to a browser.
 - If another window takes a terminal over, the pane keeps its screen, pauses input and says
   "This terminal is controlled from another window. Press Enter to take it back".
+- **From a browser**: `matterm-server --expose-local-sessions [--daemon-socket PATH]` offers the
+  shared terminals to logged-in browsers. In the web page the palette gets **Local terminals...**
+  (only when the server offers them); choosing one opens a tab attached to it, and the laptop's
+  window shows the take-over notice. Enter in the browser pane takes it back after the laptop
+  took it again. `web/tools/e2e-local.js` checks the whole path with a real daemon.
 - Details: [docs/tasks/daemon.md](docs/tasks/daemon.md), [docs/PROTOCOL.md](docs/PROTOCOL.md)
   section 12, [docs/TABS_PLAN.md](docs/TABS_PLAN.md) sections 10-11.
 

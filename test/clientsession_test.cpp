@@ -213,6 +213,23 @@ TEST_CASE("Exact resume keeps frontend state; malformed or unnegotiated replay "
             EXPECT(f.session.state() == ClientSession::State::Failed);
     }
 }
+TEST_CASE("A local:<id> session (bridged by the web server) is answered with the plain id") {
+    const std::string id = "00112233445566778899aabbccddeeff";
+    ClientSession::Config config;
+    config.replay = true;
+    config.sessionId = "local:" + id;
+    config.resetForReplay = [] {};
+    Fixture f(config);
+    f.channel.opened();
+    f.channel.deliver(Welcome{1, id, 0, 3, featureReplay});
+    EXPECT(f.session.state() == ClientSession::State::Running);
+    EXPECT_EQ(f.session.sessionId(), id);
+    // Any other id is still refused.
+    Fixture g(config);
+    g.channel.opened();
+    g.channel.deliver(Welcome{1, "ffeeddccbbaa99887766554433221100", 0, 3, featureReplay});
+    EXPECT(g.session.state() == ClientSession::State::Failed);
+}
 TEST_CASE(
     "A frontend disconnect during replay reset cannot revive the client") {
     ClientSession::Config config;

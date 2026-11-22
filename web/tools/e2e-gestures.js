@@ -76,7 +76,16 @@ const check = (name, ok, detail) => {
   check('drag down scrolls back', scrolled !== bottom);
   check('drag keeps the keyboard field focused', await page.evaluate(() => document.activeElement.id) === 'softkeys');
   await drag([200, 600], [200, 200]);
-  { const h = await canvasHash(); check('drag up scrolls forward again', h === bottom || h === bottomOther); }
+  {
+    // The scroll glides and a slow software renderer can need more than the 300 ms of drag():
+    // wait for the picture to settle on the bottom (either cursor phase) instead of sampling once.
+    let h = await canvasHash();
+    for (let i = 0; i < 20 && h !== bottom && h !== bottomOther; i++) {
+      await page.waitForTimeout(150);
+      h = await canvasHash();
+    }
+    check('drag up scrolls forward again', h === bottom || h === bottomOther);
+  }
 
   // Alternate screen: a drag sends arrow keys, as the wheel does.
   await run("printf '\\033[?1049h'; stty -icanon -echo; cat -v");

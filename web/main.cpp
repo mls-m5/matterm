@@ -18,6 +18,7 @@
 #include "terminalview.h"
 #include "touchgesture.h"
 #include "ui/commandpalette.h"
+#include "ui/dialogs.h"
 #include "websocketchannel.h"
 #include "workspaceview.h"
 
@@ -64,6 +65,7 @@ struct WebPane {
     std::unique_ptr<ScriptedLink> demo; // The pretend system, no server.
     TerminalLink *link = nullptr;       // session or demo.
     std::string requested;              // The session id asked for (or empty).
+    std::string attachId;               // What Hello carried: an id, "local:<id>" or empty.
     bool changed = false;               // Output arrived since the last frame.
     bool hinted = false;                // What Enter does now was written.
     // Last: it listens to the link above, so it is destroyed first.
@@ -114,6 +116,12 @@ struct App {
     std::string shownTitle;
     int pointerShape = 0;       // 0 arrow, 1 columns, 2 rows.
     std::string pendingSession; // For the next pane the factory makes.
+    // The laptop's shared terminals, offered by the server (POST /local-sessions): 0 not known
+    // (or not offered), 1 offered. `localPick`: show the list when the answer arrives.
+    int localOffered = 0;
+    bool localAsking = false;
+    bool localPick = false;
+    std::vector<std::pair<std::string, bool>> localSessions; // id, attached
     std::string savedLayout;    // What sessionStorage holds.
     bool touchDivider = false;  // A finger is dragging a divider.
     int touchFinger = 0;
@@ -399,9 +407,148 @@ std::string prefixBytes(const App &app) {
 // The command palette (Ctrl+B ':', the strip's button): an overlay over the
 // panes.
 void openPalette(App &app) {
+    std::vector<CommandEntry> extra;
+    if (app.localOffered == 1) {
+        extra.push_back({"local.open",
+                         "Local terminals...",
+                         "Take over a terminal that is shared from the laptop",
+                         std::nullopt,
+                         {},
+                         {}});
+    }
     app.layout->pushLayer(std::make_unique<ui::CommandPalette>(
-        buildCommandRegistry(app.layout->config().prefix)));
+        buildCommandRegistry(app.layout->config().prefix, extra)));
     layoutChanged(app, false);
+}
+
+// ---- the laptop's shared terminals (docs/TABS_PLAN.md section 11) ----
+
+// The ids this window took over from the laptop, remembered for the tab (sessionStorage), so a
+// reload attaches to them as local terminals again. Browser storage can be missing: then a
+// reload shows them as unavailable, nothing worse.
+void rememberLocal(const std::string &id) {
+    EM_ASM(
+        {
+            try {
+                const have = (sessionStorage.getItem("matterm.local") || "").split(",").filter(Boolean);
+                const id = UTF8ToString($0);
+                if (!have.includes(id)) {
+                    have.push(id);
+                }
+                sessionStorage.setItem("matterm.local", have.slice(-32).join(","));
+            } catch (e) {
+            }
+        },
+        id.c_str());
+}
+
+bool isLocal(const std::string &id) {
+    return EM_ASM_INT(
+               {
+                   try {
+                       return (sessionStorage.getItem("matterm.local") || "").split(",").includes(UTF8ToString($0)) ? 1 : 0;
+                   } catch (e) {
+                       return 0;
+                   }
+               },
+               id.c_str()) != 0;
+}
+
+// Asks the server which shared terminals of the local daemon it offers (POST, so that the
+// browser sends an Origin header; the login cookie goes along). The answer is picked up by
+// pollLocal(). A server that does not expose them answers 404: the menu entry stays hidden.
+void askLocalSessions(App &app) {
+    if (app.url.empty() || app.localAsking) {
+        return;
+    }
+    app.localAsking = true;
+    EM_ASM(
+        {
+            const state = {done : false, status : 0, lines : ""};
+            globalThis.mattermLocal = state;
+            let url;
+            try {
+                const u = new URL(UTF8ToString($0), location.href);
+                u.protocol = u.protocol === "wss:" ? "https:" : "http:";
+                u.pathname = "/local-sessions";
+                u.search = "";
+                url = u.toString();
+            } catch (e) {
+                state.done = true;
+                return;
+            }
+            fetch(url, {method : "POST", credentials : "include"})
+                .then((r) => {
+                    state.status = r.status;
+                    return r.ok ? r.json() : null;
+                })
+                .then((j) => {
+                    if (j && Array.isArray(j.sessions)) {
+                        state.lines =
+                            j.sessions
+                                .filter((s) => typeof s.id === "string" &&
+                                               /^[0-9a-f]{32}$/.test(s.id))
+                                .map((s) => s.id + " " + (s.attached ? "1" : "0"))
+                                .join("\n");
+                    }
+                    state.done = true;
+                })
+                .catch(() => { state.done = true; });
+        },
+        app.url.c_str());
+}
+
+void showLocalPicker(App &app) {
+    std::vector<ui::PickList::Item> items;
+    for (const auto &[id, attached] : app.localSessions) {
+        items.push_back({id.substr(0, 8),
+                         attached ? "in use" : "",
+                         "local.attach:" + id});
+    }
+    app.layout->pushLayer(std::make_unique<ui::PickList>(
+        "Local terminals", std::move(items), "Nothing is shared from the laptop"));
+    layoutChanged(app, false);
+}
+
+// Called every frame: takes the server's answer when it has come.
+void pollLocal(App &app) {
+    if (!app.localAsking ||
+        EM_ASM_INT({ return globalThis.mattermLocal && globalThis.mattermLocal.done ? 1 : 0; }) == 0) {
+        return;
+    }
+    app.localAsking = false;
+    const int status = EM_ASM_INT({ return globalThis.mattermLocal.status | 0; });
+    char *raw = static_cast<char *>(EM_ASM_PTR({
+        const v = globalThis.mattermLocal.lines || "";
+        const n = lengthBytesUTF8(v) + 1;
+        const p = _malloc(n);
+        stringToUTF8(v, p, n);
+        return p;
+    }));
+    const std::string lines = raw;
+    std::free(raw);
+    if (status == 200) {
+        app.localOffered = 1;
+        app.localSessions.clear();
+        std::size_t at = 0;
+        while (at < lines.size()) {
+            const auto end = std::min(lines.find('\n', at), lines.size());
+            const std::string line = lines.substr(at, end - at);
+            at = end + 1;
+            if (line.size() == 34 && LayoutSnapshot::validId(line.substr(0, 32))) {
+                app.localSessions.emplace_back(line.substr(0, 32), line.back() == '1');
+            }
+        }
+    }
+    else if (status == 404 || status == 401) {
+        app.localOffered = 0; // Not exposed here (or not logged in).
+    }
+    if (app.localPick) {
+        app.localPick = false;
+        if (app.localOffered == 1) {
+            showLocalPicker(app);
+        }
+    }
 }
 
 // A new tab or split could not be made: say so in the focused terminal.
@@ -410,6 +557,29 @@ void refusedNotice(App &app) {
         pane->view().note(
             "no new terminal: at most 16 in this window, and the space must "
             "fit them");
+    }
+}
+
+// What a layer or the strip asked of the application itself (a CommandEntry id, possibly
+// "id:argument").
+void handleAction(App &app, const std::string &action) {
+    const auto colon = action.find(':');
+    const std::string id = action.substr(0, colon);
+    const std::string argument = colon == std::string::npos ? std::string() : action.substr(colon + 1);
+    if (id == "local.open") {
+        app.localPick = true;
+        askLocalSessions(app);
+    }
+    else if (id == "local.attach" && LayoutSnapshot::validId(argument)) {
+        // A new tab whose terminal is the laptop's: the server bridges "local:<id>" to the daemon.
+        rememberLocal(argument);
+        app.pendingSession = "local:" + argument;
+        const Outcome made = app.workspace->apply(Command::NewTab);
+        app.pendingSession.clear();
+        if (made == Outcome::Ignored) {
+            refusedNotice(app);
+        }
+        layoutChanged(app, false);
     }
 }
 
@@ -439,6 +609,9 @@ bool layoutKey(App &app, const KeyChord &chord) {
     }
     if (result.openPalette) {
         openPalette(app);
+    }
+    if (!result.action.empty()) {
+        handleAction(app, result.action);
     }
     if (result.forwardPrefix) {
         send(app, prefixBytes(app));
@@ -915,6 +1088,9 @@ void handleMouse(App &app, const SDL_Event &event) {
     if (result.openPalette) {
         openPalette(app);
     }
+    if (!result.action.empty()) {
+        handleAction(app, result.action);
+    }
     if (result.consumed || !result.pane) {
         return;
     }
@@ -1022,9 +1198,24 @@ void handleMouse(App &app, const SDL_Event &event) {
     }
 }
 
+void connectPane(App &app, WebPane &pane, const std::string &sessionId, std::uint64_t resumeOffset);
+
 void handleEvent(App &app, const SDL_Event &event) {
     auto *pane = app.focused();
     if (!pane) {
+        return;
+    }
+    if (pane->view().state() == TerminalView::State::Replaced && pane->session &&
+        !pane->session->sessionId().empty() && event.type == SDL_KEYDOWN &&
+        (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_KP_ENTER)) {
+        // Another window took this terminal over: Enter takes it back, continuing from the
+        // bytes already shown (the other window then shows the same notice).
+        const std::string plain = pane->session->sessionId();
+        const bool local = pane->attachId.rfind("local:", 0) == 0;
+        const auto offset = pane->session->receivedOffset();
+        connectPane(app, *pane, local ? "local:" + plain : plain, offset);
+        pane->hinted = false;
+        app.lastSignature.reset();
         return;
     }
     if (app.ended(*pane) && event.type == SDL_KEYDOWN &&
@@ -1173,6 +1364,7 @@ TerminalView::Config viewConfig(const App &app) {
     config.columns = std::size_t(std::max(1, app.backend->columns(true)));
     config.rows = std::size_t(std::max(1, app.backend->rows()));
     config.glide = app.glideConfig;
+    config.replacedNotice = "This terminal is controlled from another window. Press Enter to take it back";
     return config;
 }
 
@@ -1187,6 +1379,7 @@ void connectPane(App &app,
     pane.channel.reset();
     pane.link = nullptr;
     pane.requested = sessionId;
+    pane.attachId = sessionId;
     DBG("connectPane url=%s session=%s", app.url.c_str(), sessionId.c_str());
     try {
         pane.channel = std::make_unique<WebSocketChannel>(app.url);
@@ -1301,8 +1494,12 @@ std::unique_ptr<WebPane> makePane(App &app) {
         startDemoPane(*pane);
     }
     else {
-        connectPane(app, *pane, std::move(app.pendingSession), 0);
+        std::string id = std::move(app.pendingSession);
         app.pendingSession.clear();
+        if (LayoutSnapshot::validId(id) && isLocal(id)) {
+            id = "local:" + id; // A reload of a tab that holds a terminal taken from the laptop.
+        }
+        connectPane(app, *pane, std::move(id), 0);
     }
     return pane;
 }
@@ -1542,6 +1739,7 @@ void frame(void *data) {
         EM_ASM({ location.reload(); });
     }
     // Every pane runs, shown or not: links are served and output is parsed.
+    pollLocal(app);
     std::vector<PaneId> hiddenChanged;
     app.workspace->forEachPane([&](PaneId id, WebPane &pane, bool visible) {
         if (pane.session) {
@@ -1558,6 +1756,10 @@ void frame(void *data) {
             pane.view().note(
                 "terminals are not kept on this server: a reload starts "
                 "fresh");
+        }
+        if (app.ended(pane) && !pane.hinted &&
+            pane.view().state() == TerminalView::State::Replaced) {
+            pane.hinted = true; // The notice already says what Enter does.
         }
         if (app.ended(pane) && !pane.hinted) {
             pane.hinted = true;
@@ -2032,6 +2234,7 @@ int main() {
         return 1;
     }
     app.layout->sync(nowMs(), true);
+    askLocalSessions(app); // Whether the server offers the laptop's shared terminals.
     if (app.layoutKeys()) {
         // The extra-keys bar gets its tabs/panes prefix button (server mode).
         EM_ASM({

@@ -103,6 +103,11 @@ void ClientSession::handle(const Welcome &message) {
         return;
     }
     const auto offered = (config_.replay ? featureReplay : 0) | config_.extraFeatures;
+    // "local:<id>" asks the web server to bridge to a shared session of the local daemon; the
+    // daemon then names the session by its plain id.
+    const std::string expectedId = config_.sessionId.rfind("local:", 0) == 0
+                                       ? config_.sessionId.substr(6)
+                                       : config_.sessionId;
     const bool resumed = (message.flags & welcomeResumed) != 0;
     const bool reset = (message.flags & welcomeOutputLost) != 0;
     const bool validReplayId =
@@ -116,7 +121,7 @@ void ClientSession::handle(const Welcome &message) {
         (reset && !resumed) ||
         (resumed && !(message.features & featureReplay)) ||
         (resumed ? (config_.sessionId.empty() ||
-                    message.sessionId != config_.sessionId)
+                    message.sessionId != expectedId)
                  : (!config_.sessionId.empty() || message.startOffset != 0 ||
                     message.flags != 0)) ||
         (resumed && !reset &&

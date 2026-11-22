@@ -50,5 +50,26 @@ port3=$((port + 2))
 pid2=$!
 sleep 1
 node "$here/e2e-tabs-limit.js" "http://localhost:$port3/" "$password" "$out"
+# Terminals of the laptop: a local daemon on a temporary socket and a server that offers its
+# shared terminals (only when matterm-daemon is next to the server or in PATH).
+daemon=${MATTERM_DAEMON:-$(dirname "$server")/matterm-daemon}
+[ -x "$daemon" ] || daemon=$(command -v matterm-daemon || true)
+if [ -n "$daemon" ] && [ -x "$daemon" ]; then
+    kill "$pid2" 2>/dev/null || true
+    sock="$work/daemon.sock"
+    SHELL=/bin/bash "$daemon" --daemonize --daemon-socket "$sock" --idle-seconds 0
+    port4=$((port + 3))
+    "$server" --config "$work/persistent.json" --credentials "$work/cred" \
+        --port "$port4" --origin "http://localhost:$port4" --static-dir "$site" \
+        --expose-local-sessions --daemon-socket "$sock" \
+        -- /bin/bash >"$work/server4.log" 2>&1 &
+    pid2=$!
+    sleep 1
+    node "$here/e2e-local.js" "http://localhost:$port4/" "$password" "$out" "$sock"
+    kill "$pid2" 2>/dev/null || true
+    pkill -f "matterm-daemon --daemonize --daemon-socket $sock" 2>/dev/null || true
+else
+    echo "SKIP e2e-local.js: no matterm-daemon (set MATTERM_DAEMON)"
+fi
 node "$here/e2e-demo.js" "${url}?demo" "$out/demo.png"
 echo "screenshots in $out"
