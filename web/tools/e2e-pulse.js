@@ -29,7 +29,7 @@ async function setup(page) {
   await page.waitForTimeout(800);
 }
 // The strip, a picture a little apart in time; hashes of the first tab's label area.
-const strip = { x: 0, y: 0, width: 260, height: 28 };
+const strip = { x: 43, y: 44, width: 260, height: 24 }; // the page frames the terminal: the strip starts at (43, 44)
 async function samples(page, n, gap, out, name) {
   const hs = [];
   for (let i = 0; i < n; i++) {
