@@ -253,3 +253,52 @@ Open items noted by the owner:
 - Needs: a `RenameTab` command with a text argument (the palette's text input is the
   first widget that produces it), a title field in `Workspace`'s tab, the snapshot
   format change (bump its version, keep reading the old one).
+
+## 9. Saving and restoring sessions (idea, owner request 2026-11-22, nothing decided)
+
+Goal: after the terminal is restarted, keep the layout, the folders and, if it can
+be made to work, the programs that were running.
+
+What can be restored, from cheap to hard:
+
+1. **Layout:** tabs, the pane tree, ratios and tab titles. `LayoutSnapshot` (strict,
+   limits, versioned) already does this for the browser; native can use the same format.
+2. **Working folder of every pane.** On Linux read `/proc/<pid>/cwd` of the pane's
+   foreground process (via `tcgetpgrp` on the PTY, falling back to the shell). It needs no
+   shell configuration, which the owner prefers (OSC 7 would need the shell to print the
+   folder; use it too when a shell does, but do not depend on it). Linux only; elsewhere
+   the layout comes back without folders.
+3. **What was on screen.** The checkpointed on-disk scrollback idea
+   (`docs/MULTI_TERMINAL.md` section 12): a restored pane can show its old text,
+   dimmed, under a marker line, then the new shell starts below it in the same folder.
+4. **The command line of the program that was running** (`/proc/<pid>/cmdline`). A
+   running process cannot be moved (no checkpoint/restore of processes), so the
+   program can only be started again. Never automatically: the pane shows "was
+   running: <command> - press Enter to run it again" and waits. Environment variables
+   are not saved (they may hold secrets). Shell state (variables, an activated virtualenv,
+   an open ssh session, unsaved history in memory) is lost.
+5. **Processes that really keep running** only if they are owned by something that
+   outlives the window: the server's persistent sessions already do this for the
+   browser. The native app could attach to a local session daemon over a Unix socket
+   (the tmux model: close the window, programs go on, open it again and attach). That
+   is the only way to keep a program alive across a restart of the terminal, and it needs
+   a local transport for the server, an owner-only socket, and a rule for who may attach.
+   After a reboot of the machine all processes are gone, so 1-4 are the fallback.
+
+Policy ideas:
+- The default session is saved after every layout change (debounced) and on quit, and
+  offered or restored at the next start. Named sessions ("work", "server") can be saved
+  and opened from the command palette.
+- Stored under the XDG state folder, one file per session, mode 0600, versioned, read with the
+  same strict parser and limits as the browser layout (the file is untrusted input).
+- A restored pane whose folder no longer exists starts in the home folder with a note.
+- Window position and size are saved but only used where the window manager lets us
+  (not on Wayland).
+
+Suggested order: (1) layout + titles + folders in the native app, (2) restored text
+under a marker, (3) "run it again" offer for the previous command, (4) named sessions in
+the palette, (5) local session daemon, if the owner wants the tmux model.
+
+Questions for the owner: restore automatically or ask at start? Named sessions
+wanted? Is "offer to run the program again" enough, or is a daemon that keeps programs
+alive the goal?
