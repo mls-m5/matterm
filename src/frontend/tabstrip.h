@@ -32,7 +32,7 @@ inline constexpr int kMaxTitle = 20; // Columns of a title at most.
 inline constexpr int kMinTitle = 4;  // Shrinking stops here.
 
 struct StripHit {
-    enum class Kind { None, Tab, Close, NewTab, ScrollLeft, ScrollRight, Palette };
+    enum class Kind { None, Tab, Close, NewTab, ScrollLeft, ScrollRight, Palette, Share };
     Kind kind = Kind::None;
     int tab = -1; // Index into the TabInfo list for Tab and Close.
     bool operator==(const StripHit &o) const {
@@ -239,21 +239,57 @@ private:
 
 } // namespace tabstrip_detail
 
+// The share button at the end of the strip (only offered when the panes can be shared, that is
+// when they run in the local daemon): grey "Share" when nothing in the active tab is shared, red
+// "Share N" when N panes are. ASCII only, so no glyph has to exist in the font.
+struct ShareButton {
+    bool shown = false;
+    int shared = 0; // Panes of the active tab that are shared.
+};
+
+inline std::u32string shareLabel(const ShareButton &share) {
+    std::u32string text = U" Share ";
+    if (share.shared > 0) {
+        for (const char c : std::to_string(share.shared)) {
+            text.push_back(char32_t(c));
+        }
+        text.push_back(U' ');
+    }
+    return text;
+}
+
 inline TabStrip buildTabStrip(const std::vector<TabInfo> &tabs,
                               int columns,
                               const Palette &palette = Palette(),
                               int firstVisible = 0,
-                              bool paletteButton = false) {
+                              bool paletteButton = false,
+                              ShareButton share = {}) {
     using namespace tabstrip_detail;
     constexpr int kButtonWidth = 3;
-    if (paletteButton && columns >= 12 + kButtonWidth) {
-        // The command palette's button closes the row: " ≡ ", after everything else.
-        TabStrip strip = buildTabStrip(tabs, columns - kButtonWidth, palette, firstVisible, false);
+    const std::u32string shareText = shareLabel(share);
+    const int shareWidth = share.shown ? int(shareText.size()) : 0;
+    const int paletteWidth = paletteButton ? kButtonWidth : 0;
+    if ((share.shown || paletteButton) && columns >= 12 + shareWidth + paletteWidth) {
+        // Buttons close the row after everything else: " Share " then " ≡ ".
+        TabStrip strip = buildTabStrip(tabs, columns - shareWidth - paletteWidth, palette, firstVisible, false);
         const Colors col = colors(palette);
-        strip.cells.push_back(FChar{U' ', col.dim, col.stripBg});
-        strip.cells.push_back(FChar{U'≡', col.dim, col.stripBg});
-        strip.cells.push_back(FChar{U' ', col.dim, col.stripBg});
-        strip.regions.push_back({columns - kButtonWidth, columns, {StripHit::Kind::Palette, -1}});
+        int at = columns - shareWidth - paletteWidth;
+        if (share.shown) {
+            const bool on = share.shared > 0;
+            const Rgb8 fg = on ? Rgb8{255, 255, 255} : col.dim;
+            const Rgb8 bg = on ? Rgb8{190, 35, 35} : col.tabBg;
+            for (const char32_t c : shareText) {
+                strip.cells.push_back(FChar{c, fg, bg});
+            }
+            strip.regions.push_back({at, at + shareWidth, {StripHit::Kind::Share, -1}});
+            at += shareWidth;
+        }
+        if (paletteButton) {
+            strip.cells.push_back(FChar{U' ', col.dim, col.stripBg});
+            strip.cells.push_back(FChar{U'≡', col.dim, col.stripBg});
+            strip.cells.push_back(FChar{U' ', col.dim, col.stripBg});
+            strip.regions.push_back({at, columns, {StripHit::Kind::Palette, -1}});
+        }
         return strip;
     }
     const Colors col = colors(palette);

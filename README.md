@@ -33,6 +33,32 @@ cmake --build build
 The browser build and the server are described in [web/README.md](web/README.md) and
 [docs/SERVER.md](docs/SERVER.md) (`-DMATTERM_BUILD_SERVER=ON`).
 
+## Keep terminals running: the local daemon
+
+`matterm-daemon` (built with `-DMATTERM_BUILD_SERVER=ON`, Linux) keeps terminals alive on a
+private Unix socket, so they survive closing the window or a crash of the GUI.
+
+```sh
+./build/matterm --daemon            # starts the daemon if it is not running (--no-daemon: default)
+./build/matterm --daemon --daemon-socket /tmp/dev.sock   # a separate daemon, for development
+```
+
+- The socket is `$XDG_RUNTIME_DIR/matterm/daemon.sock` (directory 0700, socket 0600, only your
+  user can connect); the daemon runs your `$SHELL` and ends itself after 60 s with nothing in it.
+- Ctrl+Shift+P opens the command palette: **Daemon status**, **Stop daemon** (asks, and says how
+  many programs end), **Quit and keep running** (closes the window, the programs stay).
+  Closing a pane or quitting normally ends its terminal; SIGTERM/SIGHUP and *Quit and keep
+  running* leave them. Start `matterm --daemon` again to get a new window; open terminals are
+  still listed by the daemon (re-attaching old ones from the GUI is not built yet).
+- **Sharing**: with `--daemon` the end of the tab strip has a *Share* button (grey: nothing in
+  the tab is shared; red with a count: that many panes are), and the palette has *Share this
+  terminal*, *Share this tab* and the matching *Stop sharing* entries. A shared pane has a
+  small red square in its corner. Only shared terminals are ever offered to a browser.
+- If another window takes a terminal over, the pane keeps its screen, pauses input and says
+  "This terminal is controlled from another window. Press Enter to take it back".
+- Details: [docs/tasks/daemon.md](docs/tasks/daemon.md), [docs/PROTOCOL.md](docs/PROTOCOL.md)
+  section 12, [docs/TABS_PLAN.md](docs/TABS_PLAN.md) sections 10-11.
+
 ## More
 
 - [docs/OVERVIEW.md](docs/OVERVIEW.md): the full guide (controls, options, tests,

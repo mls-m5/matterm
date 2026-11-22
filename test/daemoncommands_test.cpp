@@ -44,4 +44,20 @@ TEST_CASE("Status text") {
               "daemon: 1 program, 0 shown, 1 running without a window");
 }
 
+TEST_CASE("Sharing entries follow what is shared now") {
+    const auto ids = [](const ShareState &state) {
+        std::string all;
+        for (const auto &e : shareCommandEntries(state)) {
+            all += e.id + " ";
+        }
+        return all;
+    };
+    EXPECT_EQ(ids({2, 0, false}), "share.pane share.tab ");
+    EXPECT_EQ(ids({2, 1, true}), "share.pane.stop share.tab share.tab.stop ");
+    EXPECT_EQ(ids({2, 2, true}), "share.pane.stop share.tab.stop ");
+    EXPECT_EQ(ids({2, 1, false}), "share.pane share.tab share.tab.stop ");
+    EXPECT_EQ(shareCommandEntries({1, 0, false})[0].name,
+              "Share this terminal");
+}
+
 TEST_SUIT_END

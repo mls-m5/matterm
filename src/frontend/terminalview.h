@@ -21,6 +21,8 @@ struct TerminalViewConfig {
     std::size_t rows = 24;
     std::size_t scrollback = 1000;
     CursorGlide::Config glide;
+    // The line written into the terminal when another window takes the session over.
+    std::string replacedNotice = "session taken over by another window";
 };
 
 // One terminal in a window: its own model, parser, palette, title, selection
@@ -232,7 +234,7 @@ private:
         const auto code = errorCode_ ? errorCode_() : std::nullopt;
         if (code == protocol::ErrorCode::Replaced) {
             state_ = State::Replaced;
-            notice("session taken over by another window");
+            notice(config_.replacedNotice);
         }
         else if (code == protocol::ErrorCode::ResumeUnsupported) {
             state_ = State::Unavailable;

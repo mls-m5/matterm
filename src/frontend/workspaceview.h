@@ -50,6 +50,7 @@ struct ViewConfig {
     int dividerThickness = 12;   // gutter strip in pixels (its near half holds a scrollbar)
     int scrollbarStrip = 12;     // reserved at the right edge of panes touching it
     bool showStripWithOneTab = true;
+    bool shareButton = false;    // a Share button in the strip (needs a share probe; panes in the daemon)
     bool paletteButton = false;  // a button at the end of the strip that opens the command palette
     bool prefixKeys = true;      // Ctrl+B ... (browser)
     bool desktopShortcuts = true; // Ctrl+Shift+T ... (native)
@@ -71,6 +72,7 @@ struct PanePlan {
     int columns = 0;     // size the program sees (view().model() has this size after sync())
     int rows = 0;
     bool focused = false;
+    bool shared = false; // marked shared: the owner draws a small red mark in its corner
 };
 
 // An overlay as it should be drawn: a cell grid at a pixel place (whole cells).
@@ -178,7 +180,7 @@ public:
         if (stripH > 0) {
             out.stripRect = {0, 0, metrics_.width, stripH};
             out.strip = buildTabStrip(workspace_.tabInfos(titleOf), stripColumns(), config_.palette, stripFirst_,
-                                  config_.paletteButton);
+                                  config_.paletteButton, ShareButton{config_.shareButton && probeShared_, sharedInActiveTab()});
         }
         const Layout layout = activeLayout();
         out.dividers = layout.dividers;
@@ -191,6 +193,7 @@ public:
             p.columns = box.columns;
             p.rows = box.rows;
             p.focused = box.pane == out.focus;
+            p.shared = shared_ && shared_(box.pane);
             if (box.rect.x + box.rect.w >= right) {
                 // At the window edge: the strip inside the pane holds the scrollbar.
                 p.columns = std::max(1, (box.rect.w - config_.scrollbarStrip) / metrics_.cellWidth);
@@ -385,6 +388,10 @@ public:
                 r.openPalette = true;
                 r.changed = true;
                 break;
+            case StripHit::Kind::Share:
+                r.action = sharedInActiveTab() > 0 ? "share.tab.stop" : "share.tab";
+                r.changed = true;
+                break;
             case StripHit::Kind::ScrollLeft:
                 stripFirst_ = std::max(0, std::max(stripFirst_, p.strip.firstVisible) - 1);
                 r.changed = true;
@@ -519,6 +526,24 @@ public:
     // never asked about (it is closed through Workspace::closePaneAnywhere).
     using BusyProbe = std::function<std::optional<std::string>(PaneId)>;
     void setBusyProbe(BusyProbe probe) { busy_ = std::move(probe); }
+    // Which panes are shared (the daemon's mark). Without a probe nothing is shown shared and the
+    // Share button is not offered. Clicking the button returns the action "share.tab" (nothing in
+    // the active tab is shared: share it) or "share.tab.stop" (stop sharing it).
+    using ShareProbe = std::function<bool(PaneId)>;
+    void setShareProbe(ShareProbe probe) {
+        shared_ = std::move(probe);
+        probeShared_ = bool(shared_);
+    }
+    // Shared panes in the active tab.
+    int sharedInActiveTab() const {
+        int n = 0;
+        if (shared_) {
+            workspace_.forEachPane([&](PaneId id, const Pane &, bool visible) {
+                if (visible && shared_(id)) ++n;
+            });
+        }
+        return n;
+    }
     const std::optional<CloseRequest> &pendingClose() const { return pendingClose_; }
     // Closing the whole window: nullopt when it is fine to quit now; otherwise the request
     // (also pending, answer it with answerClose; Close then means "quit", nothing is changed here).
@@ -831,6 +856,8 @@ private:
 
     Workspace<Pane> &workspace_;
     BusyProbe busy_;
+    ShareProbe shared_;
+    bool probeShared_ = false;
     std::optional<CloseRequest> pendingClose_;
     ViewConfig config_;
     mutable std::vector<std::unique_ptr<ui::Layer>> layers_; // bottom first; resized by place()

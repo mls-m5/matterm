@@ -23,6 +23,12 @@ inline constexpr const char *stopCancel = "daemon.stop.cancel";
 inline constexpr const char *quitKeep =
     "daemon.quitkeep"; // Close the window only.
 inline constexpr const char *status = "daemon.status";
+// Sharing (the daemon's per-terminal mark): the pane in focus or every pane of
+// the active tab.
+inline constexpr const char *sharePane = "share.pane";
+inline constexpr const char *sharePaneStop = "share.pane.stop";
+inline constexpr const char *shareTab = "share.tab";
+inline constexpr const char *shareTabStop = "share.tab.stop";
 } // namespace daemonaction
 
 // Entries for the palette's `extra` list. Without a daemon (the default) there
@@ -52,6 +58,43 @@ inline std::vector<CommandEntry> daemonCommandEntries(bool usingDaemon) {
          {},
          {}},
     };
+}
+
+// What the palette needs to know to offer the sharing entries that make sense
+// now.
+struct ShareState {
+    std::size_t panes = 0;  // Panes in the active tab.
+    std::size_t shared = 0; // Of those, shared.
+    bool focusedShared = false;
+};
+
+inline std::vector<CommandEntry> shareCommandEntries(const ShareState &state) {
+    std::vector<CommandEntry> out;
+    const auto add =
+        [&](const char *id, const char *name, const char *description) {
+            out.push_back({id, name, description, std::nullopt, {}, {}});
+        };
+    if (!state.focusedShared) {
+        add(daemonaction::sharePane,
+            "Share this terminal",
+            "Let a browser on this machine's server take this terminal over");
+    }
+    else {
+        add(daemonaction::sharePaneStop,
+            "Stop sharing this terminal",
+            "Make this terminal private again");
+    }
+    if (state.shared < state.panes) {
+        add(daemonaction::shareTab,
+            "Share this tab",
+            "Share every terminal of this tab");
+    }
+    if (state.shared > 0) {
+        add(daemonaction::shareTabStop,
+            "Stop sharing this tab",
+            "Make every terminal of this tab private again");
+    }
+    return out;
 }
 
 inline std::string plural(std::size_t n, const char *one, const char *many) {

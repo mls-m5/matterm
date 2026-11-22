@@ -233,6 +233,13 @@ private:
     std::function<void(std::string_view)> tap_;
 };
 
+// A daemon pane says plainly what happened when another window took its terminal over.
+TerminalViewConfig daemonViewConfig(int columns, int rows) {
+    TerminalViewConfig config{std::size_t(columns), std::size_t(rows), 1000, {}};
+    config.replacedNotice = "This terminal is controlled from another window. Press Enter to take it back";
+    return config;
+}
+
 // Time for the daemon connection's timers.
 protocol::Time daemonClock() {
     return std::chrono::duration_cast<protocol::Time>(std::chrono::steady_clock::now().time_since_epoch());
@@ -248,6 +255,8 @@ struct NativePane {
     TerminalView v;
     bool endInDaemon = true; // Closing the pane ends its terminal; false: leave it running.
     bool hinted = false;
+    bool shared = false;           // Marked shared in the daemon (offered to browsers).
+    bool takeoverReported = false; // The owner was told that another window took this terminal.
 
     NativePane(const std::vector<std::string> &arguments,
                const std::string &term,
@@ -268,7 +277,7 @@ struct NativePane {
     // A pane whose terminal lives in the daemon: a new one (empty `sessionId`) or an existing one.
     NativePane(const std::string &socketPath, std::string sessionId, int columns, int rows)
         : socket(socketPath)
-        , v(TerminalViewConfig{std::size_t(columns), std::size_t(rows), 1000, {}}) {
+        , v(daemonViewConfig(columns, rows)) {
         daemon = attachToDaemon(v, socket, std::move(sessionId), 0, daemonClock);
     }
     ~NativePane() {
@@ -304,6 +313,9 @@ struct NativePane {
         }
         else if (!hinted) {
             hinted = true;
+            if (kind == Reattach::Same && v.state() == TerminalView::State::Replaced) {
+                return; // The notice already says it.
+            }
             v.note(kind == Reattach::Fresh ? "press Enter to start a new terminal"
                                            : "press Enter to attach again");
         }
@@ -487,6 +499,7 @@ int runPtyFrontend(const char *font,
     // shortcuts instead (the browser uses the prefix keys).
     viewConfig.prefixKeys = false;
     viewConfig.paletteButton = true;
+    viewConfig.shareButton = daemonOptions.enabled;
     WorkspaceView<NativePane> wv(workspace, viewConfig);
     const CursorPtr arrowCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW));
     const CursorPtr columnsCursor(
@@ -682,6 +695,58 @@ int runPtyFrontend(const char *font,
             return commandLine(state.command); // Empty: the dialog says "A program".
         });
     }
+    const auto notify = [&](const std::string &text) {
+        linkError = text; // Shown in the window title, like the other errors of the app.
+    };
+    if (daemonOptions.enabled) {
+        wv.setShareProbe([&](PaneId id) {
+            const NativePane *pane = workspace.pane(id);
+            return pane && pane->shared;
+        });
+    }
+    // Marks the given panes shared (or private) in the daemon, and takes over what the daemon
+    // answers: its list says which sessions are shared now.
+    const auto setShared = [&](const std::vector<PaneId> &ids, bool on) {
+        std::string error;
+        std::optional<mtd::ControlReply> last;
+        for (const PaneId id : ids) {
+            NativePane *pane = workspace.pane(id);
+            if (!pane || !pane->daemon || pane->daemon->sessionId().empty()) {
+                continue;
+            }
+            last = askDaemon(daemonPath, mtd::SetShared{pane->daemon->sessionId(), on}, error);
+            if (!last) {
+                break;
+            }
+        }
+        const auto *list = last ? std::get_if<mtd::SessionList>(&*last) : nullptr;
+        if (!list) {
+            if (!last && !error.empty()) {
+                notify("daemon: " + error);
+            }
+            return;
+        }
+        workspace.forEachPane([&](PaneId, NativePane &pane, bool) {
+            if (!pane.daemon) {
+                return;
+            }
+            for (const auto &entry : list->sessions) {
+                if (entry.id == pane.daemon->sessionId()) {
+                    pane.shared = entry.shared;
+                }
+            }
+        });
+        notify(on ? "shared" : "sharing stopped");
+    };
+    const auto activeTabPanes = [&] {
+        std::vector<PaneId> ids;
+        workspace.forEachPane([&](PaneId id, NativePane &, bool visible) {
+            if (visible) {
+                ids.push_back(id);
+            }
+        });
+        return ids;
+    };
     const auto showCloseDialog = [&](const CloseRequest &request) {
         std::vector<ui::ConfirmDialog::Button> buttons = {{"Close", "close.confirm"}, {"Cancel", "close.cancel"}};
         // Hook: when request.backgroundAvailable, a third button "Run in background" goes here.
@@ -694,9 +759,6 @@ int runPtyFrontend(const char *font,
         else {
             running = false;
         }
-    };
-    const auto notify = [&](const std::string &text) {
-        linkError = text; // Shown in the window title, like the other errors of the app.
     };
     // The window's session as it is now. Screen text only for a shutdown checkpoint.
     const auto saveSession = [&](const std::string &name, bool withText) {
@@ -769,6 +831,16 @@ int runPtyFrontend(const char *font,
         };
         for (auto &entry : daemonCommandEntries(daemonOptions.enabled)) {
             extra.push_back(std::move(entry));
+        }
+        if (daemonOptions.enabled) {
+            ShareState state;
+            state.panes = activeTabPanes().size();
+            state.shared = std::size_t(wv.sharedInActiveTab());
+            const NativePane *focusedPane = workspace.focusedPane();
+            state.focusedShared = focusedPane && focusedPane->shared;
+            for (auto &entry : shareCommandEntries(state)) {
+                extra.push_back(std::move(entry));
+            }
         }
         wv.pushLayer(std::make_unique<ui::CommandPalette>(buildCommandRegistry(viewConfig.prefix, extra), true));
     };
@@ -843,6 +915,14 @@ int runPtyFrontend(const char *font,
             else {
                 notify("daemon stopped");
             }
+        }
+        else if (id == daemonaction::sharePane || id == daemonaction::sharePaneStop) {
+            if (const auto focusedId = workspace.focusedPaneId(); focusedId != 0) {
+                setShared({focusedId}, id == daemonaction::sharePane);
+            }
+        }
+        else if (id == daemonaction::shareTab || id == daemonaction::shareTabStop) {
+            setShared(activeTabPanes(), id == daemonaction::shareTab);
         }
         else if (id == daemonaction::quitKeep) {
             keepTerminals = true;
@@ -1463,6 +1543,14 @@ int runPtyFrontend(const char *font,
         std::vector<PaneId> ended;
         workspace.forEachPane([&](PaneId id, NativePane &pane, bool) {
             pane.pump();
+            if (pane.inDaemon()) {
+                const bool taken = pane.v.state() == TerminalView::State::Replaced;
+                if (taken && !pane.takeoverReported) {
+                    notify(pane.shared ? "a shared terminal was taken over from another window"
+                                       : "a terminal was taken over by another window");
+                }
+                pane.takeoverReported = taken;
+            }
             if (pane.finished()) {
                 ended.push_back(id);
             }
@@ -1561,6 +1649,11 @@ int runPtyFrontend(const char *font,
                                      pp.scrollbar.y,
                                      pp.scrollbar.w,
                                      pp.scrollbar.h}});
+            if (pp.shared) {
+                // Shared with browsers: a small red square in the pane's corner.
+                const int side = std::max(4, backend.cellHeight() / 3);
+                backend.drawRect({pp.rect.x + pp.rect.w - side - 2, pp.rect.y + 2, side, side}, Rgb8{210, 40, 40});
+            }
         }
         for (const auto &d : plan.dividers) {
             backend.drawRect({d.rect.x, d.rect.y, d.rect.w, d.rect.h},

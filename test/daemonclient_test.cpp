@@ -154,6 +154,48 @@ TEST_CASE("Start the daemon, run a terminal in it, leave, come back, stop it") {
     EXPECT(until([&] { return !daemonRunning(socket); }));
 }
 
+TEST_CASE("Marking a terminal shared shows in the daemon's list, and back") {
+    ::setenv("SHELL", "/bin/sh", 1);
+    TempDir dir;
+    const std::string socket = dir.path + "/d.sock";
+    EXPECT_EQ(ensureDaemon(socket, MATTERM_DAEMON_BIN), "");
+    auto view = makeView();
+    auto link = attachToDaemon(view, socket, "", 0, clockNow);
+    EXPECT(link != nullptr);
+    EXPECT(until([&] {
+        link->tick();
+        return !link->sessionId().empty();
+    }));
+    const auto sharedFlag = [&](bool on) {
+        std::string error;
+        const auto reply =
+            askDaemon(socket, mtd::SetShared{link->sessionId(), on}, error);
+        const auto *list =
+            reply ? std::get_if<mtd::SessionList>(&*reply) : nullptr;
+        if (!list) {
+            return -1;
+        }
+        for (const auto &entry : list->sessions) {
+            if (entry.id == link->sessionId()) {
+                return entry.shared ? 1 : 0;
+            }
+        }
+        return -1;
+    };
+    EXPECT_EQ(sharedFlag(true), 1);
+    EXPECT_EQ(sharedFlag(false), 0);
+    std::string error;
+    const auto unknown =
+        askDaemon(socket,
+                  mtd::SetShared{"00000000000000000000000000000000", true},
+                  error);
+    EXPECT(unknown.has_value());
+    EXPECT(unknown && std::holds_alternative<mtd::ControlError>(*unknown));
+    view.detach();
+    std::string stop;
+    askDaemon(socket, mtd::Shutdown{1}, stop);
+}
+
 TEST_CASE("No daemon: asking says so") {
     TempDir dir;
     std::string error;

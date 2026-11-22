@@ -351,4 +351,42 @@ TEST_CASE("A palette button closes the row when asked, at any width") {
     EXPECT(buildTabStrip(makeTabs(3, 0), 80).regions.back().hit.kind != Kind::Palette);
 }
 
+TEST_CASE("A share button sits before the palette button: grey when nothing is shared, red with the count") {
+    for (int columns = 0; columns <= 200; ++columns) {
+        for (const int tabs : {0, 1, 3, 50}) {
+            for (const int shared : {0, 1, 12}) {
+                const auto strip = buildTabStrip(makeTabs(tabs, 0), columns, Palette(), 0, true, ShareButton{true, shared});
+                EXPECT(sound(strip, columns, std::size_t(tabs)));
+                bool found = false;
+                for (const auto &r : strip.regions) {
+                    found = found || r.hit.kind == Kind::Share;
+                }
+                if (found) {
+                    // Share, then the palette button, closing the row.
+                    EXPECT(strip.regions.back().hit.kind == Kind::Palette);
+                    const auto &share = strip.regions[strip.regions.size() - 2];
+                    EXPECT(share.hit.kind == Kind::Share);
+                    EXPECT_EQ(share.end, strip.regions.back().begin);
+                    std::u32string text;
+                    for (int c = share.begin; c < share.end; ++c) {
+                        text.push_back(strip.cells[std::size_t(c)].codePoint);
+                    }
+                    EXPECT(text.find(U"Share") != std::u32string::npos);
+                    EXPECT((text.find(U"12") != std::u32string::npos) == (shared == 12));
+                    const auto bg = strip.cells[std::size_t(share.begin)].background;
+                    EXPECT((bg.r > 150 && bg.g < 80) == (shared > 0)); // Red only when something is shared.
+                }
+                else {
+                    EXPECT(columns < 12 + int(shareLabel(ShareButton{true, shared}).size()) + 3);
+                }
+            }
+        }
+    }
+    // Without a share button nothing changes; without the palette button it ends the row.
+    const auto only = buildTabStrip(makeTabs(2, 0), 80, Palette(), 0, false, ShareButton{true, 0});
+    EXPECT(only.regions.back().hit.kind == Kind::Share);
+    EXPECT_EQ(only.regions.back().end, 80);
+    EXPECT(buildTabStrip(makeTabs(3, 0), 80).regions.back().hit.kind != Kind::Share);
+}
+
 TEST_SUIT_END

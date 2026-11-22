@@ -747,4 +747,48 @@ TEST_CASE("The strip can end in a button that asks for the palette") {
            plain.plan().strip.regions.back().hit.kind != StripHit::Kind::Palette);
 }
 
+TEST_CASE("The Share button shows the shared panes of the active tab and asks for the right action") {
+    int made = 0;
+    Space space{[&made]() { return std::make_unique<Pane>("t" + std::to_string(++made)); }};
+    ViewConfig config;
+    config.shareButton = true;
+    View view(space, config);
+    view.setWindow({1200, 800, 8, 16});
+    view.key({'t', true, true, false}, 0);
+    view.key({'t', true, true, false}, 1); // Two tabs: the strip shows.
+    // No probe (panes not in the daemon): no button.
+    for (const auto &region : view.plan().strip.regions) {
+        EXPECT(region.hit.kind != StripHit::Kind::Share);
+    }
+    std::set<PaneId> shared;
+    view.setShareProbe([&shared](PaneId id) { return shared.count(id) != 0; });
+    const auto clickShare = [&view]() {
+        const FramePlan plan = view.plan();
+        int column = -1;
+        for (const auto &region : plan.strip.regions) {
+            if (region.hit.kind == StripHit::Kind::Share) column = region.begin;
+        }
+        if (column < 0) {
+            return MouseResult{}; // The caller's check of the action fails.
+        }
+        MouseInput click;
+        click.x = column * 8 + 2;
+        click.y = 4;
+        click.type = MouseInput::Type::Down;
+        click.button = MouseInput::Button::Left;
+        return view.mouse(click);
+    };
+    EXPECT_EQ(clickShare().action, "share.tab");
+    const PaneId pane = space.focusedPaneId();
+    shared.insert(pane);
+    EXPECT_EQ(view.sharedInActiveTab(), 1);
+    EXPECT_EQ(clickShare().action, "share.tab.stop");
+    bool marked = false;
+    for (const auto &p : view.plan().panes) {
+        EXPECT(p.shared == (p.id == pane));
+        marked = marked || p.shared;
+    }
+    EXPECT(marked);
+}
+
 TEST_SUIT_END

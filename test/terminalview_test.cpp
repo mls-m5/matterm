@@ -408,4 +408,25 @@ TEST_CASE("Resizing the view resizes the model and tells the link") {
     EXPECT(sawResize);
 }
 
+TEST_CASE("The take-over notice can be worded by the owner of the view") {
+    TerminalView::Config config;
+    config.columns = 80;
+    config.rows = 5;
+    config.replacedNotice = "This terminal is controlled from another window. Press Enter to take it back";
+    Slot slot;
+    slot.view = std::make_unique<TerminalView>(config);
+    ClientSession::Config sessionConfig;
+    sessionConfig.clock = [&slot] { return slot.now; };
+    slot.view->configure(sessionConfig, {}, 0);
+    slot.session = std::make_unique<ClientSession>(slot.channel, sessionConfig);
+    slot.view->attach(*slot.session, [&slot] { return slot.session->errorCode(); });
+    slot.connect();
+    slot.output("kept");
+    slot.channel.deliver(Error{ErrorCode::Replaced, "session taken over"});
+    EXPECT(slot.view->state() == TerminalView::State::Replaced);
+    EXPECT(contains(slot.screen(), "controlled from another window. Press Enter to take it back"));
+    EXPECT(contains(slot.screen(), "kept"));
+    EXPECT(!slot.view->sendInput("x"));
+}
+
 TEST_SUIT_END
