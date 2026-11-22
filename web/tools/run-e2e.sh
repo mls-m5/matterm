@@ -6,7 +6,7 @@ set -eu
 server=$1; site=$2; out=${3:-$(mktemp -d)}
 here=$(cd "$(dirname "$0")" && pwd)
 pid2=
-work=$(mktemp -d); trap 'kill $pid $pid2 2>/dev/null; rm -rf "$work"' EXIT
+work=$(mktemp -d); trap 'kill $pid $pid2 2>/dev/null || true; rm -rf "$work"' EXIT
 password='end to end test passphrase 0123456789'
 printf '%s\n' "$password" | "$server" --set-password --credentials "$work/cred"
 port=$((20000 + $$ % 20000))

@@ -464,7 +464,11 @@ void askLocalSessions(App &app) {
     app.localAsking = true;
     EM_ASM(
         {
-            const state = {done : false, status : 0, lines : ""};
+            // No object literal: commas outside parentheses split the macro arguments.
+            const state = Object.create(null);
+            state.done = false;
+            state.status = 0;
+            state.lines = "";
             globalThis.mattermLocal = state;
             let url;
             try {
