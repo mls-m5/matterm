@@ -511,7 +511,8 @@ private:
                                {},
                                0,
                                "application/json");
-            });
+            },
+            shared_->config.daemonPeerUid);
     }
     // The browser asked for "local:<id>": take over a shared session of the local daemon.
     // The daemon decides what is visible; this connection only forwards frames both ways.
@@ -559,7 +560,10 @@ private:
             [weak] {
                 if (const auto s = weak.lock())
                     s->bridgeClosed();
-            });
+            },
+            shared_->config.daemonPeerUid);
+        // The daemon gets as long as a Hello gets to answer.
+        helloDeadline_ = Clock::now() + shared_->config.session.helloTimeout;
         std::string bytes;
         protocol::encode(protocol::ClientMessage{hello}, bytes);
         bridge_->send(bytes);
@@ -687,6 +691,11 @@ private:
                      Clock::now() >= self->helloDeadline_) {
                 self->protocolError(protocol::ErrorCode::Timeout,
                                     "expected Hello");
+            }
+            else if (self->bridge_ && !self->bridgeAnswered_ &&
+                     Clock::now() >= self->helloDeadline_) {
+                self->protocolError(protocol::ErrorCode::Timeout,
+                                    "local session did not answer");
             }
             self->schedule();
         });

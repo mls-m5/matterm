@@ -40,6 +40,14 @@ UnixSocketChannel::UnixSocketChannel(const std::string &path) {
         throw UnixConnectError(
             "cannot connect to " + path + ": " + std::strerror(error), error);
     }
+    // The daemon must belong to us: a socket planted by another user (for instance under
+    // /tmp) would get everything the terminal receives and the owner types.
+    ucred cred{};
+    socklen_t credLength = sizeof cred;
+    if (::getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &credLength) != 0 || cred.uid != ::geteuid()) {
+        ::close(fd);
+        throw UnixConnectError("the socket at " + path + " belongs to another user", EACCES);
+    }
     adopt(fd);
 }
 

@@ -2,6 +2,7 @@
 #include "auth.h"
 #include "ptysessionhost.h"
 #include "sessionregistry.h"
+#include <optional>
 #include <utility>
 
 #include <boost/asio/io_context.hpp>
@@ -19,6 +20,8 @@ struct ServerConfig {
     std::string daemonSocket; // Empty: the daemon's default socket.
     // Needed for a non-loopback listen address while local sessions are exposed.
     bool allowRemoteListen = false;
+    // The uid the daemon socket's owner must have (default: this process's own). Tests only.
+    std::optional<unsigned> daemonPeerUid;
     std::string passwordHash;
     std::string trustedProxy = "none";
     unsigned trustedProxyHops = 0;

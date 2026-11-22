@@ -8,6 +8,8 @@
 #include <boost/asio.hpp>
 #include <array>
 #include <chrono>
+#include <sys/socket.h>
+#include <unistd.h>
 #include <deque>
 
 namespace server {
@@ -32,7 +34,8 @@ DaemonConnection::~DaemonConnection() = default;
 std::shared_ptr<DaemonConnection> DaemonConnection::open(net::any_io_executor executor,
                                                          const std::string &path,
                                                          OnFrame onFrame,
-                                                         OnClosed onClosed) {
+                                                         OnClosed onClosed,
+                                                         std::optional<unsigned> expectedPeerUid) {
     auto impl = std::make_unique<Impl>(executor);
     impl->onFrame = std::move(onFrame);
     impl->onClosed = std::move(onClosed);
@@ -43,9 +46,17 @@ std::shared_ptr<DaemonConnection> DaemonConnection::open(net::any_io_executor ex
     mtd::encodeFrame(hello, framed);
     c->impl_->queue.push_back(std::move(framed));
     try {
-        c->impl_->socket.async_connect(stream::endpoint(path), [c](const boost::system::error_code &error) {
+        const uid_t expected = expectedPeerUid ? uid_t(*expectedPeerUid) : ::geteuid();
+        c->impl_->socket.async_connect(stream::endpoint(path), [c, expected](const boost::system::error_code &error) {
             if (error) {
                 c->close();
+                return;
+            }
+            ucred cred{};
+            socklen_t length = sizeof cred;
+            if (::getsockopt(c->impl_->socket.native_handle(), SOL_SOCKET, SO_PEERCRED, &cred, &length) != 0 ||
+                cred.uid != expected) {
+                c->close(); // Not our daemon: send it nothing.
                 return;
             }
             c->impl_->connected = true;
@@ -126,7 +137,8 @@ bool DaemonConnection::isClosed() const { return impl_->closed; }
 void listSharedSessions(net::any_io_executor executor,
                         const std::string &path,
                         std::chrono::milliseconds timeout,
-                        std::function<void(std::optional<std::vector<LocalSessionInfo>>)> done) {
+                        std::function<void(std::optional<std::vector<LocalSessionInfo>>)> done,
+                        std::optional<unsigned> expectedPeerUid) {
     struct State {
         std::function<void(std::optional<std::vector<LocalSessionInfo>>)> done;
         std::shared_ptr<DaemonConnection> connection;
@@ -160,7 +172,8 @@ void listSharedSessions(net::any_io_executor executor,
             }
             state->finish(std::nullopt);
         },
-        [state] { state->finish(std::nullopt); });
+        [state] { state->finish(std::nullopt); },
+        expectedPeerUid);
     std::string request;
     mtd::encode(mtd::ControlRequest(mtd::ListSessions{}), request);
     state->connection->send(request);

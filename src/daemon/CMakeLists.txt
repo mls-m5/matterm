@@ -7,3 +7,6 @@ target_include_directories(matterm-daemon-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR
 target_link_libraries(matterm-daemon-core PUBLIC matterm-daemon-wire matterm-server-core sessionfiles)
 add_executable(matterm-daemon main.cpp)
 target_link_libraries(matterm-daemon PRIVATE matterm-daemon-core)
+# Test support for the browser end-to-end tests of the sharing path. Not installed, not for users.
+add_executable(matterm-daemon-e2e e2e_helper.cpp)
+target_link_libraries(matterm-daemon-e2e PRIVATE matterm-daemon-core)

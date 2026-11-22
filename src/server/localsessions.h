@@ -25,12 +25,15 @@ class DaemonConnection : public std::enable_shared_from_this<DaemonConnection> {
 public:
     using OnFrame = std::function<void(std::string)>;
     using OnClosed = std::function<void()>;
+    // Connects and sends ExposedHello, but only to a socket whose owner is `expectedPeerUid`
+    // (default: our own uid): a daemon planted by another user would get the browser's input.
     // Connects and sends ExposedHello. `onClosed` runs once, whoever ends the connection
     // (also when connecting fails).
     static std::shared_ptr<DaemonConnection> open(boost::asio::any_io_executor executor,
                                                   const std::string &socketPath,
                                                   OnFrame onFrame,
-                                                  OnClosed onClosed);
+                                                  OnClosed onClosed,
+                                                  std::optional<unsigned> expectedPeerUid = std::nullopt);
     ~DaemonConnection();
     // Queues one message (the bytes a WebSocket message would carry). Dropped after close.
     void send(const std::string &payload);
@@ -50,6 +53,7 @@ private:
 void listSharedSessions(boost::asio::any_io_executor executor,
                         const std::string &socketPath,
                         std::chrono::milliseconds timeout,
-                        std::function<void(std::optional<std::vector<LocalSessionInfo>>)> done);
+                        std::function<void(std::optional<std::vector<LocalSessionInfo>>)> done,
+                        std::optional<unsigned> expectedPeerUid = std::nullopt);
 
 } // namespace server

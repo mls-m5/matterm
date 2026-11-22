@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <poll.h>
 #include <sys/socket.h>
@@ -132,7 +133,8 @@ struct Running {
     std::string path;
     std::unique_ptr<mtd::Daemon> d;
     std::thread thread;
-    explicit Running(unsigned idle = 60, std::optional<uid_t> uid = std::nullopt, std::string existingDir = {}) {
+    explicit Running(unsigned idle = 60, std::optional<uid_t> uid = std::nullopt, std::string existingDir = {},
+                     std::function<void(mtd::DaemonConfig &)> tune = {}) {
         if (existingDir.empty()) {
             std::string t = (std::filesystem::temp_directory_path() / "mtdXXXXXX").string();
             dir = ::mkdtemp(t.data());
@@ -147,6 +149,7 @@ struct Running {
         config.idleExitSeconds = idle;
         config.allowedUid = uid;
         config.process.arguments = {"/bin/sh"};
+        if (tune) tune(config);
         d = std::make_unique<mtd::Daemon>(std::move(config));
         std::string error;
         started = d->start(error);

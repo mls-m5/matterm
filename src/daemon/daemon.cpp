@@ -68,6 +68,7 @@ struct Daemon::Impl : std::enable_shared_from_this<Impl> {
     int lockFd = -1;
     bool socketBound = false;
     bool stopping = false;
+    bool shutdownPending = false; // A confirmed Shutdown was accepted: nothing new may start.
     std::atomic<ExitReason> exitReason{ExitReason::None};
     Clock::time_point started = Clock::now();
     std::optional<Clock::time_point> idleSince;
@@ -110,7 +111,9 @@ private:
     void armHelloTimer() {
         timer_.expires_after(std::chrono::milliseconds(d_.config.helloTimeoutMs));
         timer_.async_wait([self = shared_from_this()](const boost::system::error_code &ec) {
-            if (!ec && self->mode_ == Mode::Unknown) self->kill();
+            // Also an exposed connection that never follows up with its Hello or a list request.
+            if (!ec && (self->mode_ == Mode::Unknown || (self->mode_ == Mode::Exposed && !self->attachment_)))
+                self->kill();
         });
     }
     void read() {
@@ -184,6 +187,10 @@ private:
             protocolError(protocol::ErrorCode::ResumeUnsupported, "session unavailable");
             return;
         }
+        if (d_.shutdownPending) {
+            protocolError(protocol::ErrorCode::ShuttingDown, "shutting down");
+            return;
+        }
         std::weak_ptr<Connection> weak = shared_from_this();
         server::SessionRegistry::Transport transport;
         transport.send = [weak](std::string data) {
@@ -236,6 +243,10 @@ private:
         handle(ListSessions{});
     }
     void handle(const CreateSession &m) {
+        if (d_.shutdownPending) {
+            controlError(ControlErrorCode::Busy, "shutting down");
+            return;
+        }
         std::string cwd;
         struct stat st{};
         if (frontend::plainPath(m.cwd) && ::stat(m.cwd.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) cwd = m.cwd;
@@ -281,6 +292,7 @@ private:
             reply(ShutdownReply{false, live});
             return;
         }
+        d_.shutdownPending = true; // The owner confirmed this many: no session may slip in unconfirmed.
         reply(ShutdownReply{true, live});
         // Let the reply reach the client, then end everything.
         onFlushed_ = [&daemon = d_] { daemon.finish(ExitReason::Shutdown); };
@@ -412,16 +424,25 @@ bool Daemon::Impl::start(std::string &error) {
             error = "cannot create " + dir + ": " + std::strerror(errno);
             return false;
         }
+        // lstat: a symlink here was planted by whoever could write the parent directory.
         struct stat st{};
-        if (::stat(dir.c_str(), &st) != 0 || !S_ISDIR(st.st_mode) || st.st_uid != geteuid() ||
+        if (::lstat(dir.c_str(), &st) != 0 || !S_ISDIR(st.st_mode) || st.st_uid != geteuid() ||
             (st.st_mode & 077) != 0) {
-            error = dir + " must be a directory owned by you with mode 0700";
+            error = dir + " must be a real directory (not a symlink) owned by you with mode 0700";
             return false;
         }
     }
-    lockFd = ::open((path + ".lock").c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    // O_NOFOLLOW: a symlink planted as the lock file must not make us truncate its target.
+    lockFd = ::open((path + ".lock").c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
     if (lockFd < 0) {
         error = std::string("cannot open lock file: ") + std::strerror(errno);
+        return false;
+    }
+    struct stat lockStat{};
+    if (::fstat(lockFd, &lockStat) != 0 || !S_ISREG(lockStat.st_mode) || lockStat.st_uid != geteuid()) {
+        error = path + ".lock is not a regular file of yours";
+        ::close(lockFd);
+        lockFd = -1;
         return false;
     }
     if (::flock(lockFd, LOCK_EX | LOCK_NB) != 0) {
@@ -434,12 +455,27 @@ bool Daemon::Impl::start(std::string &error) {
     if (::ftruncate(lockFd, 0) == 0) {
         [[maybe_unused]] const auto written = ::write(lockFd, pid.data(), pid.size());
     }
-    // We hold the lock, so a socket file left here is stale.
-    ::unlink(path.c_str());
+    // We hold the lock, so a socket of ours left here is stale. Anything else is not ours to remove.
+    struct stat existing{};
+    if (::lstat(path.c_str(), &existing) == 0) {
+        if (!S_ISSOCK(existing.st_mode) || existing.st_uid != geteuid()) {
+            error = path + " exists and is not a socket of yours";
+            return false;
+        }
+        ::unlink(path.c_str());
+    }
+    struct UmaskGuard {
+        mode_t old;
+        UmaskGuard() : old(::umask(077)) {}
+        ~UmaskGuard() { ::umask(old); }
+        UmaskGuard(const UmaskGuard &) = delete;
+        UmaskGuard &operator=(const UmaskGuard &) = delete;
+    };
     try {
-        const auto old = ::umask(077);
-        acceptor.emplace(ioc, stream::endpoint(path));
-        ::umask(old);
+        {
+            const UmaskGuard guard; // The socket is born 0600, never briefly wider.
+            acceptor.emplace(ioc, stream::endpoint(path));
+        }
         socketBound = true;
         [[maybe_unused]] const auto chmodResult = ::chmod(path.c_str(), 0600);
     }
