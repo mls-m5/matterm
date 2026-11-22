@@ -110,7 +110,9 @@ public:
 
     // Input goes to the program only while the view is live.
     bool sendInput(std::string_view bytes) {
-        return link_ && state_ == State::Live && link_->sendInput(bytes);
+        const bool sent = link_ && state_ == State::Live && link_->sendInput(bytes);
+        if (sent) inputBytes_ += bytes.size();
+        return sent;
     }
     void resize(std::size_t columns, std::size_t rows) {
         model_->resize(columns, rows);
@@ -146,6 +148,10 @@ public:
     // Everything the program has written to this view so far (for "did it output lately").
     std::uint64_t outputBytes() const {
         return outputBytes_;
+    }
+    // Everything sent to the program (keys, paste, mouse reports): output soon after it is the echo.
+    std::uint64_t inputBytes() const {
+        return inputBytes_;
     }
 
     TerminalModel &model() {
@@ -275,6 +281,7 @@ private:
     TerminalLink *link_ = nullptr;
     ErrorSource errorCode_;
     std::uint64_t outputBytes_ = 0;
+    std::uint64_t inputBytes_ = 0;
     State state_ = State::Live;
     int exitCode_ = 0;
     int exitSignal_ = 0;

@@ -585,3 +585,10 @@ Native with the daemon. Design in short:
 - Off: `--no-tab-pulse` (native), `?pulse=0` (browser), `ViewConfig::tabPulse = false`.
 - Tests: `test/workspaceview_test.cpp` (working or not, phase, the time limit, in step, off, the
   wake-up), `web/tools/e2e-pulse.js` (pictures of the strip; not run here: no browser).
+- **Your own input and new panes do not count** (`OutputWatch`): output within 5 s after something
+  was sent to the pane (`TerminalView::inputBytes()`: keys, paste, mouse reports) is the echo or a
+  program answering you, and output within 5 s after a pane is first seen (a new terminal, pane,
+  tab, or the replay of an attached one) is its startup. Both are `ViewConfig::pulseIgnoreAfterInputMs`
+  and `pulseIgnoreAfterStartMs` (5000; the owner said 5-10 s, longer than the round trip of an echo
+  through a tunnel). Output after that starts the pulse as usual. Program answers to its own
+  queries (device attributes) also count as input, which only makes the pane calmer.

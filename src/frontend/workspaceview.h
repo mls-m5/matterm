@@ -57,6 +57,8 @@ struct ViewConfig {
     bool prefixKeys = true;      // Ctrl+B ... (browser)
     bool desktopShortcuts = true; // Ctrl+Shift+T ... (native)
     PrefixKeys::Config prefix;
+    std::int64_t pulseIgnoreAfterInputMs = 5000; // output this soon after input to a pane is its echo, not work
+    std::int64_t pulseIgnoreAfterStartMs = 5000; // and this soon after a pane was made
     bool tabPulse = true;               // working tabs alternate their colour once a second (--no-tab-pulse: off)
     std::int64_t whichKeyDelayMs = 500; // after the prefix key, a box lists what can follow (0: never)
     int touchSlop = 16;          // extra pixels around dividers and below the strip for a finger
@@ -514,6 +516,8 @@ public:
 
     // A key press is pending after the prefix key (the next printable key is a command).
     bool prefixWaiting() const { return prefix_.waiting(); }
+    // Tab `index` had output that counts lately (as of the last tick).
+    bool working(std::size_t index) const { return config_.tabPulse && tabWorking(index, nowMs_); }
     bool whichKeyShown() const { return whichKey_ && prefix_.waiting(); }
 
     // The pane under a point and where in it, without changing anything (hover, wheel).
@@ -608,7 +612,8 @@ private:
     bool pollOutput(std::int64_t nowMs) {
         nowMs_ = nowMs;
         workspace_.forEachPane([&](PaneId id, Pane &pane, bool) {
-            output_.update(id, pane.view().outputBytes(), nowMs);
+            output_.update(id, pane.view().outputBytes(), pane.view().inputBytes(), nowMs,
+                           {config_.pulseIgnoreAfterInputMs, config_.pulseIgnoreAfterStartMs});
         });
         const std::uint64_t now = pulseState(nowMs);
         const bool changed = now != lastPulse_;

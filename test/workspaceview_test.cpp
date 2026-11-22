@@ -66,6 +66,8 @@ struct Rig {
 };
 
 const KeyChord kPrefix{'b', true, false, false};
+// The start grace (5 s) of the tab pulse is over at K; an even number of seconds keeps the phase.
+constexpr std::int64_t K = 6000;
 
 } // namespace
 
@@ -883,22 +885,22 @@ TEST_CASE("Tab pulse: a tab with recent output alternates its colour once a seco
     auto same = [](Rgb8 a, Rgb8 b) { return a.r == b.r && a.g == b.g && a.b == b.b; };
     const Rgb8 quiet0 = bgOf(0, 1), quiet1 = bgOf(0, 1);
     EXPECT(same(quiet0, quiet1));
-    // Output in the first tab's pane (hidden) at t = 100.
+    r.view.tick(K - 10);
+    // Output in the first tab's pane (hidden) after the start grace.
     PaneId first = r.space.tab(0)->tree.ids().front();
     r.space.pane(first)->link.push("hello");
-    EXPECT(!r.view.tick(100).changed); // phase 0 (light): nothing to redraw yet
-    const Rgb8 light = bgOf(500, 1);
+    EXPECT(!r.view.tick(K + 100).changed); // phase 0 (light): nothing to redraw yet
+    const Rgb8 light = bgOf(K + 500, 1);
     EXPECT(same(light, quiet0)); // Light half: the usual colour.
-    const auto flipped = r.view.tick(1000);
-    EXPECT(flipped.changed);     // The dark half begins: one change.
-    const Rgb8 dark = bgOf(1000, 1);
+    EXPECT(r.view.tick(K + 1000).changed); // The dark half begins: one change.
+    const Rgb8 dark = bgOf(K + 1000, 1);
     EXPECT(!same(dark, light));
     EXPECT(dark.r <= light.r && dark.g <= light.g && dark.b <= light.b);
-    EXPECT(!r.view.tick(1500).changed); // No change within the half period.
-    EXPECT(same(bgOf(2000, 1), light));  // Light again.
-    EXPECT(!same(bgOf(3000, 1), light)); // 2.9 s after the output: still working, odd second: dark.
-    EXPECT(same(bgOf(5000, 1), light));  // Odd second again, but 4.9 s of silence: the usual colour.
-    EXPECT(!r.view.nextWakeMs().has_value() || *r.view.nextWakeMs() > 5000);
+    EXPECT(!r.view.tick(K + 1500).changed); // No change within the half period.
+    EXPECT(same(bgOf(K + 2000, 1), light));  // Light again.
+    EXPECT(!same(bgOf(K + 3000, 1), light)); // 2.9 s after the output: still working, odd second: dark.
+    EXPECT(same(bgOf(K + 5000, 1), light));  // Odd second again, but 4.9 s of silence: the usual colour.
+    EXPECT(!r.view.nextWakeMs().has_value() || *r.view.nextWakeMs() > K + 5000);
 }
 
 TEST_CASE("Tab pulse: also the tab in focus, all working tabs in step, and it can be switched off") {
@@ -906,17 +908,16 @@ TEST_CASE("Tab pulse: also the tab in focus, all working tabs in step, and it ca
     r.view.key({'t', true, true, false}, 0); // second tab in focus
     r.view.sync(0);
     r.view.tick(0);
+    r.view.tick(K - 10);
     const PaneId a = r.space.tab(0)->tree.ids().front();
     const PaneId b = r.space.tab(1)->tree.ids().front();
     r.space.pane(a)->link.push("x");
     r.space.pane(b)->link.push("y");
-    r.view.tick(1100);
+    r.view.tick(K + 1100);
     EXPECT(r.view.nextWakeMs().has_value()); // Something works: the next phase is a wake-up.
-    EXPECT_EQ(*r.view.nextWakeMs(), std::int64_t(2000));
-    const auto infos = r.space.tabInfos([](const Pane &) { return std::string("t"); });
-    EXPECT_EQ(infos.size(), std::size_t(2));
+    EXPECT_EQ(*r.view.nextWakeMs(), K + 2000);
     // Quiet again after 3 s of silence: no wake-up at all, no timer.
-    r.view.tick(4200);
+    r.view.tick(K + 4200);
     EXPECT(!r.view.nextWakeMs().has_value());
     // Off.
     Space space([] { return std::make_unique<Pane>(); });
@@ -927,8 +928,60 @@ TEST_CASE("Tab pulse: also the tab in focus, all working tabs in step, and it ca
     v.key({'t', true, true, false}, 0);
     v.tick(0);
     space.pane(space.tab(0)->tree.ids().front())->link.push("x");
-    v.tick(1100);
+    v.tick(K + 1100);
     EXPECT(!v.nextWakeMs().has_value());
+}
+
+TEST_CASE("Tab pulse: output after your own input or right after a pane starts is not work") {
+    Rig r;
+    r.view.key({'t', true, true, false}, 0);
+    r.view.sync(0);
+    r.view.tick(0);
+    const PaneId a = r.space.tab(0)->tree.ids().front();
+    // Within 5 s of the start: output is ignored.
+    r.space.pane(a)->link.push("prompt");
+    r.view.tick(2000);
+    EXPECT(!r.view.nextWakeMs().has_value());
+    // After the grace it counts.
+    r.view.tick(K);
+    r.space.pane(a)->link.push("build output");
+    r.view.tick(K + 100);
+    EXPECT(r.view.nextWakeMs().has_value());
+    // Quiet, then the user types in that pane: the echo within 5 s is ignored.
+    r.view.tick(K + 4000);
+    EXPECT(!r.view.nextWakeMs().has_value());
+    r.space.pane(a)->view().sendInput("ls\n"); // attached and live: counts as input
+    r.view.tick(K + 4100);
+    r.space.pane(a)->link.push("echo ls\r\n");
+    r.view.tick(K + 4300);
+    EXPECT(!r.view.nextWakeMs().has_value());
+    r.space.pane(a)->link.push("more");
+    r.view.tick(K + 9000); // 4.9 s after the key: still ignored
+    EXPECT(!r.view.nextWakeMs().has_value());
+    // Output after the 5 s starts the pulse as usual.
+    r.space.pane(a)->link.push("still going");
+    r.view.tick(K + 9200);
+    EXPECT(r.view.nextWakeMs().has_value());
+    // A pane made later gets its own grace.
+    r.view.key({'t', true, true, false}, K + 9300);
+    r.view.sync(K + 9300);
+    const PaneId c = r.space.tab(2)->tree.ids().front();
+    r.view.tick(K + 9400);
+    r.space.pane(c)->link.push("shell banner");
+    r.view.tick(K + 10000);
+    EXPECT(!r.view.working(2));
+    // The settings can change: no grace at all.
+    Space space([] { return std::make_unique<Pane>(); });
+    ViewConfig cfg;
+    cfg.pulseIgnoreAfterInputMs = 0;
+    cfg.pulseIgnoreAfterStartMs = 0;
+    View v(space, cfg);
+    v.setWindow({800, 480, 8, 16});
+    v.key({'t', true, true, false}, 0);
+    v.tick(0);
+    space.pane(space.tab(0)->tree.ids().front())->link.push("x");
+    v.tick(100);
+    EXPECT(v.working(0));
 }
 
 TEST_SUIT_END

@@ -6,6 +6,7 @@
 // No SDL, no clock of its own: the owner passes the time, so tests are exact.
 #include "tabtypes.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 
@@ -22,36 +23,54 @@ struct TabPulse {
     static std::int64_t nextChange(std::int64_t nowMs) { return (nowMs / kPeriodMs + 1) * kPeriodMs; }
 };
 
-// When each pane last produced output, seen by comparing a byte counter on every poll.
+// When each pane last produced output that counts, seen by comparing byte counters on every poll.
+// Output that follows the user's own input (the echo, a program reacting to a key) or the start of
+// the pane does not count: it is not the program working on its own.
 class OutputWatch {
 public:
-    // `bytes` is the pane's total output so far. The first sight of a pane records it as quiet.
-    void update(PaneId id, std::uint64_t bytes, std::int64_t nowMs) {
+    struct Settings {
+        std::int64_t ignoreAfterInputMs = 5000; // Output this soon after input to the pane is ignored.
+        std::int64_t ignoreAfterStartMs = 5000; // And this soon after the pane was first seen.
+    };
+
+    // `outputBytes`/`inputBytes`: totals so far for the pane. The first sight of a pane records it
+    // as quiet and starts the start grace.
+    void update(PaneId id, std::uint64_t outputBytes, std::uint64_t inputBytes, std::int64_t nowMs,
+                const Settings &settings) {
         auto it = seen_.find(id);
         if (it == seen_.end()) {
-            seen_.emplace(id, Entry{bytes, -1});
+            Entry e;
+            e.output = outputBytes;
+            e.input = inputBytes;
+            e.ignoreUntilMs = nowMs + settings.ignoreAfterStartMs;
+            seen_.emplace(id, e);
+            return;
         }
-        else if (it->second.bytes != bytes) {
-            it->second.bytes = bytes;
-            it->second.lastMs = nowMs;
+        Entry &e = it->second;
+        if (e.input != inputBytes) {
+            e.input = inputBytes;
+            e.ignoreUntilMs = std::max(e.ignoreUntilMs, nowMs + settings.ignoreAfterInputMs);
         }
+        if (e.output != outputBytes) {
+            e.output = outputBytes;
+            if (nowMs >= e.ignoreUntilMs) e.lastMs = nowMs;
+        }
+    }
+    void update(PaneId id, std::uint64_t outputBytes, std::uint64_t inputBytes, std::int64_t nowMs) {
+        update(id, outputBytes, inputBytes, nowMs, Settings{});
     }
     bool recent(PaneId id, std::int64_t nowMs) const {
         const auto it = seen_.find(id);
         return it != seen_.end() && it->second.lastMs >= 0 && nowMs - it->second.lastMs < TabPulse::kWorkingMs;
-    }
-    // When `id` stops being recent (for the wake-up), or -1.
-    std::int64_t quietAt(PaneId id) const {
-        const auto it = seen_.find(id);
-        return it == seen_.end() || it->second.lastMs < 0 ? -1 : it->second.lastMs + TabPulse::kWorkingMs;
     }
     void forget(PaneId id) { seen_.erase(id); }
     std::size_t size() const { return seen_.size(); }
 
 private:
     struct Entry {
-        std::uint64_t bytes = 0;
+        std::uint64_t output = 0, input = 0;
         std::int64_t lastMs = -1;
+        std::int64_t ignoreUntilMs = 0;
     };
     std::map<PaneId, Entry> seen_;
 };

@@ -180,6 +180,11 @@ if(BUILD_TESTING)
     target_link_libraries(daemoncommands_test PRIVATE cellbuffer)
     add_test(NAME daemon_commands COMMAND daemoncommands_test)
 
+    add_executable(clioptions_test clioptions_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(clioptions_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+    target_compile_definitions(clioptions_test PRIVATE MATTERM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    add_test(NAME cli_options COMMAND clioptions_test)
+
     add_executable(commandregistry_test commandregistry_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(commandregistry_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
     add_test(NAME command_registry COMMAND commandregistry_test)

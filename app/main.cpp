@@ -1,3 +1,4 @@
+#include "clioptions.h"
 #include "fontpath.h"
 #include "render/sdlbackend.h"
 #include "terminal/terminalmodel.h"
@@ -63,6 +64,9 @@ void printUsage(std::ostream &out, const char *program) {
            "                       this it is copied only if the other computer has none on PATH).\n"
            "  --yes                Copy without asking.\n"
            "  --ssh-arg ARG        An extra argument for ssh (repeatable), e.g. -p / 2222.\n"
+           "  --completion SHELL   Print the shell completion script (bash, zsh or fish) for "
+           "matterm,\n"
+           "                       matterm-server and matterm-daemon; see the README.\n"
            "  --no-tab-pulse       Tabs with recent output do not alternate their colour.\n"
            "  --snap-scroll        Let scrolling come to rest on whole rows (default: "
            "smooth\n"
@@ -379,6 +383,17 @@ int main(int argc, char **argv) {
         else if (arg == "--daemon") {
             useDaemon = true;
             daemonExplicit = true;
+        }
+        else if (arg == "--completion") {
+            // The script for matterm, matterm-server and matterm-daemon (docs/README: install).
+            const std::string script =
+                frontend::cli::completionScript(i + 1 < argc ? std::string(argv[i + 1]) : std::string());
+            if (script.empty()) {
+                std::cerr << "--completion needs bash, zsh or fish\n";
+                return 1;
+            }
+            std::cout << script;
+            return 0;
         }
         else if (arg == "--snap-scroll") {
             snapScroll = true;
