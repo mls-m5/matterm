@@ -70,6 +70,8 @@ clang-tidy (`docs/STATIC_ANALYSIS.md`).
   Worktree `.tmp/agent3`, branch `agent3-fakeos`.
 - `docs/tasks/web-sessions.md`: browser tabs/terminal views. **Paused** while the
   operator plans them; the implementation is archived on `archive/web-tabs`.
+- `docs/tasks/daemon-reconnect.md`: reconnect for `--daemon-host`. agent2 (`.tmp/agent2`, branch `agent2`).
+- `docs/tasks/borderless-window.md`: borderless native window. agent3 (`.tmp/agent3`, branch `agent3`).
 - Width reflow: designed only (docs/SCROLLING_AND_REFLOW.md), not assigned.
 
 Agents can be reached through the MCP message tools (`list_peers`,
