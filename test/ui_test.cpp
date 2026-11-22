@@ -1,5 +1,6 @@
 #include "mls-unit-test/unittest.h"
 #include "ui/commandpalette.h"
+#include "ui/dialogs.h"
 
 #include <string>
 #include <vector>
@@ -241,5 +242,121 @@ TEST_CASE("The wheel scrolls the list") {
     p.palette.wheel(1);
     EXPECT_EQ(p.palette.firstVisible(), std::size_t(0));
 }
+
+
+    TEST_CASE("ConfirmDialog: the safe button is the default, Escape cancels, a click on a button answers") {
+        ConfirmDialog d("Close this tab? vim notes.txt is still running.",
+                        {{"Close", "close.confirm"}, {"Cancel", "close.cancel"}}, 1, 1);
+        const auto size = d.wanted(80, 24);
+        d.resize(size.columns, size.rows);
+        CellBuffer cells(std::size_t(size.columns), std::size_t(size.rows));
+        CursorState cursor;
+        d.render(cells, cursor);
+        EXPECT(!cursor.visible);
+        std::string all;
+        for (int y = 0; y < size.rows; ++y) all += rowText(cells, y) + "\n";
+        EXPECT(all.find("vim notes.txt") != std::string::npos);
+        EXPECT(all.find("[ Close ]") != std::string::npos && all.find("[ Cancel ]") != std::string::npos);
+        // Enter takes the initial button (Cancel).
+        auto out = d.key({keys::Enter, false, false, false});
+        EXPECT(out.close && out.action == "close.cancel");
+        // Move left, then Enter: Close.
+        d.key({keys::Left, false, false, false});
+        EXPECT_EQ(d.selected(), std::size_t(0));
+        out = d.key({keys::Enter, false, false, false});
+        EXPECT(out.close && out.action == "close.confirm");
+        // Escape is always the cancel button, whatever is selected.
+        out = d.key({keys::Escape, false, false, false});
+        EXPECT(out.close && out.action == "close.cancel");
+        // Plain letters do nothing (no accidental Close).
+        out = d.key({'c', false, false, false});
+        EXPECT(!out.close && out.action.empty());
+        // Clicking the "Close" label.
+        int closeColumn = -1;
+        const auto last = rowText(cells, size.rows - 2);
+        closeColumn = int(last.find("Close"));
+        EXPECT(closeColumn > 0);
+        out = d.click(closeColumn, size.rows - 2);
+        EXPECT(out.close && out.action == "close.confirm");
+        EXPECT(!d.click(1, 1).close);
+    }
+
+    TEST_CASE("ConfirmDialog: long and hostile text is wrapped and shown printable") {
+        std::string q = "Close this tab? ";
+        q += std::string(200, 'x');
+        q += " \x1b[2J still running.";
+        ConfirmDialog d(q, {{"Close", "a"}, {"Cancel", "b"}}, 1, 1);
+        const auto size = d.wanted(40, 12);
+        EXPECT(size.columns <= 40 && size.rows <= 12);
+        d.resize(size.columns, size.rows);
+        CellBuffer cells(std::size_t(size.columns), std::size_t(size.rows));
+        CursorState cursor;
+        d.render(cells, cursor);
+        for (int y = 0; y < size.rows; ++y) {
+            for (std::size_t x = 0; x < cells.columns(); ++x) EXPECT(cells.at(x, std::size_t(y)).codePoint >= U' ');
+        }
+        // A tiny window draws nothing and does not crash.
+        d.resize(3, 2);
+        CellBuffer tiny(3, 2);
+        d.render(tiny, cursor);
+    }
+
+    TEST_CASE("TextPrompt answers prefix plus text; empty only when allowed; Escape closes") {
+        TextPrompt p("Save session as", "work", "session.save:", false);
+        const auto size = p.wanted(80, 24);
+        p.resize(size.columns, size.rows);
+        for (const char c : std::string("-2")) p.key({c, false, false, false});
+        p.key({keys::Backspace, false, false, false});
+        for (const char c : std::string("b")) p.key({c, false, false, false});
+        auto out = p.key({keys::Enter, false, false, false});
+        EXPECT(out.close);
+        EXPECT_EQ(out.action, std::string("session.save:work-b"));
+        TextPrompt e("Name", "", "tab.rename:", false);
+        e.resize(40, 4);
+        EXPECT(!e.key({keys::Enter, false, false, false}).close);
+        TextPrompt a("Name", "x", "tab.rename:", true);
+        a.resize(40, 4);
+        a.key({keys::Backspace, false, false, false});
+        out = a.key({keys::Enter, false, false, false});
+        EXPECT(out.close && out.action == "tab.rename:");
+        EXPECT(a.key({keys::Escape, false, false, false}).close);
+        // Control characters never get in.
+        TextPrompt c("n", "", "p:", true);
+        c.resize(40, 4);
+        c.key({1, false, false, false});
+        c.key({'\n', false, false, false});
+        EXPECT_EQ(c.current(), std::string());
+        CellBuffer cells(std::size_t(size.columns), std::size_t(size.rows));
+        CursorState cursor;
+        p.render(cells, cursor);
+        EXPECT(cursor.visible && cursor.row == 2);
+    }
+
+    TEST_CASE("PickList: choose by key or click, scroll, empty list says so") {
+        std::vector<PickList::Item> items;
+        for (int i = 0; i < 25; ++i) items.push_back({"session" + std::to_string(i), std::to_string(i) + " tabs", "session.open:s" + std::to_string(i)});
+        PickList l("Open session", items);
+        const auto size = l.wanted(80, 24);
+        l.resize(size.columns, size.rows);
+        auto out = l.key({keys::Down, false, false, false});
+        EXPECT(!out.close);
+        out = l.key({keys::Enter, false, false, false});
+        EXPECT(out.close && out.action == "session.open:s1");
+        l.key({keys::PageDown, false, false, false});
+        EXPECT(l.selected() > 1);
+        CellBuffer cells(std::size_t(size.columns), std::size_t(size.rows));
+        CursorState cursor;
+        l.render(cells, cursor);
+        EXPECT(rowText(cells, 1).find("Open session") != std::string::npos);
+        out = l.click(3, 2);
+        EXPECT(out.close && out.action.rfind("session.open:", 0) == 0);
+        EXPECT(l.key({keys::Escape, false, false, false}).close);
+        PickList none("Open session", {}, "No saved sessions");
+        none.resize(30, 4);
+        CellBuffer c2(30, 4);
+        none.render(c2, cursor);
+        EXPECT(rowText(c2, 2).find("No saved sessions") != std::string::npos);
+        EXPECT(!none.key({keys::Enter, false, false, false}).close);
+    }
 
 TEST_SUIT_END

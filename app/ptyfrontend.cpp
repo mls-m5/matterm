@@ -8,7 +8,12 @@
 #include "sdlinput.h"
 #include "terminalmodel.h"
 #include "ptylink.h"
+#include "procinfo.h"
+#include "sessionfiles.h"
+#include "sessionrestore.h"
 #include "terminalview.h"
+#include "ui/commandpalette.h"
+#include "ui/dialogs.h"
 #include "workspaceview.h"
 
 #include <SDL.h>
@@ -17,7 +22,10 @@
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
+#include <csignal>
+#include <ctime>
 #include <fcntl.h>
+#include <filesystem>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -29,6 +37,13 @@
 
 namespace {
 using namespace frontend;
+
+// SIGHUP (the terminal that started us went away) and SIGTERM: a controlled shutdown that saves
+// a saved session first. Only sets a flag; the main loop does the work.
+volatile std::sig_atomic_t gShutdownSignal = 0;
+void onShutdownSignal(int) {
+    gShutdownSignal = 1;
+}
 class OutputRecording {
 public:
     explicit OutputRecording(const char *path) {
@@ -329,6 +344,8 @@ int runPtyFrontend(const char *font,
     OutputRecording recording(recordPath);
     bool recordFirst = recordPath != nullptr;
     int hintColumns = 80, hintRows = 24; // size of a new pane until the layout says
+    // Folder the next pane's shell should start in (a restored session), else empty.
+    std::string nextCwd;
     // The first pane is made before SDL and its threads exist (fork); later ones
     // are made on demand, see docs/TABS_PLAN.md.
     Space workspace([&]() -> std::unique_ptr<NativePane> {
@@ -339,8 +356,15 @@ int runPtyFrontend(const char *font,
                 recording.append(bytes);
             };
         }
+        std::vector<std::string> command = arguments;
+        if (!nextCwd.empty()) {
+            // cd, then become the usual command (the pane's process stays the shell, so /proc
+            // and the close question see the shell). A folder that vanished was checked before.
+            command = {"/bin/sh", "-c", "cd -- \"$1\" 2>/dev/null; shift; exec \"$@\"", "sh", nextCwd};
+            command.insert(command.end(), arguments.begin(), arguments.end());
+        }
         auto pane = std::make_unique<NativePane>(
-            arguments, term, hintColumns, hintRows, std::move(record));
+            command, term, hintColumns, hintRows, std::move(record));
         pane->v.glide() = CursorGlide([&] {
             CursorGlide::Config c;
             c.enabled = smoothCursor;
@@ -350,6 +374,14 @@ int runPtyFrontend(const char *font,
     });
     workspace.apply(Command::NewTab);
     SdlRuntime runtime;
+    {
+        // After SDL_Init, which installs its own SIGTERM handler (a plain quit): ours saves first.
+        struct sigaction action {};
+        action.sa_handler = onShutdownSignal;
+        sigemptyset(&action.sa_mask);
+        sigaction(SIGTERM, &action, nullptr);
+        sigaction(SIGHUP, &action, nullptr);
+    }
     std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(
         SDL_CreateWindow("matterm",
                          SDL_WINDOWPOS_CENTERED,
@@ -370,6 +402,7 @@ int runPtyFrontend(const char *font,
     // Ctrl+B is readline's backward-char; the native app has the desktop
     // shortcuts instead (the browser uses the prefix keys).
     viewConfig.prefixKeys = false;
+    viewConfig.paletteButton = true;
     WorkspaceView<NativePane> wv(workspace, viewConfig);
     const CursorPtr arrowCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW));
     const CursorPtr columnsCursor(
@@ -506,9 +539,13 @@ int runPtyFrontend(const char *font,
         return InputEncoder::control(
             char(viewConfig.prefix.prefix.key), false);
     };
+    std::function<void(const KeyResult &)> keyExtras; // palette, dialogs, actions (set below)
     const auto afterLayout = [&](const KeyResult &r) {
         if (r.empty) {
             running = false;
+        }
+        if (keyExtras) {
+            keyExtras(r);
         }
         if (r.copy) {
             if (auto *pane = workspace.focusedPane()) {
@@ -532,6 +569,185 @@ int runPtyFrontend(const char *font,
             linkError = error.what();
         }
     };
+
+    // ---- palette, dialogs, saved sessions (docs/TABS_PLAN.md sections 8 and 9) ----
+    LinuxProcSource procSource;
+    const SessionFiles sessionFiles(SessionFiles::defaultDirectory());
+    SessionPolicy sessionPolicy;
+    bool smokeBusy = false; // --pty-tabs-smoke-test: pretend every pane runs a program
+    const auto paneState = [&](NativePane &pane) {
+        return probePane(procSource, pane.link.childPid(), pane.link.foregroundProcessGroup());
+    };
+    {
+        // Closing a pane, tab or the window asks when a program other than the shell runs there.
+        wv.setBusyProbe([&](PaneId id) -> std::optional<std::string> {
+            NativePane *pane = workspace.pane(id);
+            if (!pane || pane->link.finished()) {
+                return std::nullopt;
+            }
+            if (smokeBusy) {
+                return std::string("smoke program");
+            }
+            const auto state = paneState(*pane);
+            if (!state.busy) {
+                return std::nullopt;
+            }
+            return commandLine(state.command); // Empty: the dialog says "A program".
+        });
+    }
+    const auto showCloseDialog = [&](const CloseRequest &request) {
+        std::vector<ui::ConfirmDialog::Button> buttons = {{"Close", "close.confirm"}, {"Cancel", "close.cancel"}};
+        // Hook: when request.backgroundAvailable, a third button "Run in background" goes here.
+        wv.pushLayer(std::make_unique<ui::ConfirmDialog>(request.question(), std::move(buttons), 1, 1));
+    };
+    const auto requestQuit = [&] {
+        if (auto request = wv.windowClose()) {
+            showCloseDialog(*request);
+        }
+        else {
+            running = false;
+        }
+    };
+    const auto notify = [&](const std::string &text) {
+        linkError = text; // Shown in the window title, like the other errors of the app.
+    };
+    // The window's session as it is now. Screen text only for a shutdown checkpoint.
+    const auto saveSession = [&](const std::string &name, bool withText) {
+        const auto snapshot = captureSession(
+            workspace, name, std::int64_t(std::time(nullptr)), [&](PaneId, const NativePane &pane) {
+                SavedPane saved;
+                const auto state = paneState(const_cast<NativePane &>(pane));
+                saved.cwd = state.cwd;
+                saved.command = state.command;
+                if (withText) {
+                    saved.text = visibleText(pane.v.model());
+                }
+                return saved;
+            });
+        if (!snapshot) {
+            return false;
+        }
+        std::string error;
+        if (!sessionFiles.save(*snapshot, &error)) {
+            notify("session not saved: " + error);
+            return false;
+        }
+        return true;
+    };
+    const auto restoreByName = [&](const std::string &name) {
+        const auto snapshot = sessionFiles.load(name);
+        if (!snapshot) {
+            notify("session '" + name + "' cannot be read");
+            return;
+        }
+        std::vector<std::string> gone; // Folders that no longer exist, by creation order.
+        const auto report = restoreSession(workspace, *snapshot, [&](const SavedPane &saved) {
+            std::error_code ec;
+            nextCwd = !saved.cwd.empty() && std::filesystem::is_directory(saved.cwd, ec) ? saved.cwd : std::string();
+        });
+        nextCwd.clear();
+        for (const auto &restored : report.panes) {
+            NativePane *pane = workspace.pane(restored.id);
+            if (!pane || !restored.saved) {
+                continue;
+            }
+            const SavedPane &saved = *restored.saved;
+            std::error_code ec;
+            if (!saved.cwd.empty() && !std::filesystem::is_directory(saved.cwd, ec)) {
+                pane->v.note("restored without its folder (gone): " + CloseRequest::shown(saved.cwd));
+            }
+            if (!saved.text.empty()) {
+                std::string crlf;
+                for (const char c : saved.text) {
+                    crlf += c == '\n' ? std::string("\r\n") : std::string(1, c);
+                }
+                pane->v.note("previous screen:\r\n" + crlf);
+            }
+            if (const auto offer = offerText(saved); !offer.empty()) {
+                pane->v.note(offer);
+                // On the prompt line, without a newline: the owner presses Enter, edits or ignores it.
+                send(*pane, rerunInput(saved));
+            }
+        }
+        if (report.refused > 0) {
+            notify("session partly restored: no room for everything");
+        }
+        sessionPolicy.adopt(name);
+    };
+    const auto openPalette = [&] {
+        std::vector<CommandEntry> extra = {
+            {"session.open", "Open session...", "Choose a saved session to open", std::nullopt, {}, {}},
+            {"session.save", "Save session as...", "Save the tabs and panes under a name", std::nullopt, {}, {}},
+            {"tab.rename", "Rename tab...", "Give the tab a name that stays", std::nullopt, {}, {}},
+        };
+        wv.pushLayer(std::make_unique<ui::CommandPalette>(buildCommandRegistry(viewConfig.prefix, extra), true));
+    };
+    const auto handleAction = [&](const std::string &action) {
+        const auto colon = action.find(':');
+        const std::string id = action.substr(0, colon);
+        const std::string argument = colon == std::string::npos ? std::string() : action.substr(colon + 1);
+        if (id == "close.confirm" || id == "close.cancel") {
+            const auto pending = wv.pendingClose();
+            const auto result = wv.answerClose(id == "close.confirm" ? CloseAnswer::Close : CloseAnswer::Cancel);
+            if (id == "close.confirm") {
+                if (pending && pending->scope == CloseScope::Window) {
+                    running = false;
+                }
+                else if (result.empty) {
+                    running = false;
+                }
+            }
+        }
+        else if (id == "session.open" && colon == std::string::npos) {
+            std::vector<ui::PickList::Item> items;
+            for (const auto &info : sessionFiles.list()) {
+                items.push_back({info.name,
+                                 std::to_string(info.tabs) + (info.tabs == 1 ? " tab, " : " tabs, ") +
+                                     std::to_string(info.panes) + (info.panes == 1 ? " pane" : " panes"),
+                                 "session.open:" + info.name});
+            }
+            wv.pushLayer(std::make_unique<ui::PickList>("Open session", std::move(items), "No saved sessions"));
+        }
+        else if (id == "session.open") {
+            restoreByName(argument);
+        }
+        else if (id == "session.save" && colon == std::string::npos) {
+            wv.pushLayer(std::make_unique<ui::TextPrompt>("Save session as", sessionPolicy.name(), "session.save:", false));
+        }
+        else if (id == "session.save") {
+            if (!SessionSnapshot::validName(argument)) {
+                notify("session names use letters, digits, '.', '_' and '-'");
+            }
+            else {
+                sessionPolicy.adopt(argument);
+                saveSession(argument, false);
+            }
+        }
+        else if (id == "tab.rename" && colon == std::string::npos) {
+            wv.pushLayer(std::make_unique<ui::TextPrompt>("Rename tab", workspace.userTitle(workspace.activeIndex()), "tab.rename:", true));
+        }
+        else if (id == "tab.rename") {
+            workspace.setUserTitle(workspace.activeIndex(), SessionSnapshot::cleanTitle(argument));
+            if (sessionPolicy.shouldSave(SessionPolicy::Event::TabNamed)) {
+                saveSession(sessionPolicy.name(), false);
+            }
+        }
+    };
+    // What the layout says besides its own changes: a palette to open, an answer from an overlay,
+    // a question before closing.
+    const auto layoutExtras = [&](const auto &r) {
+        if (r.openPalette) {
+            openPalette();
+        }
+        if (r.confirm) {
+            showCloseDialog(*r.confirm);
+        }
+        if (!r.action.empty()) {
+            handleAction(r.action);
+        }
+    };
+
+    keyExtras = [&](const KeyResult &r) { layoutExtras(r); };
 
     // --pty-tabs-smoke-test: the same events a user would cause, pushed into the
     // loop, and checks of the workspace after each. Docs/TABS_PLAN.md phase 2.
@@ -664,9 +880,89 @@ int runPtyFrontend(const char *font,
             later(300);
             break;
         }
-        default:
+        case 10:
             expectThat(workspace.tabCount() == 1 && workspace.paneCount() == 1,
                        "Ctrl+Shift+W closes the tab and its panes");
+            pushKey(SDLK_p, ctrlShift);
+            later(300);
+            break;
+        case 11:
+            expectThat(wv.hasLayer(), "Ctrl+Shift+P opens the palette");
+            pushKey(SDLK_ESCAPE, 0);
+            later(300);
+            break;
+        case 12: {
+            expectThat(!wv.hasLayer(), "Escape closes the palette");
+            // Save and open a session through the same actions the palette runs.
+            handleAction("tab.rename:smoke tab");
+            expectThat(workspace.userTitle(0) == "smoke tab", "renaming a tab sets its title");
+            handleAction("session.save:smoke");
+            bool saved = false;
+            for (const auto &info : sessionFiles.list()) {
+                saved = saved || (info.name == "smoke" && info.tabs == 1 && info.panes == 1);
+            }
+            expectThat(saved, "the session was saved");
+            handleAction("session.open:smoke");
+            expectThat(workspace.tabCount() == 2 && workspace.paneCount() == 2,
+                       "opening the session adds its tab");
+            expectThat(workspace.userTitle(1) == "smoke tab",
+                       "the restored tab has its title");
+            handleAction("session.open");
+            expectThat(wv.hasLayer(), "the session list opens");
+            pushKey(SDLK_ESCAPE, 0);
+            later(300);
+            break;
+        }
+        case 13:
+            expectThat(!wv.hasLayer(), "Escape closes the session list");
+            smokeBusy = true;
+            pushKey(SDLK_w, ctrlShift);
+            later(300);
+            break;
+        case 14:
+            expectThat(wv.hasLayer() && wv.pendingClose() && workspace.tabCount() == 2,
+                       "closing a tab that runs a program asks first");
+            pushKey(SDLK_ESCAPE, 0);
+            later(300);
+            break;
+        case 15:
+            expectThat(!wv.hasLayer() && !wv.pendingClose() && workspace.tabCount() == 2,
+                       "Escape cancels the close");
+            pushKey(SDLK_w, ctrlShift);
+            later(300);
+            break;
+        case 16:
+            expectThat(wv.hasLayer(), "the question is asked again");
+            pushKey(SDLK_LEFT, 0); // from Cancel to Close
+            later(200);
+            break;
+        case 17:
+            pushKey(SDLK_RETURN, 0);
+            later(300);
+            break;
+        case 18: {
+            expectThat(!wv.hasLayer() && workspace.tabCount() == 1, "Close closes the tab");
+            SDL_Event quit{};
+            quit.type = SDL_QUIT; // The window's close button.
+            SDL_PushEvent(&quit);
+            later(300);
+            break;
+        }
+        case 19:
+            expectThat(wv.hasLayer() && wv.pendingClose() &&
+                           wv.pendingClose()->scope == CloseScope::Window,
+                       "closing the window asks too");
+            pushKey(SDLK_LEFT, 0);
+            later(200);
+            break;
+        case 20:
+            scriptDone = true;
+            pushKey(SDLK_RETURN, 0); // Close: the window quits
+            later(300);
+            break;
+        default:
+            expectThat(!wv.hasLayer() && !wv.pendingClose(),
+                       "no overlay is left open");
             scriptDone = true;
             running = false;
             break;
@@ -675,6 +971,12 @@ int runPtyFrontend(const char *font,
 
     while (running) {
         skipText = false;
+        if (gShutdownSignal != 0) {
+            break; // SIGTERM or SIGHUP: leave through the shutdown save below, no question asked.
+        }
+        if (wv.pendingClose() && !wv.hasLayer()) {
+            wv.answerClose(CloseAnswer::Cancel); // The dialog was dismissed by a click outside.
+        }
         updateWindow();
         script();
         SDL_Event event;
@@ -682,7 +984,27 @@ int runPtyFrontend(const char *font,
             const std::int64_t now = std::int64_t(SDL_GetTicks64());
             const auto mod = modifiers(SDL_GetModState());
             if (event.type == SDL_QUIT) {
-                running = false;
+                requestQuit();
+            }
+            else if (event.type == SDL_TEXTINPUT && wv.hasLayer()) {
+                // An overlay is open: typed characters go to it, one chord per code point.
+                const std::string_view text = event.text.text;
+                for (std::size_t i = 0; i < text.size();) {
+                    const auto lead = static_cast<unsigned char>(text[i]);
+                    const std::size_t n = lead < 0x80 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
+                    if (i + n > text.size()) {
+                        break;
+                    }
+                    char32_t cp = n == 1 ? lead : char32_t(lead & (0xff >> (n + 1)));
+                    for (std::size_t k = 1; k < n; ++k) {
+                        cp = (cp << 6) | (static_cast<unsigned char>(text[i + k]) & 0x3f);
+                    }
+                    i += n;
+                    guarded([&] {
+                        const auto r = wv.key({int(cp), false, false, false}, now);
+                        afterLayout(r);
+                    });
+                }
             }
             else if (event.type == SDL_TEXTINPUT) {
                 if (wv.prefixWaiting()) {
@@ -741,6 +1063,7 @@ int runPtyFrontend(const char *font,
                 if (r.empty) {
                     running = false;
                 }
+                layoutExtras(r);
                 if (r.cursor != shownCursor) {
                     shownCursor = r.cursor;
                     SDL_SetCursor(shownCursor == Cursor::ResizeColumns
@@ -905,7 +1228,18 @@ int runPtyFrontend(const char *font,
                 const int code = keyCodeOf(key);
                 const bool printable = key >= 32 && key < 127;
                 if (mod.control && mod.shift && key == SDLK_q) {
-                    running = false;
+                    requestQuit();
+                    continue;
+                }
+                if (wv.hasLayer()) {
+                    // An overlay is open: named keys and Ctrl chords go to it; plain printable
+                    // keys arrive as text input.
+                    if (code != 0 && (!printable || mod.control || mod.alt)) {
+                        guarded([&] {
+                            const auto r = wv.key({code, mod.control, mod.shift, mod.alt}, now);
+                            afterLayout(r);
+                        });
+                    }
                     continue;
                 }
                 if (waiting && printable && !mod.control && !mod.alt) {
@@ -919,7 +1253,7 @@ int runPtyFrontend(const char *font,
                                    event.key.repeat != 0);
                     });
                     afterLayout(r);
-                    if (r.changed || r.copy || r.paste) {
+                    if (r.changed || r.copy || r.paste || r.openPalette || r.confirm) {
                         skipText = true;
                         continue;
                     }
@@ -1102,6 +1436,15 @@ int runPtyFrontend(const char *font,
             backend.drawRect({d.rect.x, d.rect.y, d.rect.w, d.rect.h},
                              Rgb8{46, 51, 60});
         }
+        for (const auto &layer : plan.layers) {
+            RenderFrame frame;
+            frame.cells = layer.cells->view();
+            frame.cursor = layer.cursor;
+            frame.cursor.focused = true;
+            frame.palette = &stripPalette;
+            backend.render(frame,
+                           PaneArea{{layer.rect.x, layer.rect.y, layer.rect.w, layer.rect.h}, {}});
+        }
         std::string title = "matterm";
         if (const auto *focused = workspace.focusedPane();
             focused && !focused->v.title().empty()) {
@@ -1123,6 +1466,12 @@ int runPtyFrontend(const char *font,
         backend.present();
     }
     SDL_StopTextInput();
+    // A controlled shutdown (quit, the window's close button, SIGTERM, SIGHUP) writes the session
+    // of a window the owner made persistent, with a checkpoint of what is on the screens. Nothing
+    // is written for a window whose session was never saved, and nothing is ever restored on start.
+    if (sessionPolicy.shouldSave(SessionPolicy::Event::Shutdown)) {
+        saveSession(sessionPolicy.name(), sessionPolicy.withScreenText(SessionPolicy::Event::Shutdown));
+    }
     if (tabsSmoke) {
         if (!scriptDone) {
             throw std::runtime_error("PTY tabs smoke: the window closed early");

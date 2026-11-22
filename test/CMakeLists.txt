@@ -379,7 +379,7 @@ if(BUILD_TESTING)
                     COMMAND matterm "${TEST_FONT_FILE}" --font-size 12 --pty-tabs-smoke-test -- /bin/sh -c
                         "while :; do echo tick; sleep 0.02; done")
                 set_tests_properties(pty_frontend_tabs_smoke PROPERTIES
-                    ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software" TIMEOUT 30)
+                    ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/smoke-config" TIMEOUT 30)
                 add_test(NAME pty_frontend_smooth_cursor_smoke
                     COMMAND matterm "${TEST_FONT_FILE}" --smooth-cursor -- /bin/sh -c
                         "printf 'cursor'; sleep 0.1; printf '\\r\\nmove'; sleep 0.1; test \"$1\" = --help" sh --help)

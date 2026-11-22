@@ -337,8 +337,15 @@ overlay layer and the palette from agent3):
 | `Workspace::setUserTitle` | `src/frontend/workspace.h` | the owner's tab name wins in the strip (the rename UI is section 8) |
 | `CloseRequest`, `WorkspaceView::setBusyProbe/windowClose/answerClose` | `src/frontend/closeprompt.h`, `workspaceview.h` | keys, the strip's x and middle click ask before closing a busy pane or tab; the answer closes by tab id; `backgroundAvailable` is the hook for the third answer |
 
-Wiring still to do in `app/ptyfrontend.cpp` (the app has no probe set, so closing behaves as
-before): set the probe (`probePane` over `PtyLink::childPid/foregroundProcessGroup`), call
+Wired in the native app (2026-11-22, branch `agent2-nativewire`): Ctrl+Shift+P and the strip button
+open the palette (extra entries *Open session...*, *Save session as...*, *Rename tab...*, built from
+`ui::PickList` and `ui::TextPrompt` in `src/frontend/ui/dialogs.h`); the close question is a
+`ui::ConfirmDialog` (Cancel is the default button, Escape cancels, plain letters do nothing) for
+keys, the strip's x, the window's close button and Ctrl+Shift+Q; SIGTERM and SIGHUP leave the loop and
+save a session the owner made persistent, with the screen text; a restored pane starts its shell in
+the saved folder (`cd`, then `exec` of the usual command; a vanished folder is noted) and gets the
+offer typed on its prompt without a newline. `--pty-tabs-smoke-test` walks through the palette, a
+save and open, and both close questions. What was still to do: set the probe (`probePane` over `PtyLink::childPid/foregroundProcessGroup`), call
 `windowClose()` on SDL_QUIT and show the dialog from `CloseRequest::question()`, a signal
 handler for SIGHUP/SIGTERM that quits through the same path, the session list, the rename
 action calling `SessionPolicy::shouldSave(TabNamed)`, and typing `rerunInput()` into a restored
