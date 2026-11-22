@@ -43,8 +43,8 @@ TEST_CASE("The default bindings") {
     struct Row { KeyChord key; Command command; int arg; };
     const Row rows[] = {
         {plain('c'), Command::NewTab, 0},        {plain('n'), Command::NextTab, 0},
-        {plain('p'), Command::PreviousTab, 0},   {plain('0'), Command::SelectTab, 0},
-        {plain('7'), Command::SelectTab, 7},     {{'%', false, true, false}, Command::SplitSideBySide, 0},
+        {plain('p'), Command::PreviousTab, 0},   {plain('1'), Command::SelectTab, 0},
+        {plain('7'), Command::SelectTab, 6},     {{'%', false, true, false}, Command::SplitSideBySide, 0},
         {{'"', false, true, false}, Command::SplitStacked, 0}, {plain('x'), Command::ClosePane, 0},
         {plain('&'), Command::CloseTab, 0},      {plain(keys::Left), Command::FocusLeft, 0},
         {plain(keys::Right), Command::FocusRight, 0}, {plain(keys::Up), Command::FocusUp, 0},

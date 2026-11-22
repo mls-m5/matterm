@@ -135,6 +135,10 @@ if(BUILD_TESTING)
     target_link_libraries(clientsession_test PRIVATE matterm::transport)
     add_test(NAME client_session COMMAND clientsession_test)
 
+    add_executable(commandregistry_test commandregistry_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(commandregistry_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+    add_test(NAME command_registry COMMAND commandregistry_test)
+
     add_executable(terminalview_test terminalview_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(terminalview_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
     target_link_libraries(terminalview_test PRIVATE matterm::transport matterm::vt matterm::terminal)

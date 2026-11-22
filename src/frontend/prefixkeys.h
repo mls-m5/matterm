@@ -63,7 +63,9 @@ inline std::vector<PrefixBinding> defaultPrefixBindings() {
     add('c', Command::NewTab);
     add('n', Command::NextTab);
     add('p', Command::PreviousTab);
-    for (int d = 0; d <= 9; ++d) add('0' + d, Command::SelectTab, d);
+    // The digits match the numbers the strip shows: 1 is the first tab, 0 the tenth.
+    for (int d = 1; d <= 9; ++d) add('0' + d, Command::SelectTab, d - 1);
+    add('0', Command::SelectTab, 9);
     add('%', Command::SplitSideBySide);
     add('"', Command::SplitStacked);
     add('x', Command::ClosePane);
