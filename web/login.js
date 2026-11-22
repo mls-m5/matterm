@@ -230,7 +230,12 @@
       if (!button) {
         return;
       }
-      if (button.dataset.mod) {
+      if (button.hasAttribute("data-prefix")) {
+        // Arms the layout prefix; the next key or tap is its second key.
+        if (mod() && mod().ccall) {
+          mod().ccall("matterm_prefix", null, [], []);
+        }
+      } else if (button.dataset.mod) {
         const on = !latched[button.dataset.mod];
         latched[button.dataset.mod] = on;
         button.setAttribute("aria-pressed", String(on));

@@ -49,6 +49,11 @@ struct ViewConfig {
     bool prefixKeys = true;      // Ctrl+B ... (browser)
     bool desktopShortcuts = true; // Ctrl+Shift+T ... (native)
     PrefixKeys::Config prefix;
+    int touchSlop = 16;          // extra pixels around dividers and below the strip for a finger
+    // Windows narrower than this many columns show only the focused pane of a
+    // tab (0: never); the other panes keep running and come back when the window
+    // widens or the focus moves.
+    int compactBelowColumns = 0;
     std::int64_t resizeIntervalMs = 40; // at most one size change per pane this often during a drag
     Palette palette;             // for the strip
 };
@@ -83,6 +88,7 @@ struct MouseInput {
     bool ctrl = false;
     bool alt = false;
     int clicks = 1;
+    bool touch = false; // a finger: dividers and the strip get a larger hit area
 };
 
 // A mouse event for a pane: position relative to the pane's rect, plus the cell.
@@ -154,7 +160,7 @@ public:
             out.stripRect = {0, 0, metrics_.width, stripH};
             out.strip = buildTabStrip(workspace_.tabInfos(titleOf), stripColumns(), config_.palette, stripFirst_);
         }
-        const Layout layout = workspace_.layoutActive();
+        const Layout layout = activeLayout();
         out.dividers = layout.dividers;
         out.focus = workspace_.focusedPaneId();
         const int right = metrics_.width;
@@ -301,7 +307,8 @@ public:
         }
 
         // The strip.
-        if (p.stripRect.h > 0 && in.y >= p.stripRect.y && in.y < p.stripRect.y + p.stripRect.h) {
+        const int stripReach = in.touch ? config_.touchSlop : 0;
+        if (p.stripRect.h > 0 && in.y >= p.stripRect.y && in.y < p.stripRect.y + p.stripRect.h + stripReach) {
             r.consumed = true;
             if (in.type != MouseInput::Type::Down || (in.button != MouseInput::Button::Left &&
                                                       in.button != MouseInput::Button::Middle)) {
@@ -344,9 +351,10 @@ public:
         }
 
         // Dividers.
-        const Layout layout = workspace_.layoutActive();
-        const int d = layout.dividerAt(in.x, in.y);
-        if (d >= 0 && !overScrollbar(p, in.x, in.y)) {
+        const Layout layout = activeLayout();
+        const int d = in.touch ? dividerNear(layout, in.x, in.y, config_.touchSlop)
+                               : layout.dividerAt(in.x, in.y);
+        if (d >= 0 && (in.touch || !overScrollbar(p, in.x, in.y))) {
             const auto idx = static_cast<std::size_t>(d);
             r.consumed = true;
             r.cursor = layout.dividers[idx].direction == SplitDirection::SideBySide
@@ -405,7 +413,7 @@ public:
             }
             return r;
         }
-        const PaneId id = workspace_.layoutActive().paneAt(x, y);
+        const PaneId id = activeLayout().paneAt(x, y);
         if (id != 0) r.pane = id;
         return r;
     }
@@ -429,7 +437,7 @@ public:
     std::optional<PaneMouse> pointerPane(int x, int y) const {
         refreshSpec();
         const FramePlan p = plan();
-        const PanePlan *pp = findPane(p, workspace_.layoutActive().paneAt(x, y));
+        const PanePlan *pp = findPane(p, activeLayout().paneAt(x, y));
         if (pp == nullptr) return std::nullopt;
         MouseInput in;
         in.x = x;
@@ -437,11 +445,66 @@ public:
         return paneMouse(*pp, in, false);
     }
 
+    // Whether a finger at this point would grab a divider (so the owner can
+    // route that touch to mouse() instead of a scroll gesture).
+    bool nearDivider(int x, int y) const {
+        refreshSpec();
+        return dividerNear(activeLayout(), x, y, config_.touchSlop) >= 0;
+    }
+
     // True while a divider or scrollbar drag owns the mouse.
     bool dragging() const { return drag_ == Drag::Divider || drag_ == Drag::Scrollbar; }
 
 private:
     enum class Drag { None, Divider, Scrollbar, Selecting };
+
+    // The layout that is shown: the active tab's, or only its focused pane in a
+    // window narrower than compactBelowColumns.
+    Layout activeLayout() const {
+        Layout full = workspace_.layoutActive();
+        if (config_.compactBelowColumns <= 0 || full.panes.size() < 2 ||
+            metrics_.width / metrics_.cellWidth >= config_.compactBelowColumns) {
+            return full;
+        }
+        const PaneId focus = workspace_.focusedPaneId();
+        const PaneBox *focused = full.box(focus);
+        if (focused == nullptr) return full;
+        Layout one;
+        PixelRect area{0, 0, 0, 0};
+        const LayoutSpec &spec = workspace_.layoutSpec();
+        area = spec.area;
+        PaneBox b;
+        b.pane = focus;
+        b.rect = area;
+        b.columns = area.w / metrics_.cellWidth;
+        b.rows = area.h / metrics_.cellHeight;
+        const int usedW = b.columns * metrics_.cellWidth;
+        const int usedH = b.rows * metrics_.cellHeight;
+        b.leftover[0] = {area.x + usedW, area.y, area.w - usedW, area.h};
+        b.leftover[1] = {area.x, area.y + usedH, usedW, area.h - usedH};
+        one.panes.push_back(b);
+        return one;
+    }
+
+    // The divider whose gutter, grown by `slop` pixels on every side, holds the
+    // point (the nearest if several), or -1.
+    static int dividerNear(const Layout &layout, int x, int y, int slop) {
+        int best = -1;
+        long long bestDistance = 0;
+        for (std::size_t i = 0; i < layout.dividers.size(); ++i) {
+            const PixelRect &g = layout.dividers[i].rect;
+            const PixelRect grown{g.x - slop, g.y - slop, g.w + 2 * slop, g.h + 2 * slop};
+            if (!Layout::contains(grown, x, y)) continue;
+            const long long dx = x - (g.x + g.w / 2);
+            const long long dy = y - (g.y + g.h / 2);
+            const long long distance = dx * dx + dy * dy;
+            if (best < 0 || distance < bestDistance) {
+                best = static_cast<int>(i);
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
 
     static std::string titleOf(const Pane &pane) { return pane.view().title(); }
 

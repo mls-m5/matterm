@@ -114,6 +114,10 @@ struct App {
     int pointerShape = 0;       // 0 arrow, 1 columns, 2 rows.
     std::string pendingSession; // For the next pane the factory makes.
     std::string savedLayout;    // What sessionStorage holds.
+    bool touchDivider = false;  // A finger is dragging a divider.
+    int touchFinger = 0;
+    bool replayTouch = false; // A tap is being replayed as a click.
+    bool prefixShown = false; // The extra-keys button shows "armed".
     bool keyShift = false; // Shift held at the last key press (not live state).
     // Sessions of closed panes, waiting for the server to confirm the Close.
     struct Retired {
@@ -736,11 +740,14 @@ void touchTap(App &app, int x, int y) {
     press.button.clicks = 1;
     press.button.x = x;
     press.button.y = y;
+    app.replayTouch =
+        true; // A finger: the strip and dividers get a bigger reach.
     handleEvent(app, press);
     SDL_Event release = press;
     release.type = SDL_MOUSEBUTTONUP;
     release.button.state = SDL_RELEASED;
     handleEvent(app, release);
+    app.replayTouch = false;
 }
 
 void applyTouch(App &app, const std::vector<TouchGesture::Action> &actions) {
@@ -872,6 +879,7 @@ void handleMouse(App &app, const SDL_Event &event) {
         y = event.button.y;
     }
     const auto mod = modifiers(SDL_GetModState());
+    in.touch = app.replayTouch;
     in.shift = mod.shift;
     in.ctrl = mod.control;
     in.alt = mod.alt;
@@ -1032,6 +1040,36 @@ void handleEvent(App &app, const SDL_Event &event) {
         const double y = event.tfinger.y * height;
         const int id = int(event.tfinger.fingerId);
         const auto now = SDL_GetTicks64();
+        // A finger on a divider drags it (the layout sees it as the mouse);
+        // anything else is a gesture.
+        if (event.type == SDL_FINGERDOWN && !app.touch.active() &&
+            !app.touchDivider) {
+            const auto [dx, dy] = drawablePoint(app, int(x), int(y));
+            if (app.layout->nearDivider(dx, dy)) {
+                app.touchDivider = true;
+                app.touchFinger = id;
+            }
+        }
+        if (app.touchDivider) {
+            if (id == app.touchFinger) {
+                MouseInput in;
+                in.type = event.type == SDL_FINGERDOWN ? MouseInput::Type::Down
+                          : event.type == SDL_FINGERMOTION
+                              ? MouseInput::Type::Move
+                              : MouseInput::Type::Up;
+                in.button = MouseInput::Button::Left;
+                in.touch = true;
+                std::tie(in.x, in.y) = drawablePoint(app, int(x), int(y));
+                const auto result = app.layout->mouse(in, nowMs());
+                if (result.changed) {
+                    layoutChanged(app, false);
+                }
+                if (event.type == SDL_FINGERUP) {
+                    app.touchDivider = false;
+                }
+            }
+            return;
+        }
         applyTouch(app,
                    event.type == SDL_FINGERDOWN ? app.touch.down(id, x, y, now)
                    : event.type == SDL_FINGERMOTION
@@ -1436,6 +1474,17 @@ void frame(void *data) {
     if (const auto timeout = app.layout->tick(nowMs()); timeout.forwardPrefix) {
         send(app, prefixBytes(app)); // The prefix expired: the program gets it.
     }
+    if (app.layout->prefixWaiting() != app.prefixShown) {
+        app.prefixShown = app.layout->prefixWaiting();
+        EM_ASM(
+            {
+                const b = document.querySelector("#keybar [data-prefix]");
+                if (b) {
+                    b.setAttribute("aria-pressed", $0 ? "true" : "false");
+                }
+            },
+            app.prefixShown ? 1 : 0);
+    }
     if (app.pendingFontCss != app.fontCss) {
         changeFont(app);
     }
@@ -1727,6 +1776,16 @@ extern "C" EMSCRIPTEN_KEEPALIVE void matterm_paste(const char *text) {
     }
 }
 
+// The extra-keys bar's prefix button: arms the layout prefix (Ctrl+B), then the
+// next key or tap (a command key, text from the soft keyboard) is its second
+// key.
+extern "C" EMSCRIPTEN_KEEPALIVE void matterm_prefix() {
+    if (gApp && gApp->layoutKeys()) {
+        layoutKey(*gApp, gApp->layout->config().prefix.prefix);
+        gApp->activeUntil = SDL_GetTicks64() + 500;
+    }
+}
+
 // Soft keyboard and the extra-keys bar (login.js): text from the on-screen
 // keyboard, and named keys that phones do not have (Esc, Tab, arrows, ...).
 // `mods`: 1 control, 2 alt, 4 shift.
@@ -1735,6 +1794,18 @@ extern "C" EMSCRIPTEN_KEEPALIVE void matterm_text(const char *utf8, int mods) {
         return;
     }
     const bool control = (mods & 1) != 0, alt = (mods & 2) != 0;
+    if (gApp->layoutKeys()) {
+        if (control && std::strlen(utf8) == 1) {
+            if (layoutKey(*gApp,
+                          KeyChord{foldKey(utf8[0]), true, false, alt})) {
+                return;
+            }
+        }
+        else if (!control) {
+            handleText(*gApp, utf8, alt); // The layout first, then the program.
+            return;
+        }
+    }
     if (control && std::strlen(utf8) == 1) {
         const auto bytes = InputEncoder::control(utf8[0], alt);
         if (!bytes.empty()) {
@@ -1768,6 +1839,29 @@ extern "C" EMSCRIPTEN_KEEPALIVE void matterm_key(const char *name, int mods) {
     auto *pane = gApp->focused();
     if (!pane) {
         return;
+    }
+    if (gApp->layoutKeys()) {
+        static const std::pair<const char *, int> chords[] = {
+            {"Enter", keys::Enter},
+            {"Backspace", keys::Backspace},
+            {"Tab", keys::Tab},
+            {"Escape", keys::Escape},
+            {"ArrowUp", keys::Up},
+            {"ArrowDown", keys::Down},
+            {"ArrowLeft", keys::Left},
+            {"ArrowRight", keys::Right},
+            {"PageUp", keys::PageUp},
+            {"PageDown", keys::PageDown}};
+        for (const auto &[chordName, code] : chords) {
+            if (std::strcmp(chordName, name) == 0 &&
+                layoutKey(*gApp,
+                          KeyChord{code,
+                                   (mods & 1) != 0,
+                                   (mods & 4) != 0,
+                                   (mods & 2) != 0})) {
+                return;
+            }
+        }
     }
     for (const auto &[keyName, key] : keys) {
         if (std::strcmp(keyName, name) == 0) {
@@ -1841,11 +1935,23 @@ int main() {
     ViewConfig layoutConfig;
     layoutConfig.palette = app.chromePalette;
     layoutConfig.showStripWithOneTab = false; // Hidden until there is a choice.
+    layoutConfig.compactBelowColumns = 60;    // A phone: one pane at a time.
+    layoutConfig.prefix.timeoutMs = 4000;     // Time to reach for the keyboard.
     layoutConfig.desktopShortcuts = false;    // The browser keeps Ctrl+T/N/W.
     layoutConfig.prefixKeys = !app.url.empty(); // Off in the static demo.
     layoutConfig.scrollbarStrip = SdlBackend::scrollbarStrip();
     app.layout =
         std::make_unique<WorkspaceView<WebPane>>(*app.workspace, layoutConfig);
+    if (app.layoutKeys()) {
+        // The extra-keys bar (touch) gets its prefix button; the static demo
+        // has no tabs, so it stays hidden there.
+        EM_ASM({
+            const b = document.querySelector("#keybar [data-prefix]");
+            if (b) {
+                b.hidden = false;
+            }
+        });
+    }
     WindowMetrics metrics;
     SDL_GetRendererOutputSize(
         SDL_GetRenderer(app.window), &metrics.width, &metrics.height);
@@ -1867,6 +1973,15 @@ int main() {
         return 1;
     }
     app.layout->sync(nowMs(), true);
+    if (app.layoutKeys()) {
+        // The extra-keys bar gets its tabs/panes prefix button (server mode).
+        EM_ASM({
+            const b = document.querySelector("#keybar [data-prefix]");
+            if (b) {
+                b.hidden = false;
+            }
+        });
+    }
     SDL_StartTextInput();
     app.last = SDL_GetTicks64();
     emscripten_set_main_loop_arg(frame, &app, 0, 1);

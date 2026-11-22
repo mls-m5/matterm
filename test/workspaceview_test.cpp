@@ -468,4 +468,76 @@ TEST_CASE("Random keys, clicks and window sizes keep the plan consistent") {
     }
 }
 
+TEST_CASE("A narrow window shows only the focused pane, a wide one all of them") {
+    int made = 0;
+    Space space{[&made]() { return std::make_unique<Pane>("t" + std::to_string(++made)); }};
+    ViewConfig config;
+    config.compactBelowColumns = 200; // 1200 px / 8 = 150 columns: compact
+    View view(space, config);
+    view.setWindow({1200, 800, 8, 16});
+    view.key({'t', true, true, false}, 0);
+    view.key({'e', true, true, false}, 1); // two panes, the new one focused
+    view.sync(2);
+    FramePlan plan = view.plan();
+    EXPECT_EQ(plan.panes.size(), std::size_t(1));
+    EXPECT(plan.dividers.empty());
+    EXPECT_EQ(plan.panes[0].id, space.focusedPaneId());
+    EXPECT_EQ(plan.panes[0].rect.w, 1200);
+    // The focus moves with the prefix keys and the other pane shows.
+    const PaneId before = space.focusedPaneId();
+    view.key(kPrefix, 10);
+    view.key({keys::Left, false, false, false}, 11);
+    EXPECT(space.focusedPaneId() != before);
+    EXPECT_EQ(view.plan().panes[0].id, space.focusedPaneId());
+    // A click goes to the shown pane.
+    MouseInput m;
+    m.x = 100;
+    m.y = 100;
+    m.type = MouseInput::Type::Down;
+    m.button = MouseInput::Button::Left;
+    const MouseResult down = view.mouse(m);
+    EXPECT(down.pane && down.pane->pane == space.focusedPaneId());
+    // Wide enough: both panes again.
+    View wide(space, ViewConfig{});
+    wide.setWindow({1200, 800, 8, 16});
+    EXPECT_EQ(wide.plan().panes.size(), std::size_t(2));
+}
+
+TEST_CASE("A finger grabs a divider from a distance and the strip from below") {
+    Rig r;
+    r.split();
+    const FramePlan plan = r.view.plan();
+    EXPECT_EQ(plan.dividers.size(), std::size_t(1));
+    const PixelRect g = plan.dividers[0].rect;
+    const int near = g.x + g.w + 10; // 10 px outside the gutter, inside the pane
+    MouseInput mouse = r.at(near, 300);
+    EXPECT(!r.view.mouse(mouse).consumed || r.view.dragging()); // A mouse hits the pane.
+    r.view.mouse(r.at(near, 300, MouseInput::Type::Up));
+    MouseInput touch = r.at(near, 300);
+    touch.touch = true;
+    MouseResult down = r.view.mouse(touch);
+    EXPECT(down.consumed);
+    EXPECT(down.cursor == MouseResult::Cursor::ResizeColumns);
+    EXPECT(r.view.dragging());
+    touch.type = MouseInput::Type::Move;
+    touch.x = near + 60;
+    EXPECT(r.view.mouse(touch).changed);
+    touch.type = MouseInput::Type::Up;
+    r.view.mouse(touch);
+    EXPECT(!r.view.dragging());
+    EXPECT(r.view.plan().panes[0].rect.w > plan.panes[0].rect.w + 40);
+
+    // The strip: a tap just below the row still counts for a finger.
+    Rig two;
+    two.view.key({'t', true, true, false}, 5); // second tab: the strip shows
+    const FramePlan withStrip = two.view.plan();
+    EXPECT(withStrip.stripRect.h > 0);
+    const int below = withStrip.stripRect.h + 8;
+    MouseInput tap = two.at(8, below);
+    EXPECT(!two.view.mouse(tap).consumed);
+    two.view.mouse(two.at(8, below, MouseInput::Type::Up));
+    tap.touch = true;
+    EXPECT(two.view.mouse(tap).consumed);
+}
+
 TEST_SUIT_END
