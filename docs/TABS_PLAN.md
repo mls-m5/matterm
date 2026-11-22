@@ -452,3 +452,11 @@ exclusive take-over first; idle expiry of a shared terminal.
   `--listen ADDRESS` stays as it is (default loopback; a non-loopback address needs
   `--allow-remote-listen`, with a start warning), `matterm --daemon / --no-daemon` for the
   GUI, `--daemon-socket PATH` for a separate dev daemon.
+
+### Styling (owner, 2026-11-22, to discuss later)
+The owner wants some styling on the edges between terminals, in the palette and on the
+edges of popups (today: flat colored borders made of cells). Ideas for the discussion:
+a thin line border in cells with box-drawing or half-block glyphs (needs a cmap test),
+a soft shadow under overlays, rounded corners with a small set of corner glyphs, a
+different divider look for the focused pane (accent color), a subtle title row in popups.
+Decide together with the theme/palette setting, not before.
