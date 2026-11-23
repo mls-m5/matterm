@@ -249,7 +249,7 @@ int runAttachTty(const DaemonOptions &daemonIn) {
         tunnel = openDaemonTunnel(daemon);
     }
     DaemonSource source(daemonSocket(daemon.socketPath));
-    ::signal(SIGPIPE, SIG_IGN);
+    (void)::signal(SIGPIPE, SIG_IGN); // A write to a gone terminal is an error return, not a signal.
     TtyHost host;
     AttachTty mode(host, source);
     mode.start(steadyMs());
