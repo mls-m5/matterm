@@ -21,3 +21,24 @@ extend `fast-json` if that is the right way. Reason first, then decide with the 
    `fast-json`, extended; C: leave as is). Do not migrate anything before the owner decides.
 
 Rules as before: tests first, small commits, tidy clean, SHAs to the integrator.
+
+## Addendum (owner, 2026-11-23)
+- **Writing JSON does not need to be centralised** (it is a simple function; sessionsnapshot and
+  settings may keep their own writers). The question is about the *reader*: drop "write back" from
+  the shared requirements, keep "unknown members kept" only as a property of the settings code.
+- **Comments**: the owner would like his parser (`fast-json`) to accept comments in files people
+  edit (`//` to the end of the line and `/* ... */`), as an opt-in mode (strict mode keeps refusing
+  them, so protocol data stays strict). Add that to the requirements test (accepted in the comment
+  mode, refused in strict mode, comment markers inside strings are text, an unterminated block
+  comment is an error).
+- **Speed is the point of fast-json and must stay**: add a benchmark (MB/s on a few shapes: many small
+  objects, long strings, deep arrays, numbers) and run it for each reader; a comment mode must not slow
+  the strict path (measure fast-json before and after in the same benchmark; the comment test must
+  cost nothing when the mode is off). The reader is fast-json's, so an extension is a patch for the
+  owner's library: prepare it as a patch file under `docs/handover/` (or a branch in a clone outside
+  the submodule), do not commit inside `lib/fast-json`.
+- **A question to bring to the owner with alternatives**: if settings.json may contain comments, the
+  settings TUI must not lose them when it saves. (a) change only the value's bytes in the file (needs
+  the parser to report the byte range of a value; keeps comments and layout; recommended),
+  (b) rewrite the file and lose the comments (simplest), (c) keep the user's file read-only and write
+  the TUI's choices to a second file. State what each costs.
