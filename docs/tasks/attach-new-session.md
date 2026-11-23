@@ -38,3 +38,9 @@ and refuse to pick it with a short explanation; the window's "Attach terminal...
 Rules as before: tests first, small commits, tidy clean, a feature description in
 `docs/handover/features/agentN-<name>.md`, SHAs to the integrator, design questions with
 alternatives to the integrator. State what was not run (no phone, no real sshd).
+
+## Addendum (owner, 2026-11-23): name, keys, status line
+- The tool is called **matmux** (stable name; versioned files `matmux-F.B.A-hash8`). `matterm-attach` is renamed to it after the running tasks are integrated (integrator coordinates; do not rename yet). `matmux` without arguments starts a new terminal with the user's shell and attaches; `matmux --attach` lists and chooses; `matmux --new [--name N] [-- COMMAND...]`; `--daemon-list`/`--daemon-stop` as before.
+- The prefix key is **Ctrl+B**, the same as the window's (`src/frontend/prefixkeys.h`, `forwardPrefix`). After it: `d` leave (the terminal keeps running, the client ends), `l` back to the list, `c` new terminal, `s` status line on/off, `?` help; **Ctrl+B twice sends one Ctrl+B to the program** (owner approved). Ctrl+] stays as a spare until the owner says otherwise.
+- After the prefix a short hint line shows the possible keys at the bottom (temporary overlay, the program's size does not change; gone at the next key).
+- Optional permanent status line (name of the terminal, prefix and the main keys). It takes one row, so the pty size sent to the daemon is rows-1 while it shows. Default on from 24 rows, off below (owner to confirm); toggled with Ctrl+B s.
