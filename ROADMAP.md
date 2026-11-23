@@ -219,6 +219,15 @@ These describe much more functionality than matterm currently implements.
 - [ ] Animated text reveal: demo pacing first, then an opt-in renderer effect for the regular terminal. See docs/tasks/text-reveal-animation.md.
 - [x] Mattrix OS as a separate terminal program (`mattrix`, see docs/FAKEOS.md; original note:): a standalone binary (e.g. `mattrix`) running the fakeos core in a regular terminal, building on `matterm-demo --tty`. Name it "Mattrix OS" in its own text so it is not confused with matterm (the emulator); web and native-window demos can say "powered by matterm". Renderer-only effects (smooth cursor, fades) need simpler tty fallbacks (256-colour steps). Distribution (install target, static binary) undecided.
 - [ ] Session ideas after the tmux comparison (checkpoints, scrollback spill to disk, shell-integration marks): docs/MULTI_TERMINAL.md section 12. Not scheduled.
+- [ ] Replay burst rendering (owner's note, 2026-11-23; not designed): after a reattach the daemon's
+  replay arrives in one large batch and the pane visibly scrolls through it while it is processed.
+  Idea: when a lot of data arrives at once, pause drawing, finish parsing in the background (or
+  just apply it to the model) and draw once when it is done. Measure first (`MATTERM_LOOP_STATS=1`,
+  docs/CPU.md); relates to `--attach-tty`, where each drawn frame also costs terminal output.
+- [ ] Faster stdout for the C++ code that prints (owner's note, 2026-11-23; not measured): where the
+  program writes through `std::cout`, try `std::ios::sync_with_stdio(false)` (no syncing with C
+  stdio) and see whether output gets faster. Only worth it where `std::cout` is used on a hot path;
+  the terminal drawing layer writes with `write(2)` (`ttyterm::writeAll`) and is not affected.
 - [ ] Start a web server from the command palette (owner's wish, 2026-11-22; not designed; postponed 2026-11-23 in favour of `--attach-tty`, docs/tasks/attach-tty.md, which reaches the phone without a server or port; owner leaned to the server being started where the daemon runs, loopback only, ssh forward). The
   palette gets an action that starts `matterm-server` for the running window. When the window
   works over ssh (`--daemon-host`), a second action also opens a port on the computer you are
