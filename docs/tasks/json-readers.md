@@ -42,3 +42,8 @@ Rules as before: tests first, small commits, tidy clean, SHAs to the integrator.
   the parser to report the byte range of a value; keeps comments and layout; recommended),
   (b) rewrite the file and lose the comments (simplest), (c) keep the user's file read-only and write
   the TUI's choices to a second file. State what each costs.
+
+## Addendum 2 (owner, 2026-11-23, replaces the comment parts above)
+- Settings are handled mainly through the settings program, so **comments are not needed now: do not add a comment mode to fast-json at this time** (drop the comment cases and the byte-range question). Speed stays the principle of fast-json if it is touched later.
+- **settings.json is rewritten whole, always formatted** (option b): the same layout every time it is saved, members in the order of the definitions, **every known setting written with its value, defaults included**, so the file shows the user what can be changed when it is edited by hand; unknown members are kept (after the known ones). Comments in an edited file are lost on the next save, which is accepted.
+- The rest of this task (requirements test, table, decision between A/B/C for the reader) stands.

@@ -51,3 +51,6 @@ The name goes roughly in the **middle** of the strip's draggable gap. Make the p
 to try out: `computerNamePlacement` = `center` (default) | `left` (next to the tabs) | `right`
 (against the buttons), a choice control in the settings, applied live like the theme.
 `placeComputerName` in `tabstrip.h` stays the one place. (agent2, small.)
+
+## Addendum 2 (owner, 2026-11-23): the file
+The file is rewritten whole each time it is saved, always with the same formatting (indented, one setting per line, members in the order of the definitions). Settings that were missing are added with their default value, so reading the file explains what can be changed; unknown members are kept (after the known ones). No comments (JSON has none; the key names must be self-explanatory, and the settings program and a short docs page list what each one does and which values are allowed). agent2: change `Settings::toText`/`save` accordingly with tests (formatting is stable; a second save changes nothing).
