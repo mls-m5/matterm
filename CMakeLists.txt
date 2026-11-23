@@ -268,6 +268,18 @@ if(MATTERM_BUILD_CHATD AND UNIX AND NOT EMSCRIPTEN)
         message(STATUS "chatd: Boost 1.74+ or threads not found, not built")
     endif()
 endif()
+# `matterm --attach-tty` without SDL (docs/tasks/daemon-versioning.md): the mode, its daemon
+# client and the shared tty layer. matterm links it; a program without SDL (matterm-attach) can too.
+# Entry point: runAttachTty(DaemonOptions) in app/attachtty.h.
+if(UNIX AND TARGET ptysession)
+    add_library(attachtty app/attachtty.cpp src/daemon/control.cpp)
+    add_library(matterm::attachtty ALIAS attachtty)
+    target_compile_features(attachtty PUBLIC cxx_std_17)
+    target_include_directories(attachtty PUBLIC app src/frontend src/daemon)
+    target_link_libraries(attachtty PUBLIC matterm::transport matterm::unixchannel matterm::vt matterm::terminal
+                                           matterm::ttyposix matterm::ttymatterm)
+endif()
+
 if(MATTERM_BUILD_APP)
     add_executable(matterm app/main.cpp)
     target_include_directories(matterm PRIVATE src/frontend app)
@@ -280,7 +292,8 @@ if(MATTERM_BUILD_APP)
         target_compile_definitions(matterm PRIVATE MATTERM_HAS_PTY=1)
         if(UNIX)
             # The daemon's control messages (a codec only: no server code) and its socket.
-            target_sources(matterm PRIVATE src/daemon/control.cpp app/attachtty.cpp)
+            target_sources(matterm PRIVATE src/daemon/control.cpp)
+            target_link_libraries(matterm PRIVATE matterm::attachtty)
             target_include_directories(matterm PRIVATE src/daemon)
             target_compile_definitions(matterm PRIVATE MATTERM_HAS_ATTACH_TTY=1)
             target_link_libraries(matterm PRIVATE matterm::unixchannel matterm::transport)

@@ -5,8 +5,9 @@
 #include "daemonclient.h"
 #include "daemonconnect.h"
 #include "daemonlink.h"
+#include "tty/posix/session.h"
+#include "tty/posix/terminal.h"
 #include "ttyattach.h"
-#include "ttyplain.h"
 
 #include <cerrno>
 #include <chrono>
@@ -18,23 +19,11 @@
 #include <poll.h>
 #include <stdexcept>
 #include <string>
-#include <sys/ioctl.h>
-#include <termios.h>
 #include <unistd.h>
 
 namespace {
 using namespace frontend;
-using namespace frontend::tty;
-
-volatile std::sig_atomic_t gWinch = 0;
-volatile std::sig_atomic_t gStop = 0;
-
-void onWinch(int) {
-    gWinch = 1;
-}
-void onStop(int) {
-    gStop = 1;
-}
+using namespace frontend::ttymode;
 
 std::int64_t steadyMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -47,81 +36,40 @@ protocol::Time daemonClock() {
         std::chrono::steady_clock::now().time_since_epoch());
 }
 
-// Writes everything, also when the terminal takes it in pieces. False when it
-// is gone.
-bool writeAll(int fd, const std::string &bytes) {
-    std::size_t done = 0;
-    while (done < bytes.size()) {
-        const ssize_t n = ::write(fd, bytes.data() + done, bytes.size() - done);
-        if (n > 0) {
-            done += std::size_t(n);
-        }
-        else if (n < 0 && errno == EINTR) {
-            continue;
-        }
-        else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            pollfd p{fd, POLLOUT, 0};
-            ::poll(&p, 1, 1000);
-        }
-        else {
-            return false;
-        }
-    }
-    return true;
-}
-
-// The terminal this runs in: raw mode, the alternate screen, and everything put
-// back on the way out, also when the mode throws or a signal asks us to stop.
-class PlainHost final : public HostScreen {
+// The terminal this runs in, through the shared tty layer (src/tty): raw mode,
+// the alternate screen, the size, SIGWINCH and the way back on every exit. The
+// mouse is asked for by this class itself, only while the program in the pane
+// wants it (the layer's option is all or nothing).
+class TtyHost final : public HostScreen {
 public:
-    PlainHost() {
-        if (!::isatty(0) || !::isatty(1)) {
+    TtyHost()
+        : session_(sessionOptions()) {
+        if (!session_.start()) {
             throw std::runtime_error("--attach-tty needs a terminal: run it in "
                                      "a terminal (ssh -t from a phone)");
         }
-        if (::tcgetattr(0, &saved_) != 0) {
-            throw std::runtime_error(
-                "--attach-tty: cannot read the terminal settings");
-        }
-        termios raw = saved_;
-        ::cfmakeraw(&raw);
-        raw.c_cc[VMIN] = 1;
-        raw.c_cc[VTIME] = 0;
-        if (::tcsetattr(0, TCSAFLUSH, &raw) != 0) {
-            throw std::runtime_error(
-                "--attach-tty: cannot put the terminal in raw mode");
-        }
-        active_ = true;
-        const char *colorterm = std::getenv("COLORTERM");
-        const std::string ct = colorterm ? colorterm : "";
-        painter_.setCaps(PlainCaps{ct == "truecolor" || ct == "24bit"});
-        // Alternate screen, bracketed paste on.
-        write("\x1b[?1049h\x1b[?2004h\x1b[2J");
+        session_.screen().canvas().setWideChars(true);
     }
-    ~PlainHost() override {
+    ~TtyHost() override {
         restore();
     }
-    PlainHost(const PlainHost &) = delete;
-    PlainHost &operator=(const PlainHost &) = delete;
+    TtyHost(const TtyHost &) = delete;
+    TtyHost &operator=(const TtyHost &) = delete;
 
     void restore() {
-        if (!active_) {
-            return;
+        if (session_.running()) {
+            ::tty::writeAll(1, mouseOff());
+            session_.stop();
         }
-        active_ = false;
-        write(mouseOff() + "\x1b[0m\x1b[?25h\x1b[?2004l\x1b[?1049l");
-        ::tcsetattr(0, TCSAFLUSH, &saved_);
     }
-
-    std::pair<int, int> size() const override {
-        winsize w{};
-        if (::ioctl(1, TIOCGWINSZ, &w) == 0 && w.ws_col > 0 && w.ws_row > 0) {
-            return {int(w.ws_col), int(w.ws_row)};
+    ::tty::Screen &screen() override {
+        return session_.screen();
+    }
+    void present() override {
+        if (!session_.present()) {
+            alive_ =
+                false; // The terminal went away (ssh dropped): the loop ends.
         }
-        return {80, 24};
-    }
-    void present(const ScreenImage &image) override {
-        write(painter_.paint(image));
     }
     void setInputModes(const HostInputModes &modes) override {
         std::string out = mouseOff();
@@ -135,31 +83,28 @@ public:
             }
             out += "\x1b[?1006h";
         }
-        write(out);
+        if (!::tty::writeAll(1, out)) {
+            alive_ = false;
+        }
     }
-    // The size changed: what is on the screen is not what was painted.
-    void resized() {
-        painter_.invalidate();
+    ::tty::Session &session() {
+        return session_;
     }
     bool alive() const {
         return alive_;
     }
 
 private:
+    static ::tty::SessionOptions sessionOptions() {
+        ::tty::SessionOptions options;
+        options.screen.bracketedPaste = true;
+        return options;
+    }
     static std::string mouseOff() {
         return "\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l";
     }
-    void write(const std::string &bytes) {
-        if (!bytes.empty() && !writeAll(1, bytes)) {
-            alive_ =
-                false; // The terminal went away (ssh dropped): the loop ends.
-        }
-    }
-
-    termios saved_{};
-    bool active_ = false;
+    ::tty::Session session_;
     bool alive_ = true;
-    PlainPainter painter_;
 };
 
 // A terminal of the daemon, taken over through the same client path as the
@@ -293,21 +238,6 @@ private:
     std::string socket_;
 };
 
-void installSignals() {
-    struct sigaction winch {};
-    winch.sa_handler = onWinch; // No SA_RESTART: poll(2) wakes up and the loop
-                                // looks at the size.
-    ::sigemptyset(&winch.sa_mask);
-    ::sigaction(SIGWINCH, &winch, nullptr);
-    struct sigaction stop {};
-    stop.sa_handler = onStop;
-    ::sigemptyset(&stop.sa_mask);
-    ::sigaction(SIGTERM, &stop, nullptr);
-    ::sigaction(SIGHUP, &stop, nullptr);
-    ::sigaction(SIGINT, &stop, nullptr);
-    ::signal(SIGPIPE, SIG_IGN);
-}
-
 } // namespace
 
 int runAttachTty(const DaemonOptions &daemonIn) {
@@ -319,24 +249,18 @@ int runAttachTty(const DaemonOptions &daemonIn) {
         tunnel = openDaemonTunnel(daemon);
     }
     DaemonSource source(daemonSocket(daemon.socketPath));
-    installSignals();
-    PlainHost host;
+    ::signal(SIGPIPE, SIG_IGN);
+    TtyHost host;
     AttachTty mode(host, source);
     mode.start(steadyMs());
     std::int64_t lastInput = steadyMs();
-    std::pair<int, int> size = host.size();
-    while (!mode.finished() && !gStop && host.alive()) {
+    bool running = true;
+    while (running && !mode.finished() && host.alive()) {
         std::int64_t now = steadyMs();
-        const auto current = host.size();
-        if (gWinch || current != size) {
-            gWinch = 0;
-            size = current;
-            host.resized();
-            mode.resized(now);
-        }
-        pollfd fds[2];
+        pollfd fds[3];
         nfds_t count = 0;
         fds[count++] = {0, POLLIN, 0};
+        fds[count++] = {host.session().wakeFd(), POLLIN, 0};
         const int paneFd = mode.pollFd();
         if (paneFd >= 0) {
             fds[count++] = {
@@ -349,6 +273,13 @@ int runAttachTty(const DaemonOptions &daemonIn) {
         if (rc < 0 && errno != EINTR) {
             break;
         }
+        const auto events = host.session().takeEvents();
+        if (events.quit) {
+            break; // SIGTERM, SIGHUP, SIGINT: the layer puts the terminal back.
+        }
+        if (events.resized) {
+            mode.resized(now);
+        }
         if (rc > 0 && (fds[0].revents & (POLLIN | POLLHUP | POLLERR))) {
             char buffer[4096];
             const ssize_t n = ::read(0, buffer, sizeof buffer);
@@ -357,7 +288,7 @@ int runAttachTty(const DaemonOptions &daemonIn) {
                 lastInput = now;
             }
             else if (n == 0 || (errno != EINTR && errno != EAGAIN)) {
-                break; // The terminal is gone (ssh dropped).
+                running = false; // The terminal is gone (ssh dropped).
             }
         }
         else if (now - lastInput >= 30) {

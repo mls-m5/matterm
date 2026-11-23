@@ -7,37 +7,53 @@
 
 namespace {
 using namespace frontend;
-using namespace frontend::tty;
+using namespace frontend::ttymode;
 using State = TerminalView::State;
 
+struct Shot {
+    int columns = 0, rows = 0;
+    std::vector<std::string> text;
+    std::string bytes; // What the terminal is sent for this picture (cursor
+                       // moves, shape).
+};
+
 struct FakeHost : HostScreen {
-    int columns = 80, rows = 8;
-    std::vector<ScreenImage> shown;
+    ::tty::Screen screen_{80, 8};
+    std::vector<Shot> shown;
     std::vector<HostInputModes> modes;
-    std::pair<int, int> size() const override {
-        return {columns, rows};
+    void setSize(int columns, int rows) {
+        screen_.resize(columns, rows);
     }
-    void present(const ScreenImage &image) override {
-        shown.push_back(image);
+    ::tty::Screen &screen() override {
+        return screen_;
+    }
+    void present() override {
+        Shot shot;
+        shot.columns = screen_.columns();
+        shot.rows = screen_.rows();
+        for (int y = 0; y < shot.rows; ++y) {
+            std::string out;
+            for (int x = 0; x < shot.columns; ++x) {
+                const char32_t cp = screen_.canvas().at(x, y).codePoint;
+                out += cp < 128 ? char(cp) : '?';
+            }
+            while (!out.empty() && out.back() == ' ') {
+                out.pop_back();
+            }
+            shot.text.push_back(out);
+        }
+        shot.bytes = screen_.present();
+        shown.push_back(std::move(shot));
     }
     void setInputModes(const HostInputModes &m) override {
         modes.push_back(m);
     }
     std::string row(int y) const {
-        std::string out;
-        const ScreenImage &image = shown.back();
-        for (int x = 0; x < image.columns; ++x) {
-            const char32_t cp = image.at(x, y).codePoint;
-            out += cp < 128 ? char(cp) : '?';
-        }
-        while (!out.empty() && out.back() == ' ') {
-            out.pop_back();
-        }
-        return out;
+        return shown.back().text[std::size_t(y)];
     }
     bool shows(const std::string &text) const {
-        for (int y = 0; y < shown.back().rows; ++y) {
-            if (row(y).find(text) != std::string::npos) {
+        for (const std::string &line : shown.back().text) {
+            if (line.find(text) != std::string::npos) {
                 return true;
             }
         }
@@ -240,9 +256,9 @@ TEST_CASE("The pane shows the program's screen and sends the keys on") {
     rig.mode->tick(rig.now);
     EXPECT_EQ(rig.host.row(0), std::string("hello"));
     EXPECT_EQ(rig.host.row(1), std::string("world"));
-    EXPECT(rig.host.shown.back().cursorVisible);
-    EXPECT_EQ(rig.host.shown.back().cursorColumn, 5);
-    EXPECT_EQ(rig.host.shown.back().cursorRow, 1);
+    // The cursor is after "world": row 2, column 6 (1-based) and shown.
+    EXPECT(rig.host.shown.back().bytes.find("\x1b[2;6H") != std::string::npos);
+    EXPECT(rig.host.shown.back().bytes.find("\x1b[?25h") != std::string::npos);
     rig.type("ls\r");
     EXPECT_EQ(rig.source.last->link.sent, std::string("ls\r"));
     rig.type("\x1b[A");
@@ -281,8 +297,7 @@ TEST_CASE(
 TEST_CASE("Resizing the host terminal resizes the terminal in the daemon") {
     Rig rig;
     rig.enterPane();
-    rig.host.columns = 60;
-    rig.host.rows = 20;
+    rig.host.setSize(60, 20);
     rig.mode->resized(rig.now + 5);
     EXPECT_EQ(rig.source.last->v.model().columns(), std::size_t(60));
     EXPECT_EQ(rig.source.last->link.columns, 60);
@@ -348,7 +363,7 @@ TEST_CASE("Taken over by another client: a line says so, Enter takes it back, "
 TEST_CASE(
     "On a narrow screen the line gets shorter but still says what Enter does") {
     Rig rig;
-    rig.host.columns = 30;
+    rig.host.setSize(30, 8);
     rig.enterPane();
     rig.source.last->takenOver();
     rig.mode->tick(rig.now);

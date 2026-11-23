@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace {
-using namespace frontend::tty;
+using namespace frontend::ttymode;
 using Kind = InputEvent::Kind;
 using Key = InputEncoder::Key;
 

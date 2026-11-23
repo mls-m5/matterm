@@ -57,6 +57,7 @@ inline const std::vector<Program> &programs() {
              {"--smoke-test", "", Value::None, "", "Hidden VT self-test", true},
              {"--pty-smoke-test", "", Value::None, "", "Hidden PTY self-test", true},
              {"--pty-tabs-smoke-test", "", Value::None, "", "Hidden tabs self-test", true},
+             {"--pty-layout-smoke-test", "", Value::None, "", "Hidden detach-tab self-test", true},
          }},
         {"matterm-server", "",
          {

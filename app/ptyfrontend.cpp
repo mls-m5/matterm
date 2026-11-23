@@ -1100,7 +1100,8 @@ int runPtyFrontend(const char *font,
         }
         return true;
     };
-    const auto openPalette = [&] {
+    // What the palette offers besides the built-in commands, from the window's state right now.
+    const auto paletteExtra = [&] {
         std::vector<CommandEntry> extra = {
             {"session.open", "Open session...", "Choose a saved session to open", std::nullopt, {}, {}},
             {"session.save", "Save session as...", "Save the tabs and panes under a name", std::nullopt, {}, {}},
@@ -1142,7 +1143,11 @@ int runPtyFrontend(const char *font,
                 extra.push_back(std::move(entry));
             }
         }
-        wv.pushLayer(std::make_unique<ui::CommandPalette>(buildCommandRegistry(viewConfig.prefix, extra), true));
+        return extra;
+    };
+    const auto openPalette = [&] {
+        wv.pushLayer(
+            std::make_unique<ui::CommandPalette>(buildCommandRegistry(viewConfig.prefix, paletteExtra()), true));
     };
     const auto handleAction = [&](const std::string &action) {
         const auto colon = action.find(':');
@@ -1410,7 +1415,7 @@ int runPtyFrontend(const char *font,
                     if (workspace.apply(Command::CloseTab) == Outcome::Empty) {
                         running = false;
                     }
-                    notify("tab detached as layout '" + name + "' (Attach layout... opens it again)");
+                    notify("tab detached as layout '" + name + "' (Attach tab... opens it again)");
                 }
             }
         }
@@ -1421,7 +1426,7 @@ int runPtyFrontend(const char *font,
                                  std::to_string(info.panes) + (info.panes == 1 ? " terminal" : " terminals"),
                                  std::string(daemonaction::attachLayout) + ":" + info.name});
             }
-            wv.pushLayer(std::make_unique<ui::PickList>("Attach layout", std::move(items), "No detached layouts"));
+            wv.pushLayer(std::make_unique<ui::PickList>("Attach tab", std::move(items), "No detached tabs"));
         }
         else if (id == daemonaction::attachLayout || id == daemonaction::attachLayoutGo) {
             const bool force = id == daemonaction::attachLayoutGo && argument.size() > 6 &&
@@ -1580,6 +1585,14 @@ int runPtyFrontend(const char *font,
     float hiddenShare = 1;
     int widthBefore = 0;
     PixelRect gutterAtStart;
+    const auto paletteEntryNamed = [](const std::vector<CommandEntry> &entries, const char *name) {
+        for (const auto &entry : entries) {
+            if (entry.name == name) {
+                return true;
+            }
+        }
+        return false;
+    };
     const auto expectThat = [](bool ok, const char *what) {
         if (!ok) {
             throw std::runtime_error(std::string("PTY tabs smoke: ") + what);
@@ -1610,8 +1623,59 @@ int runPtyFrontend(const char *font,
         }
         SDL_PushEvent(&e);
     };
+    // --pty-layout-smoke-test: Detach tab, then the palette offers Attach tab... (docs/tasks/daemon-versioning.md).
+    const auto layoutScript = [&] {
+        const auto later = [&](Uint64 ms) { scriptDue = SDL_GetTicks64() + ms; };
+        const auto connected = [](const NativePane *p) { return p && p->daemon && !p->daemon->sessionId().empty(); };
+        // MATTERM_LAYOUT_SMOKE: "detach-only" detaches the only tab (the window ends), "check" is a later
+        // window that must offer the layout; otherwise both in one window.
+        const char *variantText = std::getenv("MATTERM_LAYOUT_SMOKE");
+        const std::string variant = variantText ? variantText : "";
+        switch (scriptStep++) {
+        case 0:
+            later(2000); // The tunnel, the daemon and the first terminal.
+            break;
+        case 1:
+            expectThat(connected(workspace.focusedPane()), "the first terminal is attached to the daemon");
+            if (variant == "check") {
+                expectThat(layoutFiles.list().size() == 1, "the layout of the earlier window is still there");
+                expectThat(paletteEntryNamed(paletteExtra(), "Attach tab..."), "the palette offers Attach tab...");
+                scriptDone = true;
+                running = false;
+            }
+            else if (variant == "detach-only") {
+                scriptDone = true; // The window ends with its only tab.
+                handleAction(daemonaction::detachTab);
+                expectThat(layoutFiles.list().size() == 1, "Detach tab saves the layout");
+            }
+            else {
+                expectThat(workspace.apply(Command::NewTab) != Outcome::Ignored, "a second tab opens");
+                later(2000);
+            }
+            break;
+        case 2:
+            expectThat(workspace.tabCount() == 2 && connected(workspace.focusedPane()), "the second terminal is attached");
+            expectThat(layoutFiles.list().empty(), "no layout is saved yet");
+            expectThat(!paletteEntryNamed(paletteExtra(), "Attach tab..."), "Attach tab... is not offered without a layout");
+            handleAction(daemonaction::detachTab);
+            later(500);
+            break;
+        case 3:
+            expectThat(workspace.tabCount() == 1, "Detach tab closes the tab");
+            expectThat(layoutFiles.list().size() == 1, "Detach tab saves the layout");
+            expectThat(paletteEntryNamed(paletteExtra(), "Attach tab..."), "the palette offers Attach tab...");
+            scriptDone = true;
+            running = false;
+            break;
+        default: break;
+        }
+    };
     const auto script = [&] {
         if (!tabsSmoke || scriptDone || SDL_GetTicks64() < scriptDue) {
+            return;
+        }
+        if (daemonOptions.layoutSmoke) {
+            layoutScript();
             return;
         }
         SDL_SetModState(KMOD_NONE);

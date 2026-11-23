@@ -45,13 +45,17 @@ class Tty:
         return True
 
     def text(self):
-        return re.sub(rb"\x1b\[[0-9;?<]*[A-Za-z]", b"", self.raw).decode("utf8", "replace")
+        # Without the escape sequences and without blanks: the drawing layer skips blanks with a
+        # cursor move, so "a b" can arrive as "a", move, "b".
+        plain = re.sub(rb"\x1b\[[0-9;?<]*[A-Za-z]", b"", self.raw).decode("utf8", "replace")
+        return plain.replace(" ", "")
 
     def send(self, data):
         self.raw = b""
         os.write(self.fd, data)
 
     def wait_for(self, needle, seconds=10):
+        needle = needle.replace(" ", "")
         end = time.time() + seconds
         while time.time() < end:
             if needle in self.text():
@@ -92,7 +96,7 @@ try:
     check("\x1b[?1049h" in a.raw.decode("utf8", "replace"), "the alternate screen is used")
     a.send(b"\r")
     check(a.wait_for("hello-from-daemon"), "Enter takes the terminal over and the screen is rebuilt from the replay")
-    check(a.wait_for("leaves to the list"), "the first time, the leave key is announced")
+    check(a.wait_for("Ctrl+] leave"), "the first time, the leave key is announced")
     a.send(b"echo typed-here; stty size\r")
     check(a.wait_for("typed-here") and a.wait_for("24 80"), "typing reaches the terminal, which has the size of the screen")
 
@@ -113,7 +117,7 @@ try:
     b.send(b"echo from-b\r")
     check(b.wait_for("from-b"), "the second client types")
     a.send(b"\r")
-    check(a.wait_for("from-b") and "Taken over" not in a.text()[-300:], "Enter takes it back, with what happened meanwhile")
+    check(a.wait_for("from-b") and "Takenover" not in a.text()[-300:], "Enter takes it back, with what happened meanwhile")
     check(b.wait_for("Taken over by another client", 10), "and the second client is kicked in turn")
 
     b.send(b"\x1d")

@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace frontend::tty {
+namespace frontend::ttymode {
 
 struct ListEntry {
     std::string id;
@@ -228,33 +228,30 @@ inline ListKey listKeyOf(const InputEvent &event, int &digit) {
 }
 
 // Colours of the list: a quiet header and footer, the chosen row inverted.
-inline constexpr Rgb8 kBarFg{20, 20, 20};
-inline constexpr Rgb8 kBarBg{190, 190, 190};
-inline constexpr Rgb8 kDim{150, 150, 150};
-inline constexpr Rgb8 kWarn{240, 190, 90};
+inline constexpr ::tty::Rgb kBarFg{20, 20, 20};
+inline constexpr ::tty::Rgb kBarBg{190, 190, 190};
+inline constexpr ::tty::Rgb kDim{150, 150, 150};
+inline constexpr ::tty::Rgb kWarn{240, 190, 90};
 
 // The number of rows of the list that fit on a screen of `rows` rows.
 inline int listCapacity(int rows) {
     return std::max(0, rows - 4); // Header, blank, (rows), message, footer.
 }
 
-inline ScreenImage renderList(const ListModel &model, int columns, int rows) {
-    ScreenImage image(columns, rows);
+// Draws the list over the whole canvas.
+inline void renderList(const ListModel &model, ::tty::Canvas &canvas) {
+    const int columns = canvas.columns();
+    const int rows = canvas.rows();
+    canvas.clear(kScreenBg);
     if (columns <= 0 || rows <= 0) {
-        return image;
+        return;
     }
-    fillRow(image, 0, kBarFg, kBarBg);
-    put(image,
-        1,
-        0,
-        "matterm: running terminals",
-        kBarFg,
-        kBarBg,
-        CellAttribute::Bold);
+    fillRow(canvas, 0, kBarFg, kBarBg);
+    put(canvas, 1, 0, "matterm: running terminals", kBarFg, kBarBg, true);
     const auto &entries = model.entries();
     const int capacity = listCapacity(rows);
     if (entries.empty()) {
-        put(image, 1, 2, "No terminals are running in the daemon.", kDim);
+        put(canvas, 1, 2, "No terminals are running in the daemon.", kDim);
     }
     // The visible part follows the chosen row.
     std::size_t first = 0;
@@ -267,38 +264,33 @@ inline ScreenImage renderList(const ListModel &model, int columns, int rows) {
         const std::size_t i = first + std::size_t(line);
         const ListEntry &entry = entries[i];
         const bool chosen = i == model.index();
-        const Rgb8 fg = chosen ? kBarFg : kScreenFg;
-        const Rgb8 bg = chosen ? kBarBg : kScreenBg;
+        const ::tty::Rgb fg = chosen ? kBarFg : kScreenFg;
+        const ::tty::Rgb bg = chosen ? kBarBg : kScreenBg;
         const int y = 2 + line;
-        fillRow(image, y, fg, bg);
-        std::string number = i < 9 ? std::to_string(i + 1) : " ";
-        int x = put(image, 1, y, number + " ", chosen ? fg : kDim, bg);
-        x = put(image, x, y, entry.title, fg, bg, CellAttribute::Bold);
+        fillRow(canvas, y, fg, bg);
+        const std::string number = i < 9 ? std::to_string(i + 1) : " ";
+        int x = put(canvas, 1, y, number + " ", chosen ? fg : kDim, bg);
+        x = put(canvas, x, y, entry.title, fg, bg, true);
         if (entry.inUse) { // Before the long part, so that a narrow screen
                            // still shows it.
-            x = put(image, x, y, " (in use)", chosen ? fg : kWarn, bg);
+            x = put(canvas, x, y, " (in use)", chosen ? fg : kWarn, bg);
         }
-        put(image, x, y, "  " + entry.what, chosen ? fg : kDim, bg);
+        put(canvas, x, y, "  " + entry.what, chosen ? fg : kDim, bg);
     }
     const ListEntry *chosenEntry = model.selected();
     if (model.message().empty() && chosenEntry && chosenEntry->inUse) {
-        put(image,
-            1,
-            rows - 2,
-            "In use: opening takes it over.",
-            kWarn);
+        put(canvas, 1, rows - 2, "In use: opening takes it over.", kWarn);
     }
     if (!model.message().empty()) {
-        put(image, 1, rows - 2, model.message(), kWarn);
+        put(canvas, 1, rows - 2, model.message(), kWarn);
     }
-    fillRow(image, rows - 1, kBarFg, kBarBg);
-    put(image,
+    fillRow(canvas, rows - 1, kBarFg, kBarBg);
+    put(canvas,
         1,
         rows - 1,
         "Up/Down choose   Enter open   r refresh   q quit",
         kBarFg,
         kBarBg);
-    return image;
 }
 
-} // namespace frontend::tty
+} // namespace frontend::ttymode

@@ -1,11 +1,12 @@
 #include "mls-unit-test/unittest.h"
+#include "tty/canvas.h"
 #include "ttylist.h"
 
 #include <string>
 #include <vector>
 
 namespace {
-using namespace frontend::tty;
+using namespace frontend::ttymode;
 
 mtd::SessionEntry entry(const std::string &id,
                         bool attached = false,
@@ -27,9 +28,9 @@ mtd::SessionInfo info(const std::string &cwd,
     return i;
 }
 
-std::string rowText(const ScreenImage &image, int y) {
+std::string rowText(const ::tty::Canvas &image, int y) {
     std::string out;
-    for (int x = 0; x < image.columns; ++x) {
+    for (int x = 0; x < image.columns(); ++x) {
         const char32_t cp = image.at(x, y).codePoint;
         out += cp < 128 ? char(cp) : '?';
     }
@@ -37,6 +38,12 @@ std::string rowText(const ScreenImage &image, int y) {
         out.pop_back();
     }
     return out;
+}
+
+::tty::Canvas drawn(const ListModel &model, int columns, int rows) {
+    ::tty::Canvas canvas(columns, rows);
+    renderList(model, canvas);
+    return canvas;
 }
 
 ListModel threeRows() {
@@ -153,7 +160,7 @@ TEST_CASE("Keys of the host terminal map to list keys") {
 TEST_CASE("The list is drawn with a header, the rows, the mark for in use and "
           "a footer") {
     const ListModel model = threeRows();
-    const ScreenImage image = renderList(model, 70, 10);
+    const ::tty::Canvas image = drawn(model, 70, 10);
     EXPECT_EQ(rowText(image, 0), std::string(" matterm: running terminals"));
     EXPECT(rowText(image, 2).find("1 build") != std::string::npos);
     EXPECT(rowText(image, 3).find("2 terminal bbbbbbbb") != std::string::npos);
@@ -171,7 +178,7 @@ TEST_CASE(
     mtd::SessionInfo far =
         info("/home/someone/projects/a/very/deep/folder/tree/that/goes/on");
     model.setEntries({makeListEntry(entry("aaaaaaaa11", true), &far)});
-    const ScreenImage image = renderList(model, 40, 8);
+    const ::tty::Canvas image = drawn(model, 40, 8);
     EXPECT(rowText(image, 2).find("(in use)") != std::string::npos);
     EXPECT(rowText(image, 6).find("opening takes it over") !=
            std::string::npos);
@@ -179,7 +186,7 @@ TEST_CASE(
 
 TEST_CASE("An empty list says so and still has its footer") {
     ListModel model;
-    const ScreenImage image = renderList(model, 60, 8);
+    const ::tty::Canvas image = drawn(model, 60, 8);
     EXPECT(rowText(image, 2).find("No terminals are running") !=
            std::string::npos);
     EXPECT(rowText(image, 7).find("q quit") != std::string::npos);
@@ -188,7 +195,7 @@ TEST_CASE("An empty list says so and still has its footer") {
 TEST_CASE("A message shows under the list") {
     ListModel model = threeRows();
     model.setMessage("The daemon is not running");
-    EXPECT(rowText(renderList(model, 60, 10), 8).find("not running") !=
+    EXPECT(rowText(drawn(model, 60, 10), 8).find("not running") !=
            std::string::npos);
 }
 
@@ -206,7 +213,7 @@ TEST_CASE("A long list scrolls to keep the chosen row visible, and tiny "
     for (int i = 0; i < 20; ++i) {
         model.key(ListKey::Down);
     }
-    const ScreenImage image = renderList(model, 40, 10);
+    const ::tty::Canvas image = drawn(model, 40, 10);
     bool found = false;
     for (int y = 0; y < 10; ++y) {
         found = found || rowText(image, y).find("t20") != std::string::npos;
@@ -214,7 +221,7 @@ TEST_CASE("A long list scrolls to keep the chosen row visible, and tiny "
     EXPECT(found);
     for (int c = 0; c <= 3; ++c) {
         for (int r = 0; r <= 3; ++r) {
-            renderList(model, c, r); // Must not throw or write outside.
+            drawn(model, c, r); // Must not throw or write outside.
         }
     }
 }

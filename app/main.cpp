@@ -445,6 +445,7 @@ int main(int argc, char **argv) {
     bool smokeTest = false;
     bool ptySmokeTest = false;
     bool ptyTabsSmokeTest = false;
+    bool ptyLayoutSmokeTest = false; // Hidden: needs a daemon, no command.
     bool smoothCursor = false;
     bool useDaemon = true; // Default; --no-daemon turns it off.
     bool daemonExplicit = false;
@@ -570,6 +571,9 @@ int main(int argc, char **argv) {
         else if (arg == "--pty-tabs-smoke-test") {
             ptyTabsSmokeTest = true;
         }
+        else if (arg == "--pty-layout-smoke-test") {
+            ptyLayoutSmokeTest = true;
+        }
         else if (arg == "--term" && i + 1 < argc) {
             term = argv[++i];
         }
@@ -626,6 +630,11 @@ int main(int argc, char **argv) {
         }
         return windowTest();
     }
+    if (ptyLayoutSmokeTest && (!useDaemon || !command.empty() || ptyTabsSmokeTest || ptySmokeTest || inputPath || showcase ||
+                               smokeTest || attachTty)) {
+        std::cerr << "--pty-layout-smoke-test needs the daemon and nothing else (no command, no other mode)\n";
+        return 1;
+    }
     if (attachTty) {
         if (!valid) {
             printUsage(std::cerr, argv[0]);
@@ -681,6 +690,8 @@ int main(int argc, char **argv) {
         }
         try {
             const auto font = applicationFontPath(fontOverride);
+            DaemonOptions daemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll, daemonHost, sshArguments, daemonInstall, assumeYes, tabActivity, frontend::wantsOwnFrame(frameRequest)};
+            daemonOptions.layoutSmoke = ptyLayoutSmokeTest;
             return runPtyFrontend(font.c_str(),
                                   fontSize,
                                   command,
@@ -688,8 +699,8 @@ int main(int argc, char **argv) {
                                   ptySmokeTest,
                                   recordPath,
                                   smoothCursor,
-                                  ptyTabsSmokeTest,
-                                  DaemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll, daemonHost, sshArguments, daemonInstall, assumeYes, tabActivity, frontend::wantsOwnFrame(frameRequest)});
+                                  ptyTabsSmokeTest || ptyLayoutSmokeTest,
+                                  daemonOptions);
         }
         catch (const std::exception &error) {
             std::cerr << error.what() << '\n';

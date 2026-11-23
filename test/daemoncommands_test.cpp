@@ -61,7 +61,7 @@ TEST_CASE("Entries for the pane, the tab and the layouts appear only when they c
         return all;
     };
     const auto none = names({});
-    for (const char *n : {"Attach terminal here", "Kill terminal", "Detach tab", "Attach layout"}) {
+    for (const char *n : {"Attach terminal here", "Kill terminal", "Detach tab", "Attach tab"}) {
         EXPECT(none.find(n) == std::string::npos);
     }
     AttachState pane;
@@ -73,7 +73,7 @@ TEST_CASE("Entries for the pane, the tab and the layouts appear only when they c
     EXPECT(names(tab).find("Detach tab (keep terminals)") != std::string::npos);
     AttachState layouts;
     layouts.layouts = 2;
-    EXPECT(names(layouts).find("Attach layout...") != std::string::npos);
+    EXPECT(names(layouts).find("Attach tab...") != std::string::npos);
 }
 
 TEST_CASE("Replacing or killing a terminal asks first, with Cancel as the default") {

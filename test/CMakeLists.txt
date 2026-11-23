@@ -126,18 +126,13 @@ if(BUILD_TESTING)
 
     add_executable(ttylist_test ttylist_test.cpp mls-unit-test/test_main.cpp ../src/daemon/control.cpp)
     target_include_directories(ttylist_test PRIVATE ../src/frontend ../src/daemon)
-    target_link_libraries(ttylist_test PRIVATE matterm::transport matterm::vt)
+    target_link_libraries(ttylist_test PRIVATE matterm::transport matterm::vt matterm::tty)
     add_test(NAME tty_list COMMAND ttylist_test)
 
     add_executable(ttyattach_test ttyattach_test.cpp mls-unit-test/test_main.cpp ../src/daemon/control.cpp)
     target_include_directories(ttyattach_test PRIVATE ../src/frontend ../src/daemon)
-    target_link_libraries(ttyattach_test PRIVATE matterm::transport matterm::vt matterm::terminal)
+    target_link_libraries(ttyattach_test PRIVATE matterm::transport matterm::vt matterm::terminal matterm::ttymatterm)
     add_test(NAME tty_attach COMMAND ttyattach_test)
-
-    add_executable(ttyplain_test ttyplain_test.cpp mls-unit-test/test_main.cpp)
-    target_include_directories(ttyplain_test PRIVATE ../src/frontend)
-    target_link_libraries(ttyplain_test PRIVATE palette)
-    add_test(NAME tty_plain COMMAND ttyplain_test)
 
     add_executable(layoutsnapshot_test layoutsnapshot_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(layoutsnapshot_test PRIVATE ../src/frontend)
@@ -405,13 +400,31 @@ if(BUILD_TESTING)
         target_link_libraries(daemon_test PRIVATE matterm-daemon-core)
         add_test(NAME daemon COMMAND daemon_test)
 
-        # matterm --attach-tty against a real daemon, in real ptys (needs python3).
+        # matterm --attach-tty against a real daemon, in real ptys (needs python3). Run with
+        # matterm and with a program that links only the SDL-free library.
         find_package(Python3 COMPONENTS Interpreter QUIET)
-        if(Python3_Interpreter_FOUND AND TARGET matterm AND TARGET matterm-daemon-e2e)
+        if(Python3_Interpreter_FOUND AND TARGET matterm AND TARGET matterm-daemon-e2e AND TARGET attachtty)
+            add_executable(attachtty_probe attachtty_main.cpp)
+            target_link_libraries(attachtty_probe PRIVATE matterm::attachtty)
             add_test(NAME attach_tty_pty
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/attachtty_pty.py"
                         $<TARGET_FILE:matterm> $<TARGET_FILE:matterm-daemon-e2e>)
             set_tests_properties(attach_tty_pty PROPERTIES TIMEOUT 120)
+            add_test(NAME attach_tty_pty_nosdl
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/attachtty_pty.py"
+                        $<TARGET_FILE:attachtty_probe> $<TARGET_FILE:matterm-daemon-e2e>)
+            set_tests_properties(attach_tty_pty_nosdl PROPERTIES TIMEOUT 120)
+        endif()
+
+        # Detach tab, then Attach tab... is offered: local daemon, and --daemon-host through the fake ssh.
+        if(Python3_Interpreter_FOUND AND TARGET matterm)
+            foreach(mode local remote)
+                add_test(NAME layout_smoke_${mode}
+                    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/layout_smoke.py"
+                            $<TARGET_FILE:matterm> $<TARGET_FILE:matterm-daemon>
+                            "${CMAKE_CURRENT_SOURCE_DIR}/fakessh.py" ${mode})
+                set_tests_properties(layout_smoke_${mode} PROPERTIES TIMEOUT 200)
+            endforeach()
         endif()
 
         add_executable(daemonclient_test daemonclient_test.cpp mls-unit-test/test_main.cpp)

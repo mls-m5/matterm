@@ -208,8 +208,9 @@ Needs: `matterm` and `matterm-daemon` installed on the computer, the daemon runn
 native `matterm`, built with the same libraries as the window (SDL is linked but not started); a
 computer without them cannot run it yet.
 
-Draws with truecolor if `COLORTERM` is `truecolor` or `24bit`, else 256 colours. Wide (East
-Asian) characters and emoji are not handled specially yet.
+Drawing follows the terminal's colours (truecolor, 256 or 16, from `COLORTERM`/`TERM`); the program's
+own default and 0..15 colours come out as the terminal's theme. The mode lives in the SDL-free library
+`matterm::attachtty` (`app/attachtty.h`).
 
 ## b) A native WebSocket client against `matterm-server --expose-local-sessions` (not built)
 

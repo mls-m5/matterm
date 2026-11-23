@@ -36,27 +36,40 @@ window (the phone shows the taken-over line, Enter takes it back); Ctrl+] and `q
   rarely used by programs. A design alternative if the owner dislikes it: Ctrl+\ (but ssh clients
   and terminals map it to SIGQUIT in cooked mode; here it would work too since raw mode is on).
 
-## Not the shared tty layer yet
+## The shared tty layer and the SDL-free library (2026-11-23)
 
-agent2's `src/tty/` (parts 1 and 2) was announced but is not on `main`. Until it is, drawing and key
-decoding in this mode are my own small versions (`ttyplain.h`, `ttyinput.h`), behind `HostScreen` and
-`ScreenImage`. Swapping: implement `HostScreen` with `tty::Session`/`Screen` (map `ScreenImage` cells
-to `tty::Cell`, cursor via `setCursor`) and drop `PlainHost`/`ttyplain.h`; `ttyinput.h` stays useful
-for the re-encoding to the program's modes unless `tty::KeyDecoder` replaces its decoding half.
+The mode draws through agent2's `src/tty` now: `HostScreen` hands out a `tty::Screen`; the list is
+drawn into its canvas, the pane with `tty::drawCells` (indexed/default colours go to the host
+terminal's theme, wide characters are handled by the canvas); `app/attachtty.cpp` runs a
+`tty::Session` (raw mode, alternate screen, SIGWINCH, SIGTERM/SIGHUP, stop/continue, restore after a
+crash). My painter (`ttyplain.h`) and my picture type are gone.
+
+`ttyinput.h` stays: `tty::KeyDecoder` has no function keys, Insert or modifier bits on arrows, and a
+program in the pane needs those; the file also re-encodes everything for the program's modes
+(`InputEncoder`). If `tty::Key` grows those, only the decoding half can move.
+The mouse is asked for in `TtyHost` itself, only while the program wants it, because
+`tty::ScreenOptions::mouse` is all or nothing; those escapes are written directly and undone by
+`TtyHost::restore()` (a crash handler does not know them: a crash while the program had the mouse on
+leaves it on in the host terminal; a `setOptions` on `tty::Screen` would close that gap).
+
+The mode, its daemon client and the tty layer are the CMake library `matterm::attachtty`
+(`app/attachtty.cpp`, no SDL; entry `runAttachTty(DaemonOptions)` in `app/attachtty.h`). `matterm`
+links it; `test/attachtty_main.cpp` (`attachtty_probe`) is a program of only that, and the pty test
+runs against both (`attach_tty_pty`, `attach_tty_pty_nosdl`; `ldd` of the probe shows no SDL).
 
 ## Verified
 
-- Unit tests: ttyinput (10), ttylist (12), ttyattach (20 with fakes), ttyplain (10), cli options.
+- Unit tests: ttyinput (10), ttylist (12), ttyattach (20 with fakes), cli options.
 - `test/attachtty_pty.py` (ctest `attach_tty_pty`, needs the build with `-DMATTERM_BUILD_SERVER=ON`):
   real `matterm-daemon` (the e2e helper) and real ptys: list, open, replay, typing, size, resize,
   two clients taking over from each other, Enter to take back, leave key, `q` with the terminal
   restored, Ctrl+C, no daemon.
-- Whole ctest in the server build (110 tests before this part) passed.
+- Whole ctest in the server build (116 tests) passed.
 
 ## Not verified
 
 - A real phone, Termux, a real sshd (only ptys here). Mouse reports and bracketed paste were tested as
   bytes into the decoder and into the mode with fakes, not by a real terminal.
-- Wide characters, emoji, combining marks (shown as one cell each), other TERM values than xterm-like.
+- Wide characters, emoji and combining marks go through the layer's canvas but were not looked at on a real terminal; other TERM values than xterm-like.
 - clang-tidy (not installed here) and zsh/fish completion (only the generated text is tested).
 - A tunnel (`--attach-tty --daemon-host`): same code as the window's, not run here.

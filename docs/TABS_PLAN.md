@@ -557,7 +557,7 @@ Native with the daemon. Design in short:
   each pane also has `"terminal":"<32 hex id>"` (an optional schema field, validated like the
   browser's session ids) beside its folder and command. The name is the tab's name as a file name
   ("layout" without one; a free number is added when taken). No automatic restore, like sessions.
-- **Attach layout...:** a list of the saved layouts; choosing one opens it as a new tab with the
+- **Attach tab...** (earlier "Attach layout..."; the internal ids and the layout files keep that word): a list of the saved layouts; choosing one opens it as a new tab with the
   saved splits and ratios. For each pane the daemon is asked (`planLayoutAttach`): its terminal is
   free: attached again; another window shows it: one question first ("Take them over?");
   missing, gone or already shown here: a new terminal in the saved folder, with a note in the pane.

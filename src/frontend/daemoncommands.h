@@ -183,7 +183,7 @@ inline std::vector<CommandEntry> attachCommandEntries(const AttachState &state) 
             "Take this tab out of the window; its terminals keep running and the layout is saved");
     }
     if (state.layouts > 0) {
-        add(daemonaction::attachLayout, "Attach layout...",
+        add(daemonaction::attachLayout, "Attach tab...",
             "Open a detached tab again, with its splits and its terminals");
     }
     if (state.leftover > 0) {

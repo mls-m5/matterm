@@ -11,6 +11,8 @@
 // Time is a number of milliseconds on any steady clock; the caller passes it
 // in.
 #include "terminalview.h"
+#include "tty/matterm/cells.h"
+#include "tty/screen.h"
 #include "ttyinput.h"
 #include "ttylist.h"
 #include "ttyscreen.h"
@@ -22,7 +24,7 @@
 #include <utility>
 #include <vector>
 
-namespace frontend::tty {
+namespace frontend::ttymode {
 
 // The host terminal as the mode needs it: its size, a picture to show, which
 // reports to ask for. Implemented by the app (a plain one now, the shared
@@ -30,8 +32,10 @@ namespace frontend::tty {
 class HostScreen {
 public:
     virtual ~HostScreen() = default;
-    virtual std::pair<int, int> size() const = 0; // columns, rows
-    virtual void present(const ScreenImage &image) = 0;
+    // The screen to draw into (size included); the mode calls present() after
+    // drawing.
+    virtual ::tty::Screen &screen() = 0;
+    virtual void present() = 0;
     virtual void setInputModes(const HostInputModes &modes) = 0;
 };
 
@@ -108,7 +112,7 @@ public:
     void resized(std::int64_t now) {
         now_ = now;
         if (pane_) {
-            const auto [columns, rows] = host_.size();
+            const auto [columns, rows] = size();
             pane_->view().resize(std::size_t(std::max(1, columns)),
                                  std::size_t(std::max(1, rows)));
         }
@@ -211,7 +215,7 @@ private:
         if (key == ListKey::None) {
             return;
         }
-        const auto [columns, rows] = host_.size();
+        const auto [columns, rows] = size();
         const ListAction action =
             list_.key(key, digit, std::max(1, listCapacity(rows)));
         (void)columns;
@@ -232,7 +236,7 @@ private:
     }
 
     void open(const std::string &id) {
-        const auto [columns, rows] = host_.size();
+        const auto [columns, rows] = size();
         std::string error;
         auto pane =
             source_.open(id, std::max(1, columns), std::max(1, rows), error);
@@ -364,35 +368,42 @@ private:
         }
     }
 
+    std::pair<int, int> size() const {
+        return {host_.screen().columns(), host_.screen().rows()};
+    }
+
     void draw() {
         if (!dirty_) {
             return;
         }
         dirty_ = false;
-        const auto [columns, rows] = host_.size();
-        ScreenImage image;
+        const auto [columns, rows] = size();
+        ::tty::Screen &screen = host_.screen();
+        ::tty::Canvas &canvas = screen.canvas();
         if (pane_) {
             TerminalView &view = pane_->view();
             const auto frame = view.model().frame(16);
-            image = imageOf(frame, view.palette(), columns, rows);
+            canvas.clear(kScreenBg);
+            ::tty::drawCells(screen, frame.cells, view.palette());
+            ::tty::Cursor cursor = ::tty::toCursor(frame.cursor);
+            cursor.visible = cursor.visible && frame.cursor.column < columns &&
+                             frame.cursor.row < rows;
             const std::string status = statusText(columns);
             if (!status.empty() && rows >= 2) {
-                fillRow(image, rows - 1, kBarFg, kBarBg);
-                put(image, 1, rows - 1, status, kBarFg, kBarBg);
-                if (image.cursorRow == rows - 1) {
-                    image.cursorVisible = false;
+                fillRow(canvas, rows - 1, kBarFg, kBarBg);
+                put(canvas, 1, rows - 1, status, kBarFg, kBarBg);
+                if (cursor.row == rows - 1) {
+                    cursor.visible = false;
                 }
             }
+            screen.setCursor(cursor);
         }
         else {
-            image = renderList(list_, columns, rows);
+            renderList(list_, canvas);
+            screen.setCursor({});
         }
         applyModes();
-        if (!shown_ || image != last_) {
-            host_.present(image);
-            last_ = std::move(image);
-            shown_ = true;
-        }
+        host_.present();
     }
 
     HostScreen &host_;
@@ -406,10 +417,8 @@ private:
     bool hinted_ = false;
     bool finished_ = false;
     bool dirty_ = true;
-    bool shown_ = false;
     bool modesSet_ = false;
     HostInputModes modes_;
-    ScreenImage last_;
 };
 
-} // namespace frontend::tty
+} // namespace frontend::ttymode

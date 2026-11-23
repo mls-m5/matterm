@@ -17,7 +17,7 @@
 #include <string_view>
 #include <vector>
 
-namespace frontend::tty {
+namespace frontend::ttymode {
 
 // The key that leaves the pane for the list: Ctrl+] (0x1d), the "escape to the
 // prompt" key of telnet and ssh's cousins; programs almost never use it.
@@ -432,4 +432,4 @@ inline HostInputModes hostModesFor(const TerminalModes &modes, bool live) {
     return host;
 }
 
-} // namespace frontend::tty
+} // namespace frontend::ttymode
