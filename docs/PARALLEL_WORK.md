@@ -66,6 +66,8 @@ empty-scroll/grow/ED3 work, server sessions (phase 1 of docs/MULTI_TERMINAL.md),
 the Mattrix OS demo (`docs/tasks/fakeos-demo.md`, milestones 1-11), warnings and
 clang-tidy (`docs/STATIC_ANALYSIS.md`).
 
+- `docs/tasks/attach-tty.md`: `--attach-tty` (take over a daemon session in the current terminal; shared
+  tty layer first). Part 1-2 agent2 (`.tmp/agent2`), part 3 agent3 (`.tmp/agent3`).
 - `docs/CHAT.md`: the Mattrix OS chat (ChatRoom core, `chatd`, `mattrix-chat`).
   Worktree `.tmp/agent3`, branch `agent3-fakeos`.
 - `docs/tasks/web-sessions.md`: browser tabs/terminal views. **Paused** while the
