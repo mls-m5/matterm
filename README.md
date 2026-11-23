@@ -1,7 +1,8 @@
-# matterm
+# matterm ♥ matmux
 
-A terminal emulator in C++ that runs both as a native app and in the browser, on a
-reusable cell-grid renderer and a small terminal model.
+A terminal emulator and multiplexer that runs both as a native app and in the browser, with
+terminals that keep running in a daemon, and as `matmux` in any terminal (a small tmux). Built in
+C++ on a reusable cell-grid renderer and a small terminal model.
 
 **[Try it online](https://mls-m5.github.io/matterm/)**
 
@@ -9,6 +10,8 @@ reusable cell-grid renderer and a small terminal model.
 
 - `matterm`: the native terminal (SDL2, a real PTY), Linux, with tabs and split panes
   (Ctrl+Shift+T, Ctrl+Shift+E/O; see [docs/OVERVIEW.md](docs/OVERVIEW.md)).
+- `matmux`: the same terminals in the terminal you are in (also over ssh from a phone): start one, leave it
+  running, come back to it; one static file, no window libraries (see "Keep terminals running" below).
 - `matterm-server` and the web client: the same terminal in a browser, with a
   password-protected server that owns the shell (see
   [docs/SERVER.md](docs/SERVER.md), [web/README.md](web/README.md)).
@@ -51,31 +54,6 @@ The browser build and the server are described in [web/README.md](web/README.md)
 5. **Another laptop window** can show any terminal of the daemon (also unshared ones, it is your
    own user): palette *Attach terminal...*.
 6. Ctrl+Shift+H lists every keyboard shortcut.
-
-## Tab completion for the options
-
-`matterm --completion bash|zsh|fish` prints a completion script for `matterm`, `matterm-server` and
-`matterm-daemon`; it is generated from the same option tables the programs are checked against
-(`src/frontend/clioptions.h`), so it follows them. Install it where your shell looks by itself, no
-edit of `.bashrc`, `.zshrc` or `config.fish`:
-
-```sh
-# bash (needs the bash-completion package; each command name loads its own file)
-mkdir -p ~/.local/share/bash-completion/completions
-for c in matterm matterm-server matterm-daemon; do matterm --completion bash > ~/.local/share/bash-completion/completions/$c; done
-
-# zsh: a file named _matterm in a folder of $fpath (print -l $fpath shows them; one in your home,
-# ~/.zfunc or ~/.local/share/zsh/site-functions, only has to be listed there once)
-matterm --completion zsh > ~/.local/share/zsh/site-functions/_matterm
-
-# fish
-mkdir -p ~/.config/fish/completions
-for c in matterm matterm-server matterm-daemon; do matterm --completion fish > ~/.config/fish/completions/$c.fish; done
-```
-
-It completes the options, the values of `--term` and `--trusted-proxy`, files and folders where an
-option wants one, `*.ttf` for the font argument, and for `--daemon-host` the `Host` names of
-`~/.ssh/config` (patterns left out; `known_hosts` is never read). Open a new shell afterwards.
 
 ## The window frame
 
@@ -129,6 +107,7 @@ private Unix socket, so they survive closing the window or a crash of the GUI.
 
 ## More
 
+- [docs/COMPLETION.md](docs/COMPLETION.md): tab completion for the options (bash, zsh, fish).
 - [docs/OVERVIEW.md](docs/OVERVIEW.md): the full guide (controls, options, tests,
   library use, rendering and terminal model).
 - [ROADMAP.md](ROADMAP.md), [DESIGN.md](DESIGN.md), [docs/](docs/): plans, design and
