@@ -26,7 +26,7 @@ constexpr std::uint16_t kControlVersion = 3;
 // itself (the version in ControlWelcome::build).
 constexpr std::uint16_t kControlFormat = 1;
 constexpr std::uint16_t kControlBreaking = kControlVersion;
-constexpr std::uint16_t kControlAdditive = 1;
+constexpr std::uint16_t kControlAdditive = 2; // 2: GetActivity/Activity.
 constexpr std::size_t kMaxName = 64;
 constexpr std::size_t kMaxListed = 256;
 constexpr std::size_t kMaxPath = 4096;
@@ -42,6 +42,9 @@ struct ExposedHello { std::uint16_t version = kControlVersion; };
 struct ListSessions {};
 struct SetShared { std::string id; bool shared = false; };
 struct GetStatus {};
+// How long ago a terminal client was last attached (for "stray daemon" lists).
+// Additive in 1.3.2; an older daemon answers BadMessage.
+struct GetActivity {};
 // The owner confirmed ending `expectedSessions` sessions. Runs only when that is still the
 // number of live sessions; otherwise the daemon answers with the real count and does nothing.
 struct Shutdown { std::uint32_t expectedSessions = 0; };
@@ -86,6 +89,11 @@ struct Status {
     std::uint32_t idleExitSeconds = 0;
 };
 struct SessionCreated { std::string id; };
+struct Activity {
+    bool attachedNow = false; // A terminal client is attached at this moment.
+    std::uint32_t secondsSinceClient =
+        0; // Since the last one left (or since the daemon started).
+};
 struct SessionInfo {
     std::string id;
     std::string cwd;                  // Absolute, empty when unknown.
@@ -109,8 +117,24 @@ struct ControlError {
     std::string reason;
 };
 
-using ControlRequest = std::variant<ControlHello, ExposedHello, ListSessions, SetShared, GetStatus, Shutdown, CreateSession, GetSessionInfo, SetName>;
-using ControlReply = std::variant<ControlWelcome, SessionList, Status, ShutdownReply, ControlError, SessionCreated, SessionInfo>;
+using ControlRequest = std::variant<ControlHello,
+                                    ExposedHello,
+                                    ListSessions,
+                                    SetShared,
+                                    GetStatus,
+                                    Shutdown,
+                                    CreateSession,
+                                    GetSessionInfo,
+                                    SetName,
+                                    GetActivity>;
+using ControlReply = std::variant<ControlWelcome,
+                                  SessionList,
+                                  Status,
+                                  ShutdownReply,
+                                  ControlError,
+                                  SessionCreated,
+                                  SessionInfo,
+                                  Activity>;
 
 // True for a first byte in the control range (either direction).
 inline bool isControlType(std::uint8_t type) { return (type & 0xf0) == 0x40 || (type & 0xf0) == 0xc0; }

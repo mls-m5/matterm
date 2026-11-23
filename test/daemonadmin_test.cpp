@@ -33,6 +33,7 @@ struct Stopper {
     std::optional<PeerCredentials> peer;
     bool answer = true;
     bool gone = true;
+    std::vector<std::string> programs;
     std::vector<std::string> questions;
     std::vector<std::uint32_t> shutdowns, killed;
     DaemonStopTools tools() {
@@ -52,6 +53,7 @@ struct Stopper {
             return true;
         };
         t.gone = [this](const std::string &) { return gone; };
+        t.programs = [this](const std::string &) { return programs; };
         return t;
     }
 };
@@ -73,6 +75,42 @@ TEST_CASE(
     EXPECT_EQ(found[0], dir + "/daemon-b4.sock"); // Sorted.
     EXPECT_EQ(found[1], dir + "/daemon.sock");
     std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("The list says how long ago a daemon had a client") {
+    DaemonEntry a{"/s/a.sock", info(3, 2, 1, 1), 1, {}};
+    a.activity = mtd::Activity{true, 0};
+    DaemonEntry b{"/s/b.sock", info(3, 2, 2, 0), 2, {}};
+    b.activity = mtd::Activity{false, 125};
+    DaemonEntry c{"/s/c.sock", info(3, 0, 3, 0), 3, {}};
+    DaemonEntry d{"/s/d.sock", info(3, 2, 4, 0), 4, {}};
+    d.activity = mtd::Activity{false, 3 * 3600 + 5};
+    const auto text = formatDaemonList({a, b, c, d});
+    EXPECT(text.find("a client is attached") != std::string::npos);
+    EXPECT(text.find("last client 2 min ago") != std::string::npos);
+    EXPECT(text.find("last client 3 h ago") != std::string::npos);
+    EXPECT(formatAge(5) == "less than a minute");
+    EXPECT(formatAge(3600 * 50) == "2 days");
+}
+
+TEST_CASE("A stray-daemon notice counts the others and the old ones; none when "
+          "alone") {
+    const mtd::Version mine{1, 3, 2, "x"};
+    std::vector<DaemonEntry> rows = {{"/s/me.sock", info(3, 2, 1, 1), 1, {}}};
+    EXPECT(strayNotice(rows, "/s/me.sock", mine).empty());
+    rows.push_back({"/s/old.sock", info(3, 0, 2, 0), 2, {}});
+    EXPECT_EQ(strayNotice(rows, "/s/me.sock", mine),
+              std::string("1 other daemon runs (1 old): --daemon-list"));
+    rows.push_back({"/s/b.sock", info(3, 2, 3, 0), 3, {}});
+    rows.push_back({"/s/stale.sock",
+                    std::nullopt,
+                    0,
+                    "nothing listens (a left-over file)"});
+    EXPECT_EQ(strayNotice(rows, "/s/me.sock", mine),
+              std::string("2 other daemons run (1 old): --daemon-list"));
+    rows.erase(rows.begin() + 1);
+    EXPECT_EQ(strayNotice(rows, "/s/me.sock", mine),
+              std::string("1 other daemon runs: --daemon-list"));
 }
 
 TEST_CASE("The list names socket, pid, version, hash and terminals") {
@@ -111,6 +149,22 @@ TEST_CASE(
     EXPECT_EQ(s.shutdowns.size(), std::size_t(1));
     EXPECT_EQ(s.shutdowns[0], 3u);
     EXPECT(s.killed.empty());
+}
+
+TEST_CASE(
+    "The stop question names the programs that run, when they are known") {
+    Stopper s;
+    s.daemon = info(3, 1, 100, 3);
+    s.reply = mtd::ShutdownReply{true, 3};
+    s.programs = {"vim", "make"};
+    EXPECT(stopDaemon("/s/daemon.sock", s.tools()).stopped);
+    EXPECT(s.questions[0].find("3 terminals (running: vim, make)") !=
+           std::string::npos);
+    Stopper none;
+    none.daemon = info(3, 1, 100, 3);
+    none.reply = mtd::ShutdownReply{true, 3};
+    EXPECT(stopDaemon("/s/daemon.sock", none.tools()).stopped);
+    EXPECT(none.questions[0].find("running:") == std::string::npos);
 }
 
 TEST_CASE("Saying no stops nothing") {

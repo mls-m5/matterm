@@ -15,6 +15,7 @@ enum Type : std::uint8_t {
     tGetSessionInfo = 0x46,
     tExposedHello = 0x47,
     tSetName = 0x48,
+    tGetActivity = 0x49,
     tControlWelcome = 0xc0,
     tSessionList = 0xc1,
     tStatus = 0xc2,
@@ -23,7 +24,8 @@ enum Type : std::uint8_t {
     tSessionCreated = 0xc5,
     tSessionInfo = 0xc6,
     tSessionListNamed = 0xc7,
-    tSessionInfoNamed = 0xc8
+    tSessionInfoNamed = 0xc8,
+    tActivity = 0xc9
 };
 constexpr std::size_t kMaxId = 64;
 constexpr std::size_t kMaxText = 256;
@@ -88,6 +90,16 @@ bool write(std::string &o, const SetName &m) {
     return putString(o, m.name, kMaxName);
 }
 bool write(std::string &o, const GetStatus &) { put8(o, tGetStatus); return true; }
+bool write(std::string &o, const GetActivity &) {
+    put8(o, tGetActivity);
+    return true;
+}
+bool write(std::string &o, const Activity &m) {
+    put8(o, tActivity);
+    put8(o, m.attachedNow ? 1 : 0);
+    put32(o, m.secondsSinceClient);
+    return true;
+}
 bool write(std::string &o, const Shutdown &m) { put8(o, tShutdown); put32(o, m.expectedSessions); return true; }
 bool write(std::string &o, const CreateSession &m) {
     put8(o, tCreateSession);
@@ -193,6 +205,9 @@ std::optional<ControlRequest> decodeRequest(std::string_view bytes) {
     }
     case tGetStatus:
         return r.done() ? std::optional<ControlRequest>(GetStatus{}) : std::nullopt;
+    case tGetActivity:
+        return r.done() ? std::optional<ControlRequest>(GetActivity{})
+                        : std::nullopt;
     case tShutdown: {
         Shutdown m;
         if (!r.get(m.expectedSessions) || !r.done()) return std::nullopt;
@@ -259,6 +274,13 @@ std::optional<ControlReply> decodeReply(std::string_view bytes) {
             !r.get(m.uptimeMs) || !r.get(m.idleExitSeconds) || !r.done()) {
             return std::nullopt;
         }
+        return m;
+    }
+    case tActivity: {
+        Activity m;
+        if (!r.getBool(m.attachedNow) || !r.get(m.secondsSinceClient) ||
+            !r.done())
+            return std::nullopt;
         return m;
     }
     case tShutdownReply: {

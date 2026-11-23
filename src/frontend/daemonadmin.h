@@ -20,6 +20,7 @@
 #include <string>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <tuple>
 #include <unistd.h>
 #include <vector>
 
@@ -65,6 +66,8 @@ struct DaemonEntry {
         info;              // Empty when it did not answer the handshake.
     std::uint32_t pid = 0; // From the Welcome, else from the socket; 0 unknown.
     std::string problem;   // Set when `info` is empty.
+    std::optional<mtd::Activity>
+        activity; // Empty for a daemon older than 1.3.2.
 };
 
 using DaemonProbe =
@@ -109,11 +112,24 @@ inline std::vector<std::string> findDaemonSockets(
     return found;
 }
 
+inline std::optional<mtd::Activity> realActivity(const std::string &socket) {
+    std::string error;
+    const auto reply = askDaemon(socket, mtd::GetActivity{}, error, 1500);
+    if (reply) {
+        if (const auto *activity = std::get_if<mtd::Activity>(&*reply)) {
+            return *activity;
+        }
+    }
+    return std::nullopt;
+}
+
 inline std::vector<DaemonEntry> listDaemons(
     const std::vector<std::string> &sockets,
     const DaemonProbe &probe,
     const std::function<std::optional<PeerCredentials>(const std::string &)>
-        &peer = peerCredentials) {
+        &peer = peerCredentials,
+    const std::function<std::optional<mtd::Activity>(const std::string &)>
+        &activity = realActivity) {
     std::vector<DaemonEntry> entries;
     for (const auto &socket : sockets) {
         DaemonEntry entry;
@@ -121,6 +137,9 @@ inline std::vector<DaemonEntry> listDaemons(
         entry.info = probe(socket);
         if (entry.info) {
             entry.pid = entry.info->welcome.pid;
+            if (entry.info->version.additive >= 2) {
+                entry.activity = activity(socket);
+            }
         }
         else if (const auto who = peer(socket)) {
             entry.pid = who->pid;
@@ -133,6 +152,20 @@ inline std::vector<DaemonEntry> listDaemons(
         entries.push_back(std::move(entry));
     }
     return entries;
+}
+
+// "less than a minute", "5 min", "3 h", "2 days".
+inline std::string formatAge(std::uint32_t seconds) {
+    if (seconds < 60) {
+        return "less than a minute";
+    }
+    if (seconds < 3600) {
+        return std::to_string(seconds / 60) + " min";
+    }
+    if (seconds < 48u * 3600) {
+        return std::to_string(seconds / 3600) + " h";
+    }
+    return std::to_string(seconds / 86400) + " days";
 }
 
 inline std::string formatDaemonList(const std::vector<DaemonEntry> &entries) {
@@ -155,6 +188,13 @@ inline std::string formatDaemonList(const std::vector<DaemonEntry> &entries) {
                            " in use)";
                 }
             }
+            if (e.activity) {
+                out += e.activity->attachedNow
+                           ? ", a client is attached"
+                           : ", last client " +
+                                 formatAge(e.activity->secondsSinceClient) +
+                                 " ago";
+            }
             if (mtd::compatibility(mtd::ownVersion(), e.info->version) ==
                 mtd::Compatibility::Incompatible) {
                 out += ", cannot work with this program";
@@ -166,6 +206,34 @@ inline std::string formatDaemonList(const std::vector<DaemonEntry> &entries) {
         out += "\n";
     }
     return out;
+}
+
+// One line for the start of the window or --attach-tty when other daemons than
+// the one in use run (or one is older): "2 other daemons run (1 old):
+// --daemon-list". Empty when there are none.
+inline std::string strayNotice(const std::vector<DaemonEntry> &entries,
+                               const std::string &used,
+                               const mtd::Version &mine) {
+    int others = 0, old = 0;
+    for (const auto &e : entries) {
+        if (e.socket == used || !e.info) {
+            continue;
+        }
+        ++others;
+        if (std::make_tuple(e.info->version.format,
+                            e.info->version.breaking,
+                            e.info->version.additive) <
+            std::make_tuple(mine.format, mine.breaking, mine.additive)) {
+            ++old;
+        }
+    }
+    if (others == 0) {
+        return {};
+    }
+    return std::to_string(others) +
+           (others == 1 ? " other daemon runs" : " other daemons run") +
+           (old > 0 ? " (" + std::to_string(old) + " old)" : std::string()) +
+           ": --daemon-list";
 }
 
 struct DaemonStopTools {
@@ -180,6 +248,8 @@ struct DaemonStopTools {
     std::function<bool(std::uint32_t pid)> terminate; // SIGTERM.
     std::function<bool(const std::string &socket)>
         gone; // Waits a little for the socket to go.
+    // The programs that run in its terminals, when known (may be empty).
+    std::function<std::vector<std::string>(const std::string &socket)> programs;
 };
 
 struct StopResult {
@@ -193,9 +263,18 @@ inline StopResult stopDaemon(const std::string &socket,
     const auto info = tools.probe(socket);
     std::optional<PeerCredentials> peer;
     if (info) {
-        const std::string count =
+        std::string count =
             info->status ? std::to_string(info->status->sessions) + " terminals"
                          : std::string("its terminals");
+        if (tools.programs) {
+            const auto programs = tools.programs(socket);
+            for (std::size_t i = 0; i < programs.size(); ++i) {
+                count += (i == 0 ? " (running: " : ", ") + programs[i];
+            }
+            if (!programs.empty()) {
+                count += ")";
+            }
+        }
         if (!tools.ask("Stop the daemon on " + socket + " (pid " +
                        std::to_string(info->welcome.pid) + ", version " +
                        mtd::toString(info->version) + ")? This ends " + count +
@@ -263,6 +342,36 @@ inline StopResult stopDaemon(const std::string &socket,
     return result;
 }
 
+// The foreground programs that are not a shell, as the daemon reports them
+// (version 2+); at most 5.
+inline std::vector<std::string> daemonProgramNames(const std::string &socket) {
+    // The foreground programs that are not a shell, as the daemon reports them
+    // (version 2+).
+    std::vector<std::string> names;
+    std::string error;
+    const auto list = askDaemon(socket, mtd::ListSessions{}, error, 1500);
+    const auto *sessions =
+        list ? std::get_if<mtd::SessionList>(&*list) : nullptr;
+    for (std::size_t i = 0;
+         sessions && i < sessions->sessions.size() && names.size() < 5;
+         ++i) {
+        const auto detail = askDaemon(
+            socket, mtd::GetSessionInfo{sessions->sessions[i].id}, error, 1000);
+        const auto *info =
+            detail ? std::get_if<mtd::SessionInfo>(&*detail) : nullptr;
+        if (info && info->busy && !info->command.empty()) {
+            auto name = info->command.front();
+            name = name.substr(
+                name.rfind('/') == std::string::npos ? 0 : name.rfind('/') + 1);
+            if (!name.empty() &&
+                std::find(names.begin(), names.end(), name) == names.end()) {
+                names.push_back(name);
+            }
+        }
+    }
+    return names;
+}
+
 inline DaemonStopTools realStopTools(
     std::function<bool(const std::string &)> ask) {
     DaemonStopTools tools;
@@ -280,6 +389,7 @@ inline DaemonStopTools realStopTools(
         }
         return std::nullopt;
     };
+    tools.programs = daemonProgramNames;
     tools.peer = [](const std::string &socket) {
         return peerCredentials(socket);
     };

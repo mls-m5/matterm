@@ -377,21 +377,30 @@ inline std::string plural(std::size_t n, const char *one, const char *many) {
 
 // The question before the daemon is stopped: says what will end. The safe
 // button (Cancel) is the default and what Escape answers.
-inline std::string stopDaemonQuestion(std::size_t programs) {
+// `names`: what the terminals run, when the daemon could say ("vim, make").
+inline std::string stopDaemonQuestion(
+    std::size_t programs, const std::vector<std::string> &names = {}) {
     if (programs == 0) {
         return "Stop the daemon? No programs are running in it.";
     }
+    std::string list;
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        list += (i == 0 ? " (" : ", ") + names[i];
+    }
+    if (!list.empty()) {
+        list += ")";
+    }
     return "Stop the daemon? " + plural(programs, "program", "programs") +
-           " running in it will end, also those no window shows.";
+           " running in it" + list + " will end, also those no window shows.";
 }
 
 inline std::unique_ptr<ui::ConfirmDialog> stopDaemonDialog(
-    std::size_t programs) {
+    std::size_t programs, const std::vector<std::string> &names = {}) {
     std::vector<ui::ConfirmDialog::Button> buttons = {
         {"Stop daemon", daemonaction::stopConfirm},
         {"Cancel", daemonaction::stopCancel}};
     return std::make_unique<ui::ConfirmDialog>(
-        stopDaemonQuestion(programs), std::move(buttons), 1, 1);
+        stopDaemonQuestion(programs, names), std::move(buttons), 1, 1);
 }
 
 struct DaemonStatus {

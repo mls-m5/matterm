@@ -3,6 +3,7 @@
 // The daemon of another computer through an ssh tunnel (--daemon-host,
 // docs/REMOTE_DAEMON.md): shared by the window and by --attach-tty so that both
 // ask and report the same way.
+#include "daemonadmin.h"
 #include "daemonchoice.h"
 #include "ptyfrontend.h"
 #include "sshtunnel.h"
@@ -98,5 +99,16 @@ inline std::string selectDaemon(DaemonOptions &options,
         std::cerr << "matterm: " << choice.note << "\n";
     }
     options.socketPath = choice.socket;
+    if (!remote) { // One line when other daemons run too (never touched
+                   // automatically).
+        const auto entries =
+            frontend::listDaemons(mtd::daemonSocketsIn(mtd::socketDirectory()),
+                                  frontend::realProbe());
+        if (const auto notice = frontend::strayNotice(
+                entries, choice.socket, mtd::ownVersion());
+            !notice.empty()) {
+            std::cerr << "matterm: " << notice << "\n";
+        }
+    }
     return {};
 }

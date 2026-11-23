@@ -239,4 +239,42 @@ TEST_CASE("--ensure starts a new daemon on the versioned socket next to an "
     std::filesystem::remove_all(runtime);
 }
 
+TEST_CASE("GetActivity/Activity round-trip, and a daemon says whether a client "
+          "is attached") {
+    std::string bytes;
+    EXPECT(mtd::encode(mtd::ControlRequest(mtd::GetActivity{}), bytes));
+    const auto request = mtd::decodeRequest(bytes);
+    EXPECT(request.has_value() &&
+           std::holds_alternative<mtd::GetActivity>(*request));
+    bytes.clear();
+    EXPECT(mtd::encode(mtd::ControlReply(mtd::Activity{true, 77}), bytes));
+    const auto reply = mtd::decodeReply(bytes);
+    EXPECT(reply.has_value());
+    EXPECT(std::get<mtd::Activity>(*reply).attachedNow &&
+           std::get<mtd::Activity>(*reply).secondsSinceClient == 77u);
+    EXPECT(!mtd::decodeReply(bytes + "x").has_value());
+
+    Running r;
+    EXPECT(r.started);
+    std::string error;
+    auto ask = [&] {
+        const auto answer = askDaemon(r.path, mtd::GetActivity{}, error);
+        return answer ? std::get<mtd::Activity>(*answer)
+                      : mtd::Activity{true, 999};
+    };
+    EXPECT(!ask().attachedNow); // Nobody ever attached; control connections do
+                                // not count.
+    EXPECT(ask().secondsSinceClient < 5u);
+    {
+        DaemonClient c(r.path);
+        EXPECT(attach(c).has_value());
+        EXPECT(ask().attachedNow);
+    }
+    for (int i = 0; i < 100 && ask().attachedNow; ++i) {
+        std::this_thread::sleep_for(20ms);
+    }
+    EXPECT(!ask().attachedNow);
+    EXPECT(ask().secondsSinceClient < 5u);
+}
+
 TEST_SUIT_END

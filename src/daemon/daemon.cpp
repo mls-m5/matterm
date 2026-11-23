@@ -73,6 +73,8 @@ struct Daemon::Impl : std::enable_shared_from_this<Impl> {
     std::atomic<ExitReason> exitReason{ExitReason::None};
     Clock::time_point started = Clock::now();
     std::optional<Clock::time_point> idleSince;
+    Clock::time_point lastTerminalClient =
+        Clock::now(); // A terminal client last left (or the start).
 
     explicit Impl(DaemonConfig c) : config(std::move(c)) {
         if (!config.allowedUid) config.allowedUid = geteuid();
@@ -315,6 +317,20 @@ private:
         s.idleExitSeconds = d_.config.idleExitSeconds;
         reply(s);
     }
+    void handle(const GetActivity &) {
+        Activity a;
+        for (const auto &i : d_.registry->list()) {
+            if (i.attached)
+                a.attachedNow = true;
+        }
+        if (!a.attachedNow) {
+            a.secondsSinceClient =
+                std::uint32_t(std::chrono::duration_cast<std::chrono::seconds>(
+                                  Clock::now() - d_.lastTerminalClient)
+                                  .count());
+        }
+        reply(a);
+    }
     void handle(const Shutdown &m) {
         const auto live = d_.liveSessions();
         if (m.expectedSessions != live) {
@@ -411,6 +427,7 @@ private:
     }
     void detachSession() {
         if (attachment_) {
+            d_.lastTerminalClient = Clock::now();
             auto a = std::move(*attachment_);
             attachment_.reset();
             d_.registry->detach(a, timeNow());

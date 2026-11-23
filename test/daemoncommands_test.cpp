@@ -6,6 +6,14 @@ using namespace frontend;
 
 TEST_SUIT_BEGIN(DaemonCommands)
 
+TEST_CASE("The stop question names the programs when they are known") {
+    EXPECT_EQ(stopDaemonQuestion(2, {"vim", "make"}),
+              std::string("Stop the daemon? 2 programs running in it (vim, "
+                          "make) will end, also those no window shows."));
+    EXPECT_EQ(stopDaemonQuestion(2), stopDaemonQuestion(2, {}));
+    EXPECT(stopDaemonQuestion(0, {"vim"}).find("vim") == std::string::npos);
+}
+
 TEST_CASE("The fallback note names the reason on plain lines") {
     const auto note = daemonFallbackNote("cannot connect\x1b[31m\n");
     std::string s;

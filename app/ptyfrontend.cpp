@@ -1261,7 +1261,8 @@ int runPtyFrontend(const char *font,
             }
             else {
                 daemonStopCount = status->sessions;
-                wv.pushLayer(stopDaemonDialog(daemonStopCount));
+                wv.pushLayer(stopDaemonDialog(
+                    daemonStopCount, frontend::daemonProgramNames(daemonPath)));
             }
         }
         else if (id == daemonaction::stopConfirm) {
@@ -1274,7 +1275,8 @@ int runPtyFrontend(const char *font,
             else if (!done->done) {
                 // The number of programs changed while the question was open: ask again.
                 daemonStopCount = done->sessions;
-                wv.pushLayer(stopDaemonDialog(daemonStopCount));
+                wv.pushLayer(stopDaemonDialog(
+                    daemonStopCount, frontend::daemonProgramNames(daemonPath)));
             }
             else {
                 notify("daemon stopped");
