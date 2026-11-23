@@ -1,6 +1,6 @@
 #pragma once
 
-// The names of the matterm-daemon and matterm-attach files that
+// The names of the matterm-daemon and matmux files that
 // --daemon-install copies to another computer, and which of the old ones to
 // remove afterwards (docs/REMOTE_DAEMON.md "Installing"). A name says what is
 // inside: matterm-daemon-<format>.<breaking>.<additive>-<hash8>. Pure.
@@ -23,7 +23,7 @@ inline std::string installedName(const std::string &program,
 
 struct InstalledFile {
     std::string name;
-    std::string program; // "matterm-daemon" or "matterm-attach".
+    std::string program; // "matterm-daemon" or "matmux".
     mtd::Version version;
     bool running = false; // A process runs this file.
 };
@@ -32,7 +32,7 @@ struct InstalledFile {
 // anything else, so nothing but our own files is ever a candidate for removal.
 inline std::optional<InstalledFile> parseInstalledName(
     const std::string &name) {
-    for (const std::string program : {"matterm-daemon", "matterm-attach"}) {
+    for (const std::string program : {"matterm-daemon", "matmux"}) {
         const std::string prefix = program + "-";
         if (name.compare(0, prefix.size(), prefix) != 0) {
             continue;
@@ -99,7 +99,7 @@ inline std::vector<std::string> filesToRemove(
     const std::vector<InstalledFile> &found,
     const std::set<std::string> &current) {
     std::vector<std::string> remove;
-    for (const std::string program : {"matterm-daemon", "matterm-attach"}) {
+    for (const std::string program : {"matterm-daemon", "matmux"}) {
         const InstalledFile *now = nullptr;
         for (const auto &f : found) {
             if (f.program == program && current.count(f.name)) {

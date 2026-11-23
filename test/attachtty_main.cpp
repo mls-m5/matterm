@@ -1,4 +1,4 @@
-// A program without SDL that is only `runAttachTty` (what matterm-attach will
+// A program without SDL that is only `runAttachTty` (what matmux will
 // be built on): proves that the library needs no window libraries. Usage:
 // attachtty_probe [--daemon-socket PATH].
 #include "attachtty.h"

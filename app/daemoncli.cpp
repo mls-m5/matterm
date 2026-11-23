@@ -16,7 +16,7 @@ std::vector<std::string> socketsOf(const DaemonOptions &daemon) {
 } // namespace
 
 namespace {
-// The daemon list or stop of another computer: matterm-attach there does it
+// The daemon list or stop of another computer: matmux there does it
 // (copied first with
 // --daemon-install), with this terminal.
 int viaRemoteAttach(const DaemonOptions &daemon,

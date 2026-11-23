@@ -1,4 +1,4 @@
-# agent2: daemonsidan av "matterm-attach som en liten tmux"
+# agent2: daemonsidan av "matmux som en liten tmux"
 
 Kontrakt: `docs/tasks/attach-new-session.md` (avsnittet Split, agent2). Själva läget (lista med "New terminal",
 `--new`, vägran att koppla till den egna terminalen) är agent3:s.
@@ -22,7 +22,7 @@ Kontrakt: `docs/tasks/attach-new-session.md` (avsnittet Split, agent2). Själva 
 ## Så kontrollerar du det
 
 1. `ctest --test-dir build -R 'daemon_create|daemon_version|ssh_tunnel'`.
-2. `build/matterm-attach --version` visar `-dirty` om du har osparade ändringar.
+2. `build/matmux --version` visar `-dirty` om du har osparade ändringar.
 3. Inuti en daemon-terminal: `echo $MATTERM_SESSION` ger terminalens id (`--daemon-list`/listan visar samma).
 
 ## Inte verifierat

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""matterm-attach: version, list and stop against a real daemon (private socket folder), and that
-the binary has no window library. Usage: matterm_attach_test.py matterm-attach matterm-daemon"""
+"""matmux: version, list and stop against a real daemon (private socket folder), and that
+the binary has no window library. Usage: matmux_test.py matmux matterm-daemon"""
 import os, subprocess, sys, tempfile, shutil, re
 
 attach, daemon = sys.argv[1], sys.argv[2]
@@ -18,7 +18,7 @@ def run(*args, stdin=None):
 
 try:
     v = run(attach, "--version")
-    check(v.returncode == 0 and re.search(r"matterm-attach \d+\.\d+\.\d+\+", v.stdout), "--version prints format.breaking.additive+hash")
+    check(v.returncode == 0 and re.search(r"matmux \d+\.\d+\.\d+\+", v.stdout), "--version prints format.breaking.additive+hash")
     check("SDL" not in subprocess.run(["ldd", attach], capture_output=True, text=True).stdout, "no SDL in the dynamic dependencies")
     check(run(attach, "--daemon-list").stdout.startswith("No daemon found"), "list with no daemon")
     sock = run(daemon, "--ensure", "--print-socket").stdout.strip()

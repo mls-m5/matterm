@@ -1,5 +1,5 @@
-// matterm-attach: matterm --attach-tty without the window libraries (docs/tasks/daemon-versioning.md).
-// One file that can be copied to another computer and run over ssh (`ssh -t host matterm-attach`):
+// matmux: matterm --attach-tty without the window libraries (docs/tasks/daemon-versioning.md).
+// One file that can be copied to another computer and run over ssh (`ssh -t host matmux`):
 // lists the terminals of the daemon, takes one over, and also lists and stops daemons.
 #include "attachtty.h"
 #include "daemoncli.h"
@@ -12,9 +12,9 @@
 
 namespace {
 void usage(std::ostream &out) {
-    out << "usage: matterm-attach [--daemon-socket PATH] [--daemon-host [USER@]HOST [--daemon-install] [--yes]\n"
+    out << "usage: matmux [--daemon-socket PATH] [--daemon-host [USER@]HOST [--daemon-install] [--yes]\n"
            "                      [--ssh-arg ARG]...] [--daemon-list | --daemon-stop | --version]\n"
-           "       matterm-attach [--daemon-socket PATH] --new [--name NAME] [-- COMMAND...]\n"
+           "       matmux [--daemon-socket PATH] --new [--name NAME] [-- COMMAND...]\n"
            "  Without a command: list the terminals that run in the daemon, take one over in this\n"
            "  terminal (full screen), leave it with Ctrl+].\n"
            "  --daemon-socket PATH  the daemon on this socket (default: the compatible daemon in\n"
@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
             return 0;
         }
         if (arg == "--version") {
-            std::cout << "matterm-attach " << mtd::toString(mtd::ownVersion()) << "\n";
+            std::cout << "matmux " << mtd::toString(mtd::ownVersion()) << "\n";
             return 0;
         }
         if (arg == "--") {

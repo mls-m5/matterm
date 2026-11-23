@@ -290,7 +290,7 @@ if(MATTERM_BUILD_CHATD AND UNIX AND NOT EMSCRIPTEN)
     endif()
 endif()
 # `matterm --attach-tty` without SDL (docs/tasks/daemon-versioning.md): the mode, its daemon
-# client and the shared tty layer. matterm links it; a program without SDL (matterm-attach) can too.
+# client and the shared tty layer. matterm links it; a program without SDL (matmux) can too.
 # Entry point: runAttachTty(DaemonOptions) in app/attachtty.h.
 if(UNIX AND TARGET ptysession)
     add_library(attachtty app/attachtty.cpp app/daemoncli.cpp src/daemon/control.cpp src/daemon/buildhash.cpp
@@ -302,16 +302,16 @@ if(UNIX AND TARGET ptysession)
                                            matterm::ttyposix matterm::ttymatterm)
 endif()
 
-# matterm-attach: matterm --attach-tty plus --daemon-list/--daemon-stop in one file without SDL,
+# matmux: matterm --attach-tty plus --daemon-list/--daemon-stop in one file without SDL,
 # static where the daemon is (what --daemon-install copies next to matterm-daemon).
 if(TARGET attachtty AND UNIX)
-    add_executable(matterm-attach app/attach/main.cpp)
-    target_link_libraries(matterm-attach PRIVATE matterm::attachtty)
+    add_executable(matmux app/matmux/main.cpp)
+    target_link_libraries(matmux PRIVATE matterm::attachtty)
     if(MATTERM_STATIC_DAEMON)
-        target_link_options(matterm-attach PRIVATE -static)
+        target_link_options(matmux PRIVATE -static)
     endif()
-    set_target_properties(matterm-attach PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
-    install(TARGETS matterm-attach RUNTIME DESTINATION bin)
+    set_target_properties(matmux PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+    install(TARGETS matmux RUNTIME DESTINATION bin)
 endif()
 
 if(MATTERM_BUILD_APP)

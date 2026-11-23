@@ -68,9 +68,9 @@ clang-tidy (`docs/STATIC_ANALYSIS.md`).
 
 - `docs/tasks/attach-tty.md`: `--attach-tty` (take over a daemon session in the current terminal; shared
   tty layer first). Part 1-2 agent2 (`.tmp/agent2`), part 3 agent3 (`.tmp/agent3`).
-- `docs/tasks/daemon-versioning.md`: daemon version scheme, `matterm-attach`, `--daemon-list/--daemon-stop`;
+- `docs/tasks/daemon-versioning.md`: daemon version scheme, `matmux`, `--daemon-list/--daemon-stop`;
   agent2 and agent3 (layout bug, rename, shared tty layer swap).
-- `docs/tasks/attach-new-session.md`: `matterm-attach` starts a terminal itself (small tmux), self-attach loop fix,
+- `docs/tasks/attach-new-session.md`: `matmux` starts a terminal itself (small tmux), self-attach loop fix,
   `-dirty` build hash; agent2 (daemon side) and agent3 (list/UI).
 - `docs/CHAT.md`: the Mattrix OS chat (ChatRoom core, `chatd`, `mattrix-chat`).
   Worktree `.tmp/agent3`, branch `agent3-fakeos`.

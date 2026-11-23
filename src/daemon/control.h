@@ -58,7 +58,7 @@ struct CreateSession {
     std::uint16_t columns = 80;
     std::uint16_t rows = 24;
 };
-// CreateSession for a client that has no window (matterm-attach): also the
+// CreateSession for a client that has no window (matmux): also the
 // command to run (empty: the user's shell) and a name. The environment is still
 // never the client's choice; the daemon adds MATTERM_SESSION=<id>. Only the
 // owner of the socket can ask (the same user can run any command anyway); a web

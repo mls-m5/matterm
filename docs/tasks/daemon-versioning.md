@@ -1,4 +1,4 @@
-# Daemon versions, `matterm-attach`, and stopping an old daemon
+# Daemon versions, `matmux`, and stopping an old daemon
 
 Decided by the owner (do not reopen)
 - Version of the daemon control protocol is `format.breaking.additive` plus a build hash:
@@ -15,11 +15,11 @@ Decided by the owner (do not reopen)
   hash, number of terminals, per daemon found for the user) and `--daemon-stop` (ask the daemon to
   exit when the protocol is compatible; otherwise the pid from the socket peer, `SO_PEERCRED`,
   and SIGTERM). Always asks first and names how many terminals run. Palette entry "Stop daemon...".
-  Over ssh it runs the copied `matterm-attach` on the remote computer.
-- **`matterm-attach`**: a separate statically linked binary without SDL that does what
+  Over ssh it runs the copied `matmux` on the remote computer.
+- **`matmux`**: a separate statically linked binary without SDL that does what
   `matterm --attach-tty` does (list, take over, leave key), plus `--daemon-list` and
   `--daemon-stop`. `--daemon-install` copies it together with `matterm-daemon` so both are the same
-  version and the ssh way (`ssh -t host matterm-attach`) always works. `matterm --attach-tty`
+  version and the ssh way (`ssh -t host matmux`) always works. `matterm --attach-tty`
   stays (same code).
 - No secrets or deployment specifics in the repository (it is public).
 
@@ -27,7 +27,7 @@ Decided by the owner (do not reopen)
 1. Version scheme and the refusal/offer logic (client side in `src/frontend/daemonlink.h`,
    `sshtunnel.h`, daemon side in `src/daemon/control.*`), tests with a faked version both ways.
 2. `--daemon-list`, `--daemon-stop` (+ palette entry text goes to agent3's registry, tell them).
-3. `matterm-attach` target (static, no SDL; may use agent3's `--attach-tty` code, see below) and
+3. `matmux` target (static, no SDL; may use agent3's `--attach-tty` code, see below) and
    `--daemon-install` copying it; docs/REMOTE_DAEMON.md and docs/DEPENDENCIES.md updated.
 ## agent3
 1. Swap your own painter/decoder for the shared `src/tty` layer (it is on main now: `matterm::tty`,
@@ -41,14 +41,14 @@ Decided by the owner (do not reopen)
 3. Rename "Attach layout..." to "Attach tab..." (match "Detach tab"): palette text, messages,
    tests, docs/TABS_PLAN.md; keep the internal ids.
 4. Make the `--attach-tty` code buildable as a separate target without SDL so agent2 can link it
-   into `matterm-attach`; tell agent2 when it is.
+   into `matmux`; tell agent2 when it is.
 
 Both: tests first, tidy clean (`tools/clang-tidy.sh build --changed <base>`; agent3 has no
 clang-tidy, the integrator runs it), small commits, feature descriptions in
 `docs/handover/features/agentN-<name>.md`, SHAs to the integrator.
 
 ## Addendum (owner, 2026-11-23): names and cleanup (agent2)
-- The installed file names carry the version: `matterm-daemon-<format>.<breaking>.<additive>-<hash8>` and the same for `matterm-attach-...` (today the name is the content hash). Lists (`--daemon-list`, install messages) sort by the numbers, as numbers (1.10.0 after 1.9.0). A running file is never overwritten.
+- The installed file names carry the version: `matterm-daemon-<format>.<breaking>.<additive>-<hash8>` and the same for `matmux-...` (today the name is the content hash). Lists (`--daemon-list`, install messages) sort by the numbers, as numbers (1.10.0 after 1.9.0). A running file is never overwritten.
 - Cleanup of old versions is done by the installer (`--daemon-install`) after it has copied the new files: only files matching those two name patterns in matterm's own install directory; never a file that a process runs (`/proc/*/exe`); keep the newest older version as a fallback; no question, but print what was removed. Not done: the daemon cleaning up after itself (maybe later; ask the owner first).
 - A new daemon/attach binary must be able to stop older daemons (see the stop part above).
 - Several daemons at once (owner's question 2026-11-23): a daemon is identified by its socket. The

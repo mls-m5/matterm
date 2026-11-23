@@ -1,7 +1,7 @@
-# agent2: daemonversioner, flera daemoner, `matterm-attach`, lista och stopp
+# agent2: daemonversioner, flera daemoner, `matmux`, lista och stopp
 
 Kontrakt: `docs/tasks/daemon-versioning.md` (inklusive tillägget om namn och flera daemoner). Teknik:
-`docs/PROTOCOL.md` ("Control version"), `docs/REMOTE_DAEMON.md` ("Versions, several daemons, matterm-attach").
+`docs/PROTOCOL.md` ("Control version"), `docs/REMOTE_DAEMON.md` ("Versions, several daemons, matmux").
 
 ## Vad ändrades
 
@@ -15,27 +15,27 @@ Kontrakt: `docs/tasks/daemon-versioning.md` (inklusive tillägget om namn och fl
   frågar alla sockets i mappen och tar den enda kompatibla; av flera den nyaste efter en fråga; finns ingen
   kompatibel erbjuds en ny. `--daemon-socket` gäller alltid. `matterm-daemon --ensure` återanvänder en
   kompatibel daemon oavsett socketnamn. `matterm-server` följer den nyaste socketen.
-- **`matterm --daemon-list` / `--daemon-stop`** (och samma i `matterm-attach`): lista (socket, pid, version,
+- **`matterm --daemon-list` / `--daemon-stop`** (och samma i `matmux`): lista (socket, pid, version,
   hash, antal terminaler, om den passar) och stoppa efter fråga som nämner antalet terminaler. Stopp går via
   `Shutdown` (ingår i den frysta handskakningen, så det funkar för alla versioner); svarar daemonen inte
   tas pid från socketen (`SO_PEERCRED`, bara egen användare) och den får SIGTERM.
-- **`matterm-attach`**: statisk fil utan SDL: `--attach-tty`-läget, `--daemon-list`, `--daemon-stop`,
+- **`matmux`**: statisk fil utan SDL: `--attach-tty`-läget, `--daemon-list`, `--daemon-stop`,
   `--version`.
 - **`--daemon-install`** kopierar nu både daemon och attach, med versionen i namnet
-  (`matterm-daemon-1.3.1-abcd1234`), pekar de stabila namnen `matterm-daemon`/`matterm-attach` i mappen på dem,
+  (`matterm-daemon-1.3.1-abcd1234`), pekar de stabila namnen `matterm-daemon`/`matmux` i mappen på dem,
   och tar bort gamla versioner: bara filer med exakt de namnen, aldrig en fil som körs, nyaste äldre
   versionen sparas, ingen fråga, det som togs bort skrivs ut. Med `--daemon-host` kör
-  `--daemon-list/--daemon-stop` `matterm-attach` på andra datorn (kopieras dit först vid behov).
+  `--daemon-list/--daemon-stop` `matmux` på andra datorn (kopieras dit först vid behov).
 - Palettposten "Stop daemon..." finns redan och använder `Shutdown`; jag ändrade den inte.
 
 ## Så kontrollerar du det
 
-1. `build/matterm-attach --version`; `build/matterm-daemon --version`.
+1. `build/matmux --version`; `build/matterm-daemon --version`.
 2. Starta `build/matterm-daemon --daemonize`, sedan `build/matterm --daemon-list` och
    `build/matterm --daemon-stop` (svara y).
 3. Lokal version-konflikt: starta en daemon, kör `matterm` från ett bygge med annat breaking-nummer
    (testerna fejkar detta: `daemon_version`, `daemon_choice`).
-4. `ctest --test-dir build -R 'daemon|tty|ssh|matterm_attach'`.
+4. `ctest --test-dir build -R 'daemon|tty|ssh|matmux'`.
 
 ## Frågor till ägaren (standardval i parentes, lätta att ändra)
 

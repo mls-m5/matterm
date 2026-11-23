@@ -67,7 +67,7 @@ struct SshTunnelOptions {
     std::function<bool(const std::string &question)> confirm;
     std::function<void(const std::string &line)> progress; // Messages while copying.
     std::string localDaemon;             // The file to copy; empty: the daemon beside this program.
-    std::string localAttach; // matterm-attach to copy with it; empty: the one
+    std::string localAttach; // matmux to copy with it; empty: the one
                              // beside the daemon file.
     std::string installDirectory;        // On the other computer, absolute; empty: $HOME/.local/share/matterm/bin.
     int installTimeoutMs = 180000;       // For copying and checking.
@@ -121,7 +121,7 @@ inline bool safeSshWord(const std::string &s, bool allowSlash) {
 
 class SshTunnel {
 public:
-    // Where matterm-attach is on the other computer: on its PATH, or the copy
+    // Where matmux is on the other computer: on its PATH, or the copy
     // in our install folder; if there is none, ours is copied first when
     // `install` allows (and asks as for the daemon).
     static bool remoteAttachPath(const SshTunnelOptions &options,
@@ -134,8 +134,8 @@ public:
         const auto deadline = std::chrono::steady_clock::now() +
                               std::chrono::milliseconds(options.timeoutMs);
         const std::string standard =
-            "\"${HOME}/.local/share/matterm/bin/matterm-attach\"";
-        const std::string find = "command -v matterm-attach || { [ -x " +
+            "\"${HOME}/.local/share/matterm/bin/matmux\"";
+        const std::string find = "command -v matmux || { [ -x " +
                                  standard + " ] && echo " + standard + "; }";
         const auto look = [&]() {
             std::vector<std::string> arguments = baseArguments(options);
@@ -164,11 +164,11 @@ public:
             if (!path.empty() && path.front() == '/') {
                 return safeSshWord(path, true);
             }
-            if (path == "matterm-attach") {
+            if (path == "matmux") {
                 return true;
             }
             if (options.install == DaemonInstall::Never) {
-                error = options.host + " has no matterm-attach "
+                error = options.host + " has no matmux "
                                        "(--daemon-install copies one there)";
                 return false;
             }
@@ -177,11 +177,11 @@ public:
         if (!installRemote(options, daemonPath, error)) {
             return false;
         }
-        path = daemonPath.substr(0, daemonPath.rfind('/')) + "/matterm-attach";
+        path = daemonPath.substr(0, daemonPath.rfind('/')) + "/matmux";
         return true;
     }
 
-    // Runs `matterm-attach ARGS` on the other computer with this program's
+    // Runs `matmux ARGS` on the other computer with this program's
     // terminal and returns its exit status (-1 with `error` when it could not
     // be run). `args` are plain words (checked).
     static int runRemoteAttach(const SshTunnelOptions &options,
@@ -463,7 +463,7 @@ private:
         return ask;
     }
 
-    // Copies our matterm-daemon, and matterm-attach with it, to the other
+    // Copies our matterm-daemon, and matmux with it, to the other
     // computer when they are not there yet, says where the daemon is (`path`,
     // absolute) and removes old versions of both (only files named like ours,
     // never one that runs, the newest older version stays as a fallback). The
@@ -494,14 +494,14 @@ private:
                 slash == std::string::npos
                     ? std::string()
                     : options.localDaemon.substr(0, slash + 1) +
-                          "matterm-attach";
+                          "matmux";
             attachLocal = !beside.empty() && ::access(beside.c_str(), X_OK) == 0
                               ? beside
                               : std::string();
         }
         std::string attachPath, attachName, attachError;
         if (installRemoteProgram(options,
-                                 "matterm-attach",
+                                 "matmux",
                                  attachLocal,
                                  false,
                                  attachPath,
@@ -510,13 +510,13 @@ private:
             linkCurrent(options,
                         path.substr(0, path.rfind('/')),
                         {{"matterm-daemon", daemonName},
-                         {"matterm-attach", attachName}});
+                         {"matmux", attachName}});
             cleanupRemote(options,
                           path.substr(0, path.rfind('/')),
                           {daemonName, attachName});
         }
         else {
-            say("note: matterm-attach was not copied (" + attachError + ")");
+            say("note: matmux was not copied (" + attachError + ")");
             linkCurrent(options,
                         path.substr(0, path.rfind('/')),
                         {{"matterm-daemon", daemonName}});
@@ -526,9 +526,9 @@ private:
         return true;
     }
 
-    // The names a person can type: matterm-daemon and matterm-attach in the
+    // The names a person can type: matterm-daemon and matmux in the
     // install folder point at the versions just installed
-    // (`ssh -t host ~/.local/share/matterm/bin/matterm-attach` always works).
+    // (`ssh -t host ~/.local/share/matterm/bin/matmux` always works).
     static void linkCurrent(
         const SshTunnelOptions &options,
         const std::string &directory,
@@ -577,7 +577,7 @@ private:
         const std::string list =
             "cd \"" + directory +
             "\" 2>/dev/null && D=$(pwd -P) && [ -d /proc/self ] && for f in "
-            "matterm-daemon-* matterm-attach-*; do "
+            "matterm-daemon-* matmux-*; do "
             "[ -f \"$f\" ] || continue; r=0; for p in /proc/[0-9]*/exe; do "
             "[ \"$(readlink \"$p\" 2>/dev/null)\" = \"$D/$f\" ] && { r=1; "
             "break; }; done; echo \"$f $r\"; done";
@@ -772,7 +772,7 @@ private:
                 " has no matterm-daemon of this version. Copy ours (" +
                 std::to_string((size + 1023) / 1024) + " KiB, " +
                 remoteDirectory + "/" + name +
-                ") and start it there? (matterm-attach is copied with it.)";
+                ") and start it there? (matmux is copied with it.)";
             if (!options.confirm || !options.confirm(question)) {
                 error = program + " is not installed on " + options.host +
                         " and the copy was not confirmed (--yes copies without "

@@ -18,8 +18,8 @@ TEST_CASE(
     mtd::Version v{1, 3, 1, "0123456789abcdef"};
     EXPECT_EQ(installedName("matterm-daemon", v),
               std::string("matterm-daemon-1.3.1-01234567"));
-    EXPECT_EQ(installedName("matterm-attach", {1, 10, 0, "abcd1234"}),
-              std::string("matterm-attach-1.10.0-abcd1234"));
+    EXPECT_EQ(installedName("matmux", {1, 10, 0, "abcd1234"}),
+              std::string("matmux-1.10.0-abcd1234"));
 }
 
 TEST_CASE("Names are read back; anything else is not ours") {
@@ -28,7 +28,7 @@ TEST_CASE("Names are read back; anything else is not ours") {
     EXPECT_EQ(a->program, std::string("matterm-daemon"));
     EXPECT(a->version.format == 1 && a->version.breaking == 3 &&
            a->version.additive == 1);
-    EXPECT(parseInstalledName("matterm-attach-1.10.0-abcd1234").has_value());
+    EXPECT(parseInstalledName("matmux-1.10.0-abcd1234").has_value());
     for (const char *bad :
          {"matterm-daemon-0123456789abcdef01234567", // The old content-hash
                                                      // name.
@@ -54,13 +54,13 @@ TEST_CASE("Cleanup removes old versions, keeps the newest older one and never "
         file("matterm-daemon-1.2.0-aaaaaaa4", true), // Runs.
         file("matterm-daemon-1.9.0-aaaaaaa5"), // Newer than the current: left
                                                // alone.
-        file("matterm-attach-1.3.1-aaaaaaa1"),
-        file("matterm-attach-1.1.0-aaaaaaa6"), // Newest (only) older attach:
+        file("matmux-1.3.1-aaaaaaa1"),
+        file("matmux-1.1.0-aaaaaaa6"), // Newest (only) older attach:
                                                // kept.
     };
     const auto remove = filesToRemove(
         found,
-        {"matterm-daemon-1.3.1-aaaaaaa1", "matterm-attach-1.3.1-aaaaaaa1"});
+        {"matterm-daemon-1.3.1-aaaaaaa1", "matmux-1.3.1-aaaaaaa1"});
     EXPECT_EQ(remove.size(), std::size_t(1));
     EXPECT_EQ(remove[0], std::string("matterm-daemon-1.2.9-aaaaaaa3"));
 }
@@ -91,7 +91,7 @@ TEST_CASE("Two builds of the same version: the current one stays, one other is "
 TEST_CASE(
     "The listing the remote shell prints is read: name and whether it runs") {
     const auto files = parseInstalledListing(
-        "matterm-daemon-1.3.0-aaaaaaa1 0\nmatterm-attach-1.3.0-aaaaaaa1 1\n"
+        "matterm-daemon-1.3.0-aaaaaaa1 0\nmatmux-1.3.0-aaaaaaa1 1\n"
         "junk\nmatterm-daemon-0123456789abcdef01234567 0\n\n");
     EXPECT_EQ(files.size(), std::size_t(2));
     EXPECT(!files[0].running);

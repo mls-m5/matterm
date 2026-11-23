@@ -153,7 +153,7 @@ std::vector<std::string> installed(const Fake &fake) {
     if (auto *d = ::opendir(directory.c_str())) {
         while (const auto *entry = ::readdir(d)) {
             const std::string name = entry->d_name;
-            // The versioned daemon files only (not matterm-attach, not the
+            // The versioned daemon files only (not matmux, not the
             // stable links).
             if (name.rfind("matterm-daemon-", 0) == 0)
                 names.push_back(name);
@@ -415,7 +415,7 @@ TEST_CASE("--daemon-install: our daemon is copied (after asking), named after it
     stopRemote(fake.dir.path + "/remote.sock");
 }
 
-TEST_CASE("matterm-attach is copied with the daemon, and old versions of both "
+TEST_CASE("matmux is copied with the daemon, and old versions of both "
           "are removed") {
     Fake fake;
     ::unsetenv("FAKE_SSH_DAEMON_ON_PATH");
@@ -431,7 +431,7 @@ TEST_CASE("matterm-attach is copied with the daemon, and old versions of both "
     put("matterm-daemon-1.2.0-aaaaaaa1");
     put("matterm-daemon-1.1.0-aaaaaaa2");
     put("matterm-daemon-1.0.0-aaaaaaa3");
-    put("matterm-attach-1.1.0-aaaaaaa4");
+    put("matmux-1.1.0-aaaaaaa4");
     put("matterm-daemon-9.9.9-aaaaaaa5");
     put("matterm-daemon-0123456789abcdef01234567");
     put("notes.txt");
@@ -455,13 +455,13 @@ TEST_CASE("matterm-attach is copied with the daemon, and old versions of both "
     };
     EXPECT(has(expectedInstallName("matterm-daemon", daemonBinary())));
     EXPECT(has(expectedInstallName(
-        "matterm-attach",
+        "matmux",
         daemonBinary().substr(0, daemonBinary().rfind('/') + 1) +
-            "matterm-attach")));
+            "matmux")));
     EXPECT(has("matterm-daemon-1.2.0-aaaaaaa1")); // The newest older one stays.
     EXPECT(!has("matterm-daemon-1.1.0-aaaaaaa2"));
     EXPECT(!has("matterm-daemon-1.0.0-aaaaaaa3"));
-    EXPECT(has("matterm-attach-1.1.0-aaaaaaa4")); // The only older attach: the
+    EXPECT(has("matmux-1.1.0-aaaaaaa4")); // The only older attach: the
                                                   // fallback.
     EXPECT(has("matterm-daemon-9.9.9-aaaaaaa5")); // Newer: left alone.
     EXPECT(has("matterm-daemon-0123456789abcdef01234567")); // Not our naming
@@ -478,7 +478,7 @@ TEST_CASE("matterm-attach is copied with the daemon, and old versions of both "
     stopRemote(fake.dir.path + "/remote.sock");
 }
 
-TEST_CASE("matterm-attach on the other computer: installed on demand, stable "
+TEST_CASE("matmux on the other computer: installed on demand, stable "
           "names, list and stop") {
     Fake fake;
     ::unsetenv("FAKE_SSH_DAEMON_ON_PATH");
@@ -497,7 +497,7 @@ TEST_CASE("matterm-attach on the other computer: installed on demand, stable "
     const auto directory = fake.dir.path + "/home/.local/share/matterm/bin";
     // The stable names point at the installed versions.
     struct stat st {};
-    EXPECT_EQ(::lstat((directory + "/matterm-attach").c_str(), &st), 0);
+    EXPECT_EQ(::lstat((directory + "/matmux").c_str(), &st), 0);
     EXPECT(S_ISLNK(st.st_mode));
     EXPECT_EQ(::lstat((directory + "/matterm-daemon").c_str(), &st), 0);
     EXPECT(S_ISLNK(st.st_mode));
@@ -514,7 +514,7 @@ TEST_CASE("matterm-attach on the other computer: installed on demand, stable "
         return code;
     };
     EXPECT_EQ(run({"--version"}), 0);
-    EXPECT(fileText(out).find("matterm-attach " +
+    EXPECT(fileText(out).find("matmux " +
                               mtd::toString(mtd::ownVersion())) !=
            std::string::npos);
     // The daemon on the other computer is listed there, then stopped (nothing

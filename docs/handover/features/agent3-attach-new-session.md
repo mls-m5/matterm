@@ -4,7 +4,7 @@ Written by agent3, 2026-11-23. Contract: docs/tasks/attach-new-session.md (secti
 
 ## What it does
 
-`matterm --attach-tty` and `matterm-attach` (same code, library `matterm::attachtty`):
+`matterm --attach-tty` and `matmux` (same code, library `matterm::attachtty`):
 
 - The list has **New terminal** as the first row (`n`): your shell, in the current folder (not for a
   daemon on another computer: its own folder). With terminals present the chosen row starts on the

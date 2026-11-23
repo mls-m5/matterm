@@ -133,7 +133,7 @@ inline std::optional<DaemonInfo> probeDaemon(const std::string &socketPath,
     return info;
 }
 
-// A new terminal in the daemon for a client that has no window (matterm-attach
+// A new terminal in the daemon for a client that has no window (matmux
 // --new): `request` has the size, folder, command (empty: the user's shell) and
 // name. Returns the session id to attach to with Hello{id}; nullopt with
 // `error` set (an older daemon than 1.3.3 says it does not know the request:
