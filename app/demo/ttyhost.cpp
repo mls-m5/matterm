@@ -1,6 +1,6 @@
 #include "ttyhost.h"
 
-#include "ttyterm.h"
+#include "tty/posix/terminal.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -37,12 +37,12 @@ int runTtyHost(fakeos::Config config) {
                      "and output\n";
         return 1;
     }
-    const ttyterm::Caps caps = ttyterm::detect();
+    const tty::Caps caps = tty::detectCaps();
     config.capabilities.truecolor = caps.truecolor;
     config.capabilities.colors256 = caps.colors256;
     config.capabilities.alternateScreen = caps.alternateScreen;
     config.capabilities.unicode = caps.unicode;
-    ttyterm::size(config.columns, config.rows);
+    tty::windowSize(STDOUT_FILENO, config.columns, config.rows);
     if (pipe(gWinchPipe) != 0) {
         std::cerr << "pipe: " << std::strerror(errno) << '\n';
         return 1;
@@ -57,7 +57,7 @@ int runTtyHost(fakeos::Config config) {
     for (const int signal : {SIGINT, SIGTERM, SIGHUP}) {
         sigaction(signal, &action, nullptr);
     }
-    ttyterm::RawMode raw;
+    tty::RawMode raw(STDIN_FILENO);
     if (!raw.enter()) {
         std::cerr << "cannot put the terminal in raw mode\n";
         return 1;
@@ -70,7 +70,7 @@ int runTtyHost(fakeos::Config config) {
     };
     std::optional<int> exitCode;
     auto handle = [&](const fakeos::Reaction &r) {
-        if (!r.output.empty() && !ttyterm::writeAll(r.output)) {
+        if (!r.output.empty() && !tty::writeAll(STDOUT_FILENO, r.output)) {
             gStop = 1;
         }
         if (r.exitCode) {
@@ -95,7 +95,7 @@ int runTtyHost(fakeos::Config config) {
             char drain[16];
             (void)!read(gWinchPipe[0], drain, sizeof drain);
             int columns = config.columns, rows = config.rows;
-            ttyterm::size(columns, rows);
+            tty::windowSize(STDOUT_FILENO, columns, rows);
             system.resize(columns, rows);
         }
         if (ready > 0 && (fds[0].revents & (POLLIN | POLLHUP))) {
@@ -112,11 +112,12 @@ int runTtyHost(fakeos::Config config) {
         }
     }
     // Leave the screen sane even after a signal or while a program ran.
-    ttyterm::writeAll(
-        "\x1b[0m\x1b[?1006l\x1b[?1000l\x1b[?25h" +
-        std::string(config.capabilities.alternateScreen && system.inProgram()
-                        ? "\x1b[?1049l"
-                        : "") +
-        "\r\n");
+    tty::writeAll(STDOUT_FILENO,
+                  "\x1b[0m\x1b[?1006l\x1b[?1000l\x1b[?25h" +
+                      std::string(config.capabilities.alternateScreen &&
+                                          system.inProgram()
+                                      ? "\x1b[?1049l"
+                                      : "") +
+                      "\r\n");
     return exitCode.value_or(0);
 }

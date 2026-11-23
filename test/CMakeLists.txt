@@ -228,6 +228,33 @@ if(BUILD_TESTING)
         COMMAND ${CMAKE_COMMAND} -DFAKEOS_DIR=${PROJECT_SOURCE_DIR}/src/fakeos
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/check_fakeos_includes.cmake)
 
+    file(GLOB TTY_TESTS CONFIGURE_DEPENDS tty_*_test.cpp)
+    add_executable(tty_test ${TTY_TESTS} mls-unit-test/test_main.cpp)
+    target_link_libraries(tty_test PRIVATE matterm::tty matterm::vt)
+    add_test(NAME tty COMMAND tty_test)
+    if(UNIX)
+        add_executable(ttyposix_test ttyposix_test.cpp mls-unit-test/test_main.cpp)
+        target_link_libraries(ttyposix_test PRIVATE matterm::ttyposix)
+        add_test(NAME tty_posix COMMAND ttyposix_test)
+        if(TARGET ptylink)
+            add_executable(tty_probe tty_probe.cpp)
+            target_link_libraries(tty_probe PRIVATE matterm::ttyposix)
+            add_executable(ttysession_test ttysession_test.cpp mls-unit-test/test_main.cpp)
+            target_link_libraries(ttysession_test PRIVATE matterm::ptylink)
+            target_compile_definitions(ttysession_test PRIVATE TTY_PROBE="$<TARGET_FILE:tty_probe>")
+            add_dependencies(ttysession_test tty_probe)
+            add_test(NAME tty_session COMMAND ttysession_test)
+            set_tests_properties(tty_session PROPERTIES TIMEOUT 60)
+        endif()
+    endif()
+    add_test(NAME tty_includes
+        COMMAND ${CMAKE_COMMAND} -DFAKEOS_DIR=${PROJECT_SOURCE_DIR}/src/tty
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/check_fakeos_includes.cmake)
+
+    add_executable(ttymatterm_test ttymatterm_test.cpp mls-unit-test/test_main.cpp)
+    target_link_libraries(ttymatterm_test PRIVATE matterm::ttymatterm matterm::vt)
+    add_test(NAME tty_matterm COMMAND ttymatterm_test)
+
     file(GLOB CHAT_TESTS CONFIGURE_DEPENDS chat_*_test.cpp)
     add_executable(chat_test ${CHAT_TESTS} mls-unit-test/test_main.cpp)
     target_link_libraries(chat_test PRIVATE matterm::chat matterm::vt palette)

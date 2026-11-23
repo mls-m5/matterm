@@ -838,7 +838,7 @@ void System::launch(const std::string &name,
         return; // It draws on the normal screen by itself.
     }
     canvas_.resize(world_.columns, world_.rows);
-    canvas_.setCapabilities(world_.caps);
+    canvas_.setCaps(world_.caps);
     out_ += world_.caps.alternateScreen ? kEnterApp : kClearScreen;
     out_ += "\x1b[?25l";
     if (program_->wantsMouse()) {

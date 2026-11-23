@@ -1,5 +1,7 @@
 #pragma once
 
+#include "tty/color.h"
+
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -19,12 +21,7 @@ struct Reaction {
 
 // What the terminal in front of the system supports. The animations degrade
 // instead of failing.
-struct Capabilities {
-    bool truecolor = true;
-    bool colors256 = true;
-    bool alternateScreen = true;
-    bool unicode = true;
-};
+using Capabilities = tty::Caps;
 
 // A short electronic pip, as a film computer makes while it types. The core
 // only reports them (Config::onBeep); the host decides whether and how to play
@@ -36,15 +33,7 @@ struct Beep {
     Time at{0};
 };
 
-struct Rgb {
-    std::uint8_t r = 0, g = 0, b = 0;
-    friend bool operator==(Rgb a, Rgb b) {
-        return a.r == b.r && a.g == b.g && a.b == b.b;
-    }
-    friend bool operator!=(Rgb a, Rgb b) {
-        return !(a == b);
-    }
-};
+using Rgb = tty::Rgb;
 
 // Small deterministic generator (xorshift64*), so tests and screenshots repeat.
 class Rng {

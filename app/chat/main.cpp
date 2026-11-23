@@ -6,7 +6,7 @@
 #include "chatclient.h"
 #include "chatview.h"
 #include "keys.h"
-#include "ttyterm.h"
+#include "tty/posix/terminal.h"
 
 #include <boost/asio.hpp>
 #include <boost/beast/core.hpp>
@@ -305,7 +305,7 @@ public:
             everOpened_ = true;
             opened();
         };
-        ttyterm::size(columns_, rows_);
+        tty::windowSize(STDOUT_FILENO, columns_, rows_);
         apply(client_.connect(now()));
         channel_->open();
         input_.assign(::dup(STDIN_FILENO));
@@ -325,9 +325,9 @@ private:
     }
     static chat::ViewConfig viewConfig(bool animations) {
         int columns = 80, rows = 24;
-        ttyterm::size(columns, rows);
+        tty::windowSize(STDOUT_FILENO, columns, rows);
         chat::ViewConfig v;
-        const auto caps = ttyterm::detect();
+        const auto caps = tty::detectCaps();
         v.caps.truecolor = caps.truecolor;
         v.caps.colors256 = caps.colors256;
         v.caps.unicode = caps.unicode;
@@ -363,7 +363,7 @@ private:
         if (done_) {
             return;
         }
-        ttyterm::writeAll(view_.render(client_, editor_, now()));
+        tty::writeAll(STDOUT_FILENO, view_.render(client_, editor_, now()));
         schedule();
     }
     void schedule() {
@@ -555,8 +555,8 @@ private:
             if (ec || done_) {
                 return;
             }
-            ttyterm::size(columns_, rows_);
-            ttyterm::writeAll(view_.resize(columns_, rows_));
+            tty::windowSize(STDOUT_FILENO, columns_, rows_);
+            tty::writeAll(STDOUT_FILENO, view_.resize(columns_, rows_));
             redraw();
             watchSize();
         });
@@ -573,9 +573,9 @@ private:
             return;
         }
         // Show the last things (a closing notice, the reason) before ending.
-        ttyterm::writeAll(view_.render(client_, editor_, now()));
+        tty::writeAll(STDOUT_FILENO, view_.render(client_, editor_, now()));
         done_ = true;
-        ttyterm::writeAll(view_.finish());
+        tty::writeAll(STDOUT_FILENO, view_.finish());
         timer_.cancel();
         beast::error_code ignored;
         input_.cancel(ignored);
@@ -684,7 +684,7 @@ int main(int argc, char **argv) {
         else {
             channel = std::make_unique<WsChannel>(io, host, port, origin);
         }
-        ttyterm::RawMode raw;
+        tty::RawMode raw(STDIN_FILENO);
         if (!raw.enter()) {
             std::cerr << "cannot put the terminal in raw mode\n";
             return 1;

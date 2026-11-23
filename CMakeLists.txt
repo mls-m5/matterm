@@ -86,6 +86,26 @@ add_library(matterm::chat ALIAS chatcore)
 target_compile_features(chatcore PUBLIC cxx_std_17)
 target_include_directories(chatcore PUBLIC src/chat)
 
+# tty: the terminal drawing layer (cell buffer in, smallest VT update out, colour
+# reduction, key and mouse decoding) with no matterm types, meant to stand alone
+# later. The pure part has no I/O (enforced by test/check_fakeos_includes.cmake);
+# src/tty/posix is the POSIX end (raw mode, window size, write).
+file(GLOB TTY_SOURCES CONFIGURE_DEPENDS src/tty/*.cpp)
+add_library(tty ${TTY_SOURCES})
+add_library(matterm::tty ALIAS tty)
+target_compile_features(tty PUBLIC cxx_std_17)
+target_include_directories(tty PUBLIC src)
+if(UNIX)
+    add_library(ttyposix src/tty/posix/terminal.cpp src/tty/posix/session.cpp)
+    add_library(matterm::ttyposix ALIAS ttyposix)
+    target_link_libraries(ttyposix PUBLIC matterm::tty)
+endif()
+
+# The only place the tty layer meets matterm's own cell buffer and cursor.
+add_library(ttymatterm src/tty/matterm/cells.cpp)
+add_library(matterm::ttymatterm ALIAS ttymatterm)
+target_link_libraries(ttymatterm PUBLIC matterm::tty cellbuffer)
+
 # fakeos: a pretend Unix system with ASCII animations. Pure C++17 with no I/O,
 # clock or process access (enforced by test/check_fakeos_includes.cmake), so the
 # same core runs in the browser, in the native window and in a plain terminal.
@@ -94,7 +114,7 @@ add_library(fakeos ${FAKEOS_SOURCES})
 add_library(matterm::fakeos ALIAS fakeos)
 target_compile_features(fakeos PUBLIC cxx_std_17)
 target_include_directories(fakeos PUBLIC src/fakeos)
-target_link_libraries(fakeos PUBLIC matterm::chat) # The chat program.
+target_link_libraries(fakeos PUBLIC matterm::chat matterm::tty) # The chat program; the cell buffer.
 # The `about` command prints numbers counted from the repository: a build step
 # writes them to a header (cmake/AboutStats.cmake), so they match what was built.
 set(FAKEOS_ABOUT_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/fakeos_about_stats.h)
@@ -203,7 +223,8 @@ if(MATTERM_BUILD_DEMO)
     target_link_libraries(matterm-demo PRIVATE matterm::fakeos matterm::transport matterm::vt matterm::renderer)
     matterm_application_assets(matterm-demo)
     if(UNIX)
-        target_sources(matterm-demo PRIVATE app/demo/ttyhost.cpp app/demo/ttyterm.cpp)
+        target_sources(matterm-demo PRIVATE app/demo/ttyhost.cpp)
+        target_link_libraries(matterm-demo PRIVATE matterm::ttyposix)
         target_include_directories(matterm-demo PRIVATE app/demo)
         target_compile_definitions(matterm-demo PRIVATE MATTERM_DEMO_TTY=1)
     endif()
@@ -211,9 +232,9 @@ endif()
 if(MATTERM_BUILD_MATTRIX AND UNIX AND NOT EMSCRIPTEN)
     # Mattrix OS in the terminal it was started from: the fakeos core and the
     # raw terminal host, nothing graphical.
-    add_executable(mattrix app/mattrix/main.cpp app/demo/ttyhost.cpp app/demo/ttyterm.cpp)
+    add_executable(mattrix app/mattrix/main.cpp app/demo/ttyhost.cpp)
     target_include_directories(mattrix PRIVATE app/demo)
-    target_link_libraries(mattrix PRIVATE matterm::fakeos)
+    target_link_libraries(mattrix PRIVATE matterm::fakeos matterm::ttyposix)
     install(TARGETS mattrix RUNTIME DESTINATION bin)
 endif()
 option(MATTERM_BUILD_CHATD "Build chatd, the chat server (needs Boost, POSIX)" ON)
@@ -239,9 +260,9 @@ if(MATTERM_BUILD_CHATD AND UNIX AND NOT EMSCRIPTEN)
         install(TARGETS chatd RUNTIME DESTINATION bin)
         # The chat in a terminal: the chat library, the terminal helpers and the
         # key decoder of fakeos. TCP and plain WebSocket (no TLS yet).
-        add_executable(mattrix-chat app/chat/main.cpp app/demo/ttyterm.cpp)
+        add_executable(mattrix-chat app/chat/main.cpp)
         target_include_directories(mattrix-chat PRIVATE app/demo)
-        target_link_libraries(mattrix-chat PRIVATE matterm::chat matterm::fakeos chatd-core)
+        target_link_libraries(mattrix-chat PRIVATE matterm::chat matterm::fakeos matterm::ttyposix chatd-core)
         install(TARGETS mattrix-chat RUNTIME DESTINATION bin)
     else()
         message(STATUS "chatd: Boost 1.74+ or threads not found, not built")

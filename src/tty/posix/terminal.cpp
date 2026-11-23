@@ -1,23 +1,32 @@
-#include "ttyterm.h"
+#include "tty/posix/terminal.h"
 
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <poll.h>
+#include <string>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-namespace ttyterm {
+namespace tty {
 namespace {
 bool contains(const char *haystack, const char *needle) {
     return haystack && std::strstr(haystack, needle);
 }
+const char *firstSet(std::initializer_list<const char *> names) {
+    for (const char *name : names) {
+        const char *value = std::getenv(name);
+        if (value && *value) {
+            return value;
+        }
+    }
+    return nullptr;
+}
 } // namespace
 
-Caps detect() {
+Caps capsFrom(const char *colorterm, const char *term, const char *locale) {
     Caps caps;
-    const char *colorterm = std::getenv("COLORTERM");
-    const char *term = std::getenv("TERM");
     caps.truecolor =
         contains(colorterm, "truecolor") || contains(colorterm, "24bit");
     caps.colors256 = caps.truecolor || contains(term, "256");
@@ -25,27 +34,27 @@ Caps detect() {
                        std::string(term) == "dumb" || contains(term, "vt100") ||
                        contains(term, "vt220");
     caps.alternateScreen = !plain;
-    const char *locale = std::getenv("LC_ALL");
-    if (!locale || !*locale)
-        locale = std::getenv("LC_CTYPE");
-    if (!locale || !*locale)
-        locale = std::getenv("LANG");
     caps.unicode = contains(locale, "UTF-8") || contains(locale, "utf8") ||
                    contains(locale, "UTF8");
     return caps;
 }
 
-bool writeAll(const std::string &bytes) {
+Caps detectCaps() {
+    return capsFrom(std::getenv("COLORTERM"),
+                    std::getenv("TERM"),
+                    firstSet({"LC_ALL", "LC_CTYPE", "LANG"}));
+}
+
+bool writeAll(int fd, std::string_view bytes) {
     std::size_t done = 0;
     while (done < bytes.size()) {
-        const auto n =
-            ::write(STDOUT_FILENO, bytes.data() + done, bytes.size() - done);
+        const auto n = ::write(fd, bytes.data() + done, bytes.size() - done);
         if (n < 0) {
             if (errno == EINTR) {
                 continue;
             }
             if (errno == EAGAIN) {
-                pollfd out{STDOUT_FILENO, POLLOUT, 0};
+                pollfd out{fd, POLLOUT, 0};
                 poll(&out, 1, 100);
                 continue;
             }
@@ -57,30 +66,33 @@ bool writeAll(const std::string &bytes) {
 }
 
 bool RawMode::enter() {
-    if (tcgetattr(STDIN_FILENO, &saved) != 0) {
+    if (active_) {
+        return true;
+    }
+    if (tcgetattr(fd_, &saved_) != 0) {
         return false;
     }
-    termios raw = saved;
+    termios raw = saved_;
     cfmakeraw(&raw);
     raw.c_cc[VMIN] = 1;
     raw.c_cc[VTIME] = 0;
-    active = tcsetattr(STDIN_FILENO, TCSADRAIN, &raw) == 0;
-    return active;
+    active_ = tcsetattr(fd_, TCSADRAIN, &raw) == 0;
+    return active_;
 }
 
-RawMode::~RawMode() {
-    if (active) {
-        tcsetattr(STDIN_FILENO, TCSADRAIN, &saved);
+void RawMode::restore() {
+    if (active_) {
+        tcsetattr(fd_, TCSADRAIN, &saved_);
+        active_ = false;
     }
 }
 
-void size(int &columns, int &rows) {
+void windowSize(int fd, int &columns, int &rows) {
     winsize ws{};
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 &&
-        ws.ws_row > 0) {
+    if (ioctl(fd, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 && ws.ws_row > 0) {
         columns = ws.ws_col;
         rows = ws.ws_row;
     }
 }
 
-} // namespace ttyterm
+} // namespace tty

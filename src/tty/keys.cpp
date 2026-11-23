@@ -1,9 +1,9 @@
-#include "keys.h"
+#include "tty/keys.h"
 
 #include <algorithm>
 #include <cstdlib>
 
-namespace fakeos {
+namespace tty {
 namespace {
 Key simple(Key::Type type) {
     Key key;
@@ -277,4 +277,4 @@ std::vector<Key> KeyDecoder::feed(std::string_view bytes) {
     return out;
 }
 
-} // namespace fakeos
+} // namespace tty
