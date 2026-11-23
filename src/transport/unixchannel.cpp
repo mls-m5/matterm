@@ -1,6 +1,7 @@
 #include "unixchannel.h"
 
 #include <cerrno>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
