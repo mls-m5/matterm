@@ -191,48 +191,61 @@ round; it never blocks.
   `ssh` that relays Unix sockets (`test/fakessh.py`); the ssh options used are the documented ones
   but have not been run against a real sshd here.
 
-## d) From a phone, without a window: `matterm --attach-tty` (built)
+## d) From a phone, or without a window: `matterm --attach-tty` (built)
 
 For a phone (Termux, JuiceSSH, any ssh client) there is no window and no browser needed. Log in to
 the computer that runs the daemon and start the terminal mode there:
 
 ```
-ssh -t you@your-computer matterm --attach-tty
+ssh -t you@your-computer matterm --attach-tty           # the list
+ssh -t you@your-computer matterm --attach-tty --new     # a new terminal at once, in a fresh shell
+ssh -t you@your-computer matterm --attach-tty --new --name work -- htop
 ```
 
-`-t` is needed (a terminal must be allocated; `ssh` does that by itself only without a command).
-The program shows a list of the terminals that run in the daemon (name, what runs, `(in use)` if
-another client has it), you choose with Up/Down (or `j`/`k`, or the digits 1..9) and Enter, and the
-terminal is shown full screen. Choosing is the confirmation: the other client (the window on the
-computer) is kicked, as when two windows share a terminal, and says "press Enter to take it back".
+(`matterm-attach` is the same without the window libraries; `-t` is needed so that a terminal is
+allocated.) Together with the daemon this is a small tmux: start a terminal, leave it running, come
+back to it later.
+
+The list has **New terminal** as its first row (key `n`; your shell, in the folder you are in), then
+the terminals of the daemon (name, what runs, `(in use)` if another client has it). Choose with
+Up/Down (or `j`/`k`, `g`/`G`, or a digit) and Enter; choosing is the confirmation: another client
+(the window on the computer) is kicked, as when two windows share a terminal, and says "press Enter
+to take it back". The terminal this program itself runs in is marked `(this terminal)` and cannot
+be chosen (attaching it would feed it to itself; the daemon tells each terminal its id in
+`MATTERM_SESSION`).
 
 | Where | Key | Does |
 |---|---|---|
 | list | Up/Down, `j`/`k`, `g`/`G`, 1..9 | choose |
-| list | Enter | take the terminal over |
-| list | `r` | read the list again |
+| list | Enter | open the chosen row (`New terminal` starts one) |
+| list | `n` / `r` | new terminal / read the list again |
 | list | `q`, Esc, Ctrl+C | quit |
-| terminal | **Ctrl+]** | back to the list; the terminal keeps running |
+| terminal | **Ctrl+B** then `d` | leave: the client ends, the terminal keeps running |
+| terminal | Ctrl+B then `l` | back to the list (Ctrl+] does the same, as a spare) |
+| terminal | Ctrl+B then `c` | a new terminal (this one keeps running) |
+| terminal | Ctrl+B then `s` | the status line on or off |
+| terminal | Ctrl+B then `?` | help |
+| terminal | Ctrl+B Ctrl+B | send one Ctrl+B to the program |
 | terminal, after being taken over or a lost connection | Enter | take it back / connect again |
 
-The first time in a run, a line at the bottom names Ctrl+] for a few seconds (until the first key).
+Ctrl+B is the prefix of the window as well. After it a line at the bottom shows the possible keys
+until the next key (which is not sent to the program). The status line (name of the terminal and the
+main keys) is on by default from 24 rows and takes one row: the program has the screen minus that row
+(the size sent to the daemon follows). When the program ends, the client says "the program in X ended
+(exit code N)" and returns to the list; with `--new` it ends instead, with the program's exit code.
+
 All other keys go to the program: arrows, function keys, Ctrl and Alt combinations, the mouse (only
 while the program asked for it, so the phone's own selection works otherwise) and paste (in
-brackets only if the program asked). The program has the size of the screen; turning the phone or
-resizing the terminal resizes it.
+brackets only if the program asked). Turning the phone or resizing the terminal resizes it.
 
-If the connection drops (ssh ends), the terminal keeps running in the daemon. Log in again and run the
-same command: choose it, and the screen is rebuilt from the daemon's replay (a full-screen program
-such as `vim` or `htop` looks right).
+If the connection drops (ssh ends), the terminal keeps running in the daemon. Log in again and run
+the same command: choose it, and the screen is rebuilt from the daemon's replay (a full-screen
+program such as `vim` or `htop` looks right).
 
-Options: `--daemon-socket PATH` for another daemon; `--daemon-host [user@]host` from a computer (not
-needed from the phone: you are already on the computer) to reach the daemon of a third one through
-the tunnel of section c). `--attach-tty` does not start a daemon: with none running the list says so.
-
-Needs: `matterm` and `matterm-daemon` installed on the computer, the daemon running (the window or
-`matterm-daemon --daemonize` starts it), a user that is the daemon's owner. The program is the
-native `matterm`, built with the same libraries as the window (SDL is linked but not started); a
-computer without them cannot run it yet.
+Options: `--daemon-socket PATH` for another daemon; `--daemon-host [user@]host` from a computer
+(not needed from the phone: you are already on the computer) to reach the daemon of a third one
+through the tunnel of section c). The list does not start a daemon (with none running it says so);
+`--new` starts one, or uses a compatible one.
 
 Drawing follows the terminal's colours (truecolor, 256 or 16, from `COLORTERM`/`TERM`); the program's
 own default and 0..15 colours come out as the terminal's theme. The mode lives in the SDL-free library

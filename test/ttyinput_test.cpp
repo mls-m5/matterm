@@ -95,6 +95,14 @@ TEST_CASE("The leave key is its own event, nothing after it is lost") {
     EXPECT_EQ(std::string(kLeaveName), std::string("Ctrl+]"));
 }
 
+TEST_CASE("Ctrl+B is the prefix key, its own event") {
+    const auto events = decode("a\x02"
+                               "d");
+    EXPECT_EQ(events.size(), std::size_t(3));
+    EXPECT(events[1].kind == Kind::Prefix);
+    EXPECT(events[2].kind == Kind::Bytes && events[2].text == "d");
+}
+
 TEST_CASE(
     "Bracketed paste is unpacked and packed again only if the program asked") {
     EXPECT_EQ(forProgram("\x1b[200~one\ntwo\x1b[201~"),

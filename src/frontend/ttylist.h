@@ -20,14 +20,18 @@ struct ListEntry {
     std::string title; // The terminal's name, else a short form of its id.
     std::string what; // What runs there: the command, else "shell in <folder>".
     bool inUse = false; // Another client has it: opening it takes it over.
+    bool thisTerminal =
+        false; // The terminal this program itself runs in: not to be attached.
 };
 
 // A row of the list from the daemon's answers. `info` may be missing (the
 // daemon did not answer).
 inline ListEntry makeListEntry(const mtd::SessionEntry &entry,
-                               const mtd::SessionInfo *info) {
+                               const mtd::SessionInfo *info,
+                               const std::string &ownSession = {}) {
     ListEntry out;
     out.id = entry.id;
+    out.thisTerminal = !ownSession.empty() && entry.id == ownSession;
     out.inUse = entry.attached;
     const std::string &name = !entry.name.empty() ? entry.name
                               : info              ? info->name
@@ -69,36 +73,47 @@ enum class ListKey {
     Open,
     Refresh,
     Quit,
-    Digit
+    Digit,
+    New
 };
 
 struct ListAction {
-    enum class Kind { None, Open, Refresh, Quit };
+    enum class Kind { None, Open, New, Refresh, Quit };
     Kind kind = Kind::None;
     std::string id; // Open.
 };
 
+// The rows are "New terminal" first, then the terminals of the daemon.
 class ListModel {
 public:
-    // Keeps the chosen row when the same terminal is still there.
+    // Keeps the chosen row when the same terminal is still there; else the
+    // first terminal, or "New terminal" when there is none.
     void setEntries(std::vector<ListEntry> entries) {
-        std::string chosen = selected() ? selected()->id : std::string();
+        const std::string chosen = selected() ? selected()->id : std::string();
         entries_ = std::move(entries);
-        index_ = 0;
+        index_ = entries_.empty() ? 0 : 1;
         for (std::size_t i = 0; i < entries_.size(); ++i) {
             if (!chosen.empty() && entries_[i].id == chosen) {
-                index_ = i;
+                index_ = i + 1;
             }
         }
     }
     const std::vector<ListEntry> &entries() const {
         return entries_;
     }
+    std::size_t rowCount() const {
+        return entries_.size() + 1;
+    }
+    // 0 is "New terminal"; 1.. are the entries.
     std::size_t index() const {
         return index_;
     }
+    bool newSelected() const {
+        return index_ == 0;
+    }
     const ListEntry *selected() const {
-        return index_ < entries_.size() ? &entries_[index_] : nullptr;
+        return index_ >= 1 && index_ <= entries_.size() ? &entries_[index_ - 1]
+                                                        : nullptr;
     }
     // A line under the list: what went wrong, what happened to the terminal
     // that was shown.
@@ -111,7 +126,7 @@ public:
 
     ListAction key(ListKey key, int digit = 0, int pageSize = 10) {
         ListAction action;
-        const std::size_t last = entries_.empty() ? 0 : entries_.size() - 1;
+        const std::size_t last = entries_.size();
         switch (key) {
         case ListKey::Up:
             index_ = index_ > 0 ? index_ - 1 : 0;
@@ -134,15 +149,27 @@ public:
             index_ =
                 std::min(index_ + std::size_t(std::max(1, pageSize)), last);
             break;
-        case ListKey::Digit:
+        case ListKey::Digit: // The number shown in front of a terminal.
             if (digit >= 1 && std::size_t(digit) <= entries_.size()) {
-                index_ = std::size_t(digit) - 1;
+                index_ = std::size_t(digit);
             }
             break;
+        case ListKey::New:
+            action.kind = ListAction::Kind::New;
+            break;
         case ListKey::Open:
-            if (const ListEntry *entry = selected()) {
-                action.kind = ListAction::Kind::Open;
-                action.id = entry->id;
+            if (index_ == 0) {
+                action.kind = ListAction::Kind::New;
+            }
+            else if (const ListEntry *entry = selected()) {
+                if (entry->thisTerminal) {
+                    message_ = "You are in this terminal: attaching it would "
+                               "feed it to itself";
+                }
+                else {
+                    action.kind = ListAction::Kind::Open;
+                    action.id = entry->id;
+                }
             }
             break;
         case ListKey::Refresh:
@@ -209,6 +236,9 @@ inline ListKey listKeyOf(const InputEvent &event, int &digit) {
             if (c == 'G') {
                 return ListKey::Last;
             }
+            if (c == 'n' || c == 'N') {
+                return ListKey::New;
+            }
             if (c == 'r' || c == 'R') {
                 return ListKey::Refresh;
             }
@@ -217,6 +247,8 @@ inline ListKey listKeyOf(const InputEvent &event, int &digit) {
                 return ListKey::Digit;
             }
         }
+        return ListKey::None;
+    case InputEvent::Kind::Prefix:
         return ListKey::None;
     case InputEvent::Kind::Leave:
         return ListKey::Quit;
@@ -251,7 +283,7 @@ inline void renderList(const ListModel &model, ::tty::Canvas &canvas) {
     const auto &entries = model.entries();
     const int capacity = listCapacity(rows);
     if (entries.empty()) {
-        put(canvas, 1, 2, "No terminals are running in the daemon.", kDim);
+        put(canvas, 1, 3, "No terminals are running in the daemon.", kDim);
     }
     // The visible part follows the chosen row.
     std::size_t first = 0;
@@ -259,26 +291,35 @@ inline void renderList(const ListModel &model, ::tty::Canvas &canvas) {
         first = model.index() + 1 - std::size_t(capacity);
     }
     for (int line = 0;
-         line < capacity && first + std::size_t(line) < entries.size();
+         line < capacity && first + std::size_t(line) < model.rowCount();
          ++line) {
         const std::size_t i = first + std::size_t(line);
-        const ListEntry &entry = entries[i];
         const bool chosen = i == model.index();
         const ::tty::Rgb fg = chosen ? kBarFg : kScreenFg;
         const ::tty::Rgb bg = chosen ? kBarBg : kScreenBg;
         const int y = 2 + line;
         fillRow(canvas, y, fg, bg);
-        const std::string number = i < 9 ? std::to_string(i + 1) : " ";
+        if (i == 0) {
+            int x = put(canvas, 1, y, "n ", chosen ? fg : kDim, bg);
+            put(canvas, x, y, "New terminal", fg, bg, true);
+            continue;
+        }
+        const ListEntry &entry = entries[i - 1];
+        const std::string number = i < 10 ? std::to_string(i) : " ";
         int x = put(canvas, 1, y, number + " ", chosen ? fg : kDim, bg);
         x = put(canvas, x, y, entry.title, fg, bg, true);
-        if (entry.inUse) { // Before the long part, so that a narrow screen
-                           // still shows it.
+        if (entry.thisTerminal) { // Before the long part, so that a narrow
+                                  // screen still shows it.
+            x = put(canvas, x, y, " (this terminal)", chosen ? fg : kWarn, bg);
+        }
+        else if (entry.inUse) {
             x = put(canvas, x, y, " (in use)", chosen ? fg : kWarn, bg);
         }
         put(canvas, x, y, "  " + entry.what, chosen ? fg : kDim, bg);
     }
     const ListEntry *chosenEntry = model.selected();
-    if (model.message().empty() && chosenEntry && chosenEntry->inUse) {
+    if (model.message().empty() && chosenEntry && chosenEntry->inUse &&
+        !chosenEntry->thisTerminal) {
         put(canvas, 1, rows - 2, "In use: opening takes it over.", kWarn);
     }
     if (!model.message().empty()) {
@@ -288,7 +329,7 @@ inline void renderList(const ListModel &model, ::tty::Canvas &canvas) {
     put(canvas,
         1,
         rows - 1,
-        "Up/Down choose   Enter open   r refresh   q quit",
+        "Up/Down choose   Enter open   n new   r refresh   q quit",
         kBarFg,
         kBarBg);
 }

@@ -133,6 +133,9 @@ struct FakeSource : SessionSource {
     int lists = 0;
     int opened = 0;
     std::string openedId;
+    int openedRows = 0;
+    std::vector<NewTerminal> created;
+    std::string createError;
     std::vector<ListEntry> list(std::string &error) override {
         ++lists;
         error = listError;
@@ -148,9 +151,21 @@ struct FakeSource : SessionSource {
         }
         ++opened;
         openedId = id;
+        openedRows = rows;
         auto pane = std::make_unique<FakePane>(columns, rows);
         last = pane.get();
         return pane;
+    }
+    std::string create(const NewTerminal &what,
+                       int,
+                       int,
+                       std::string &error) override {
+        if (!createError.empty()) {
+            error = createError;
+            return {};
+        }
+        created.push_back(what);
+        return "new" + std::to_string(created.size());
     }
 };
 
@@ -176,6 +191,14 @@ struct Rig {
         mode = std::make_unique<AttachTty>(host, source);
         mode->start(now);
     }
+    Rig(std::vector<ListEntry> entries,
+        AttachTty::Options options,
+        int rows = 8) {
+        source.entries = std::move(entries);
+        host.setSize(80, rows);
+        mode = std::make_unique<AttachTty>(host, source, std::move(options));
+        mode->start(now);
+    }
     void type(const std::string &bytes) {
         now += 10;
         mode->input(bytes, now);
@@ -194,6 +217,18 @@ TEST_CASE("It starts with the list, also when there is only one terminal") {
     EXPECT(one.host.shows("matterm: running terminals"));
     EXPECT(one.host.shows("alpha"));
     EXPECT_EQ(one.source.opened, 0);
+}
+
+TEST_CASE("A new connection is served at once, not at the next key") {
+    Rig rig;
+    rig.enterPane();
+    EXPECT(
+        rig.source.last->ticks >=
+        1); // Its hello goes out now (a --new client waits for nothing else).
+    rig.source.last->takenOver();
+    rig.type("\r");
+    EXPECT_EQ(rig.source.last->reattaches, 1);
+    EXPECT(rig.source.last->ticks >= 2);
 }
 
 TEST_CASE(
@@ -227,7 +262,7 @@ TEST_CASE("Typed characters in the list are keystrokes one by one") {
     EXPECT_EQ(rig.source.openedId, std::string("b"));
     Rig again;
     again.type("jk2");
-    EXPECT(again.mode->list().index() == 1);
+    EXPECT(again.mode->list().index() == 2);
 }
 
 TEST_CASE(
@@ -245,8 +280,8 @@ TEST_CASE("An empty or failing daemon says so") {
     rig.type("r");
     EXPECT_EQ(rig.source.lists, 2);
     EXPECT(rig.host.shows("the daemon is not running"));
-    rig.type("\r"); // Nothing to open.
-    EXPECT(!rig.mode->inPane());
+    rig.type("\r"); // Nothing to open: a new terminal.
+    EXPECT(rig.mode->inPane());
 }
 
 TEST_CASE("The pane shows the program's screen and sends the keys on") {
@@ -391,14 +426,109 @@ TEST_CASE("A lost connection offers to connect again") {
     EXPECT_EQ(rig.source.last->reattaches, 1);
 }
 
-TEST_CASE("A terminal that ended or is gone goes back to the list with Enter") {
+TEST_CASE("A terminal that is gone goes back to the list with Enter") {
     Rig rig;
     rig.enterPane();
-    rig.source.last->link.events.exited(0, 0);
+    rig.source.last->link.error = protocol::ErrorCode::ResumeUnsupported;
+    rig.source.last->link.events.closed("no such session");
     rig.mode->tick(rig.now);
-    EXPECT(rig.host.shows("The program ended"));
+    EXPECT(rig.host.shows("This terminal is gone"));
     rig.type("\r");
     EXPECT(!rig.mode->inPane());
+}
+
+TEST_CASE("When the program ends the client says so and is back in the list") {
+    Rig rig;
+    rig.enterPane();
+    rig.source.last->link.events.exited(3, 0);
+    rig.mode->tick(rig.now);
+    EXPECT(!rig.mode->inPane() && !rig.mode->finished());
+    EXPECT(rig.host.shows("The program in alpha ended (exit code 3)"));
+    rig.type("\r"); // And the list works: Enter opens the first terminal again.
+    EXPECT(rig.mode->inPane());
+}
+
+TEST_CASE("With --new the client ends with the program, with its exit code") {
+    AttachTty::Options options;
+    options.startNew = true;
+    options.exitWhenEnded = true;
+    options.newTerminal.name = "work";
+    Rig rig({}, options);
+    EXPECT(rig.mode->inPane());
+    EXPECT_EQ(rig.source.created.size(), std::size_t(1));
+    EXPECT_EQ(rig.source.created[0].name, std::string("work"));
+    EXPECT_EQ(rig.source.openedId, std::string("new1"));
+    rig.source.last->link.events.exited(7, 0);
+    rig.mode->tick(rig.now);
+    EXPECT(rig.mode->finished());
+    EXPECT_EQ(rig.mode->exitCode(), 7);
+    EXPECT(rig.mode->farewell().find("ended (exit code 7)") !=
+           std::string::npos);
+}
+
+TEST_CASE("--new that cannot start a terminal shows the list with the reason") {
+    AttachTty::Options options;
+    options.startNew = true;
+    Rig rig({entry("a", "alpha")}, options);
+    EXPECT(rig.mode->inPane());
+    Rig failing(std::vector<ListEntry>{entry("a", "alpha")}, options);
+    failing.source.createError = "x";
+    AttachTty again(failing.host, failing.source, options);
+    failing.source.last = nullptr;
+    again.start(5);
+    EXPECT(!again.inPane() && !again.finished());
+}
+
+TEST_CASE(
+    "New terminal in the list: the first row and n start one in the daemon") {
+    Rig rig;
+    rig.type("n");
+    EXPECT(rig.mode->inPane());
+    EXPECT_EQ(rig.source.created.size(), std::size_t(1));
+    EXPECT(rig.source.created[0].command.empty()); // The shell.
+    EXPECT_EQ(rig.source.openedId, std::string("new1"));
+    rig.type("\x1d");
+    rig.type("\x1b[A"); // Up to "New terminal" ...
+    rig.type("\r");     // ... and Enter.
+    EXPECT_EQ(rig.source.created.size(), std::size_t(2));
+}
+
+TEST_CASE("With no terminals Enter starts a new one, and a refusal of the "
+          "daemon is shown") {
+    Rig rig(std::vector<ListEntry>{});
+    rig.source.createError = "the daemon is full";
+    rig.type("\r");
+    EXPECT(!rig.mode->inPane());
+    EXPECT(rig.host.shows("the daemon is full"));
+    rig.source.createError.clear();
+    rig.type("\r");
+    EXPECT(rig.mode->inPane());
+}
+
+TEST_CASE(
+    "The terminal this program runs in is marked and cannot be attached") {
+    ListEntry own = entry("mine", "me");
+    own.thisTerminal = true;
+    AttachTty::Options options;
+    options.ownSession = "mine";
+    Rig rig({own, entry("b", "beta")}, options);
+    EXPECT(rig.host.shows("(this terminal)"));
+    rig.type("\r"); // The chosen row is the first terminal: this one.
+    EXPECT(!rig.mode->inPane());
+    EXPECT_EQ(rig.source.opened, 0);
+    EXPECT(rig.host.shows("feed it to itself"));
+    rig.type("\x1b[B");
+    rig.type("\r");
+    EXPECT_EQ(rig.source.openedId, std::string("b"));
+}
+
+TEST_CASE("Even a list that does not mark it cannot attach the own terminal") {
+    AttachTty::Options options;
+    options.ownSession = "a";
+    Rig rig({entry("a", "alpha")}, options);
+    rig.type("\r");
+    EXPECT(!rig.mode->inPane());
+    EXPECT(rig.host.shows("feed it to itself"));
 }
 
 TEST_CASE("The leave key works in every state") {
@@ -424,6 +554,109 @@ TEST_CASE("The mode waits for a lone Escape only briefly") {
     rig.type("\x1b");
     const int wait = rig.mode->timeoutMs(rig.now);
     EXPECT(wait > 0 && wait <= 100);
+}
+
+TEST_CASE("Ctrl+B twice sends one Ctrl+B to the program") {
+    Rig rig;
+    rig.enterPane();
+    rig.type("\x02\x02");
+    EXPECT_EQ(rig.source.last->link.sent, std::string("\x02"));
+    rig.type("a");
+    EXPECT_EQ(rig.source.last->link.sent,
+              std::string("\x02"
+                          "a"));
+}
+
+TEST_CASE("After Ctrl+B a line shows the keys, and the next key (not sent) "
+          "takes it away") {
+    Rig rig;
+    rig.enterPane();
+    rig.type("\x02");
+    EXPECT(rig.host.shows("d leave"));
+    rig.type("x"); // Not a command: cancels, and the program does not get it.
+    EXPECT(!rig.host.shows("d leave"));
+    EXPECT_EQ(rig.source.last->link.sent, std::string());
+    rig.type("\x02\x1b");
+    rig.mode->quiet(rig.now + 100); // Escape cancels too.
+    EXPECT(!rig.host.shows("d leave"));
+    EXPECT_EQ(rig.source.last->link.sent, std::string());
+}
+
+TEST_CASE("Ctrl+B d leaves the client and the terminal keeps running; Ctrl+B l "
+          "is the list") {
+    Rig rig;
+    rig.enterPane();
+    rig.type("\x02"
+             "d");
+    EXPECT(rig.mode->finished());
+    EXPECT(rig.mode->farewell().find("keeps running") != std::string::npos);
+    Rig other;
+    other.enterPane();
+    other.type("\x02l");
+    EXPECT(!other.mode->inPane() && !other.mode->finished());
+    EXPECT(other.host.shows("keeps running"));
+}
+
+TEST_CASE("Ctrl+B c leaves this terminal running and starts a new one") {
+    Rig rig;
+    rig.enterPane();
+    rig.type("\x02"
+             "c");
+    EXPECT(rig.mode->inPane());
+    EXPECT_EQ(rig.source.openedId, std::string("new1"));
+    EXPECT_EQ(rig.source.opened, 2);
+}
+
+TEST_CASE("The prefix also works while the terminal is taken over") {
+    Rig rig;
+    rig.enterPane();
+    rig.source.last->takenOver();
+    rig.mode->tick(rig.now);
+    rig.type("\x02"
+             "d");
+    EXPECT(rig.mode->finished());
+}
+
+TEST_CASE("The status line: on from 24 rows and it takes a row from the "
+          "program; Ctrl+B s toggles") {
+    Rig tall({entry("a", "alpha")}, AttachTty::Options{}, 30);
+    tall.enterPane();
+    EXPECT(tall.mode->statusLineOn());
+    EXPECT_EQ(tall.source.openedRows, 29);
+    EXPECT_EQ(tall.source.last->v.model().rows(), std::size_t(29));
+    EXPECT(tall.host.shows("alpha"));
+    EXPECT(tall.host.shows("Ctrl+B"));
+    tall.type("\x02s");
+    EXPECT(!tall.mode->statusLineOn());
+    EXPECT_EQ(tall.source.last->v.model().rows(), std::size_t(30));
+    EXPECT_EQ(tall.source.last->link.rows, 30);
+    tall.type("\x02s");
+    EXPECT_EQ(tall.source.last->v.model().rows(), std::size_t(29));
+    Rig small({entry("a", "alpha")}, AttachTty::Options{}, 20);
+    small.enterPane();
+    EXPECT(!small.mode->statusLineOn());
+    EXPECT_EQ(small.source.last->v.model().rows(), std::size_t(20));
+}
+
+TEST_CASE("The status line can be turned off in the options") {
+    AttachTty::Options options;
+    options.statusLine = false;
+    Rig rig({entry("a", "alpha")}, options, 40);
+    rig.enterPane();
+    EXPECT(!rig.mode->statusLineOn());
+    EXPECT_EQ(rig.source.last->v.model().rows(), std::size_t(40));
+}
+
+TEST_CASE("Ctrl+B ? shows the help over the bottom rows until the next key") {
+    Rig rig({entry("a", "alpha")}, AttachTty::Options{}, 30);
+    rig.enterPane();
+    rig.type("\x02?");
+    EXPECT(rig.host.shows("a new terminal"));
+    EXPECT(rig.host.shows("any key closes this"));
+    rig.type("x");
+    EXPECT(!rig.host.shows("any key closes this"));
+    EXPECT_EQ(rig.source.last->link.sent,
+              std::string()); // The key that closed it is not sent.
 }
 
 TEST_SUIT_END

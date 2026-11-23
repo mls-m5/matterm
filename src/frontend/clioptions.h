@@ -129,6 +129,8 @@ inline const std::vector<Program> &programs() {
               "",
               "Take over a running terminal in this terminal (no window)",
               false},
+             {"--new", "", Value::None, "", "With --attach-tty: start a terminal and attach to it", false},
+             {"--name", "", Value::Text, "", "With --new: a name for the terminal", false},
              {"--daemon-list",
               "",
               Value::None,

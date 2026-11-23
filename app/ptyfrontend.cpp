@@ -1057,6 +1057,9 @@ int runPtyFrontend(const char *font,
     };
     // The terminals the daemon holds, with what the list needs (a short answer or none: the
     // daemon is local). `quiet`: no notice when it does not answer.
+    // The terminal this window itself runs in, when it was started inside one of the daemon's (set by the daemon).
+    const char *ownSessionText = std::getenv("MATTERM_SESSION");
+    const std::string ownSession = ownSessionText ? ownSessionText : "";
     const auto daemonSessions = [&](bool quiet = true) {
         std::vector<AttachableSession> out;
         std::string error;
@@ -1080,6 +1083,7 @@ int runPtyFrontend(const char *font,
             s.attached = entry.attached;
             s.shared = entry.shared;
             s.inThisWindow = mine.count(entry.id) != 0;
+            s.thisTerminal = !ownSession.empty() && entry.id == ownSession;
             if (!s.inThisWindow) {
                 std::string infoError;
                 const auto info = askDaemon(daemonPath, mtd::GetSessionInfo{entry.id}, infoError, 500);
@@ -1336,6 +1340,9 @@ int runPtyFrontend(const char *font,
             if (found == sessions.end()) {
                 notify("that terminal is gone");
             }
+            else if (found->thisTerminal) {
+                notify(thisTerminalNotice());
+            }
             else if (found->inThisWindow || !here || !here->daemon) {
                 notify("this window already shows that terminal");
             }
@@ -1495,6 +1502,9 @@ int runPtyFrontend(const char *font,
                                             [&](const AttachableSession &s) { return s.id == sessionId; });
             if (found == sessions.end()) {
                 notify("that terminal is gone");
+            }
+            else if (found->thisTerminal) {
+                notify(thisTerminalNotice());
             }
             else if (found->inThisWindow) {
                 notify("this window already shows that terminal");

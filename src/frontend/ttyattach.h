@@ -59,6 +59,12 @@ public:
     virtual std::optional<std::int64_t> nextTickMs() const = 0;
 };
 
+// What a new terminal runs and is called; empty command: the user's shell.
+struct NewTerminal {
+    std::string name;
+    std::vector<std::string> command;
+};
+
 class SessionSource {
 public:
     virtual ~SessionSource() = default;
@@ -70,14 +76,29 @@ public:
                                                int columns,
                                                int rows,
                                                std::string &error) = 0;
+    // Starts a terminal in the daemon (in the current folder) and returns its
+    // id; empty with `error` set when it cannot.
+    virtual std::string create(const NewTerminal &what,
+                               int columns,
+                               int rows,
+                               std::string &error) = 0;
 };
 
 class AttachTty {
 public:
     struct Options {
-        std::int64_t hintMs = 8000; // How long the first-time hint stays.
+        std::int64_t hintMs =
+            8000; // How long the first-time hint stays (no status line).
         std::int64_t escapeMs =
             30; // How long a lone Escape waits for the rest of a sequence.
+        bool statusLine = true;  // The permanent line at the bottom (Ctrl+B s).
+        int statusMinRows = 24;  // It starts off on a screen with fewer rows.
+        bool startNew = false;   // Start a terminal at once (--new) instead of
+                                 // showing the list.
+        NewTerminal newTerminal; // What --new starts.
+        bool exitWhenEnded = false; // --new: the client ends with the program.
+        std::string ownSession;     // The terminal this program runs in
+                                    // (MATTERM_SESSION): never attached.
     };
 
     AttachTty(HostScreen &host, SessionSource &source)
@@ -86,11 +107,16 @@ public:
     AttachTty(HostScreen &host, SessionSource &source, Options options)
         : host_(host)
         , source_(source)
-        , options_(options) {}
+        , options_(std::move(options)) {}
 
     void start(std::int64_t now) {
         now_ = now;
+        statusOn_ =
+            options_.statusLine && size().second >= options_.statusMinRows;
         refresh();
+        if (options_.startNew) {
+            createAndOpen(options_.newTerminal, "new terminal");
+        }
         dirty_ = true;
         draw();
     }
@@ -111,11 +137,7 @@ public:
     }
     void resized(std::int64_t now) {
         now_ = now;
-        if (pane_) {
-            const auto [columns, rows] = size();
-            pane_->view().resize(std::size_t(std::max(1, columns)),
-                                 std::size_t(std::max(1, rows)));
-        }
+        applyPaneSize();
         dirty_ = true;
         draw();
     }
@@ -128,6 +150,9 @@ public:
                 hintUntil_ = 0;
                 dirty_ = true;
             }
+            if (pane_->view().state() == TerminalView::State::Exited) {
+                programEnded();
+            }
         }
         draw();
     }
@@ -135,8 +160,20 @@ public:
     bool finished() const {
         return finished_;
     }
+    // A line for after the terminal is restored (what was left running, how the
+    // program ended).
+    const std::string &farewell() const {
+        return farewell_;
+    }
+    // The exit code of the program when --new ended with it, else 0.
+    int exitCode() const {
+        return exitCode_;
+    }
     bool inPane() const {
         return pane_ != nullptr;
+    }
+    bool statusLineOn() const {
+        return statusOn_;
     }
     const ListModel &list() const {
         return list_;
@@ -173,6 +210,21 @@ private:
     bool live() const {
         return pane_ && pane_->view().state() == TerminalView::State::Live;
     }
+    std::pair<int, int> size() const {
+        return {host_.screen().columns(), host_.screen().rows()};
+    }
+    // The program has the screen minus the status line.
+    std::pair<int, int> paneSize() const {
+        const auto [columns, rows] = size();
+        return {std::max(1, columns),
+                std::max(1, rows - (statusOn_ && rows >= 2 ? 1 : 0))};
+    }
+    void applyPaneSize() {
+        if (pane_) {
+            const auto [columns, rows] = paneSize();
+            pane_->view().resize(std::size_t(columns), std::size_t(rows));
+        }
+    }
 
     void refresh() {
         std::string error;
@@ -196,18 +248,30 @@ private:
         }
     }
 
-    void listEvent(const InputEvent &event) {
-        // A run of typed characters is one Bytes event: each is a keystroke of
-        // its own here.
+    // A run of typed characters is one Bytes event: where each is a keystroke
+    // of its own, this splits it.
+    template <class F>
+    bool eachKeystroke(const InputEvent &event, F &&again) {
         if (event.kind == InputEvent::Kind::Bytes && event.text.size() > 1) {
             for (const char c : event.text) {
                 InputEvent single = event;
                 single.text.assign(1, c);
-                listEvent(single);
-                if (pane_ || finished_) {
-                    return;
+                again(single);
+                if (finished_) {
+                    return true;
                 }
             }
+            return true;
+        }
+        return false;
+    }
+
+    void listEvent(const InputEvent &event) {
+        if (eachKeystroke(event, [&](const InputEvent &single) {
+                if (!pane_) {
+                    listEvent(single);
+                }
+            })) {
             return;
         }
         int digit = 0;
@@ -215,10 +279,8 @@ private:
         if (key == ListKey::None) {
             return;
         }
-        const auto [columns, rows] = size();
         const ListAction action =
-            list_.key(key, digit, std::max(1, listCapacity(rows)));
-        (void)columns;
+            list_.key(key, digit, std::max(1, listCapacity(size().second)));
         dirty_ = true;
         switch (action.kind) {
         case ListAction::Kind::Quit:
@@ -228,18 +290,26 @@ private:
             refresh();
             break;
         case ListAction::Kind::Open:
-            open(action.id);
+            open(action.id,
+                 list_.selected() ? list_.selected()->title : std::string());
+            break;
+        case ListAction::Kind::New:
+            createAndOpen({}, "new terminal");
             break;
         case ListAction::Kind::None:
             break;
         }
     }
 
-    void open(const std::string &id) {
-        const auto [columns, rows] = size();
+    void open(const std::string &id, const std::string &title) {
+        if (!options_.ownSession.empty() && id == options_.ownSession) {
+            list_.setMessage("You are in this terminal: attaching it would "
+                             "feed it to itself");
+            return;
+        }
+        const auto [columns, rows] = paneSize();
         std::string error;
-        auto pane =
-            source_.open(id, std::max(1, columns), std::max(1, rows), error);
+        auto pane = source_.open(id, columns, rows, error);
         if (!pane) {
             list_.setMessage(error.empty() ? "That terminal could not be opened"
                                            : error);
@@ -247,30 +317,148 @@ private:
         }
         list_.setMessage({});
         pane_ = std::move(pane);
+        paneTitle_ = title.empty() ? "terminal " + id.substr(0, 8) : title;
+        prefixPending_ = helpShown_ = false;
         pane_->view().setChanged([this] { dirty_ = true; });
-        // The first time in this run the leave key is announced; later the user
-        // knows it.
-        if (!hinted_) {
+        // The connection says hello only when it is first served; waiting for
+        // the next key (or for output that cannot come before the hello) would
+        // hang a client that was started with --new.
+        pane_->tick();
+        // Without the status line the leave key is announced the first time in
+        // this run.
+        if (!hinted_ && !statusOn_) {
             hinted_ = true;
             hintUntil_ = now_ + options_.hintMs;
         }
         dirty_ = true;
     }
 
+    void createAndOpen(const NewTerminal &what,
+                       const std::string &fallbackTitle) {
+        const auto [columns, rows] = paneSize();
+        std::string error;
+        const std::string id = source_.create(what, columns, rows, error);
+        if (id.empty()) {
+            list_.setMessage(error.empty()
+                                 ? "The daemon could not start a terminal"
+                                 : error);
+            dirty_ = true;
+            return;
+        }
+        open(id, what.name.empty() ? fallbackTitle : what.name);
+    }
+
     void leavePane() {
-        const std::string title = list_.selected()
-                                      ? list_.selected()->title
-                                      : std::string("the terminal");
+        const std::string title = paneTitle_;
         pane_.reset(); // The terminal keeps running in the daemon; only this
                        // connection ends.
         hintUntil_ = 0;
+        prefixPending_ = helpShown_ = false;
         applyModes();
         refresh();
         list_.setMessage("Left " + title + "; it keeps running");
         dirty_ = true;
     }
 
+    // The program in the pane ended: say so, and back to the list (or out, for
+    // --new).
+    void programEnded() {
+        const TerminalView &view = pane_->view();
+        const std::string how =
+            view.exitSignal() ? "signal " + std::to_string(view.exitSignal())
+                              : "exit code " + std::to_string(view.exitCode());
+        const std::string message =
+            "The program in " + paneTitle_ + " ended (" + how + ")";
+        if (options_.exitWhenEnded) {
+            exitCode_ =
+                view.exitSignal() ? 128 + view.exitSignal() : view.exitCode();
+            farewell_ = message;
+            finished_ = true;
+            return;
+        }
+        pane_.reset();
+        hintUntil_ = 0;
+        prefixPending_ = helpShown_ = false;
+        applyModes();
+        refresh();
+        list_.setMessage(message);
+        dirty_ = true;
+    }
+
+    // Ctrl+B and the key after it.
+    void prefixCommand(const InputEvent &event) {
+        const bool help = helpShown_;
+        prefixPending_ = helpShown_ = false;
+        dirty_ = true;
+        if (help) {
+            return; // Any key closes the help.
+        }
+        if (event.kind ==
+            InputEvent::Kind::Prefix) { // Twice: one Ctrl+B for the program.
+            if (live()) {
+                pane_->view().sendInput(std::string(1, kPrefixByte));
+            }
+            return;
+        }
+        if (event.kind == InputEvent::Kind::Leave) {
+            leavePane();
+            return;
+        }
+        if (event.kind != InputEvent::Kind::Bytes || event.text.empty()) {
+            return; // Escape and the other keys only cancel.
+        }
+        switch (event.text[0]) {
+        case 'd':
+            farewell_ = paneTitle_ +
+                        " keeps running; matterm --attach-tty comes back to it";
+            pane_.reset();
+            finished_ = true;
+            break;
+        case 'l':
+            leavePane();
+            break;
+        case 'c':
+            pane_.reset();
+            hintUntil_ = 0;
+            createAndOpen({}, "new terminal");
+            if (!pane_) {
+                refresh();
+            }
+            break;
+        case 's':
+            statusOn_ = !statusOn_;
+            applyPaneSize();
+            break;
+        case '?':
+            helpShown_ = prefixPending_ = true;
+            break;
+        default:
+            break;
+        }
+    }
+
     void paneEvent(const InputEvent &event) {
+        if (prefixPending_) {
+            if (event.kind == InputEvent::Kind::Bytes &&
+                event.text.size() > 1) {
+                InputEvent first = event;
+                first.text.assign(1, event.text[0]);
+                prefixCommand(first);
+                if (pane_ && !finished_) {
+                    InputEvent rest = event;
+                    rest.text.erase(0, 1);
+                    paneEvent(rest);
+                }
+                return;
+            }
+            prefixCommand(event);
+            return;
+        }
+        if (event.kind == InputEvent::Kind::Prefix) {
+            prefixPending_ = true;
+            dirty_ = true;
+            return;
+        }
         if (event.kind == InputEvent::Kind::Leave) {
             leavePane();
             return;
@@ -289,7 +477,7 @@ private:
             return;
         }
         // Not live: the only keys are Enter (take it back, or back to the list)
-        // and the leave key.
+        // and the prefix and leave keys.
         if (event.kind == InputEvent::Kind::Key &&
             event.key == InputEncoder::Key::Enter) {
             switch (view.state()) {
@@ -298,62 +486,84 @@ private:
                 if (!pane_->reattach()) {
                     list_.setMessage("Could not connect again");
                 }
+                else {
+                    pane_->tick(); // See open().
+                }
                 dirty_ = true;
                 break;
             case TerminalView::State::Unavailable:
-            case TerminalView::State::Exited:
                 leavePane();
                 break;
+            case TerminalView::State::Exited:
             case TerminalView::State::Live:
                 break;
             }
         }
     }
 
-    // The line at the bottom: the first text that fits the width (a phone has
-    // about 40 columns).
-    std::string statusText(int columns) const {
-        if (!pane_) {
-            return {};
-        }
-        const std::string leave = kLeaveName;
-        std::vector<std::string> variants;
-        switch (pane_->view().state()) {
-        case TerminalView::State::Live:
-            if (hintUntil_) {
-                variants = {
-                    leave + " leaves to the list; the terminal keeps running",
-                    leave + " leaves to the list"};
-            }
-            break;
-        case TerminalView::State::Replaced:
-            variants = {
-                "Taken over by another client.  Enter: take it back   " +
-                    leave + ": list",
-                "Taken over. Enter: take back, " + leave + ": list",
-                "Taken over. Enter: take back"};
-            break;
-        case TerminalView::State::Disconnected:
-            variants = {"Connection lost.  Enter: connect again   " + leave +
-                            ": list",
-                        "Connection lost. Enter: retry, " + leave + ": list",
-                        "Connection lost. Enter: retry"};
-            break;
-        case TerminalView::State::Unavailable:
-            variants = {"This terminal is gone.  Enter or " + leave + ": list",
-                        "Gone. Enter: list"};
-            break;
-        case TerminalView::State::Exited:
-            variants = {"The program ended.  Enter or " + leave + ": list",
-                        "Ended. Enter: list"};
-            break;
-        }
+    static std::string firstThatFits(const std::vector<std::string> &variants,
+                                     int columns) {
         for (const std::string &text : variants) {
             if (int(text.size()) + 2 <= columns) {
                 return text;
             }
         }
         return variants.empty() ? std::string() : variants.back();
+    }
+
+    // The line at the bottom: what the pane needs said now, else the status
+    // line. The first text that fits the width (a phone has about 40 columns).
+    std::string statusText(int columns) const {
+        if (!pane_) {
+            return {};
+        }
+        if (prefixPending_ && !helpShown_) {
+            return firstThatFits({"Ctrl+B:  d leave   l list   c new   s "
+                                  "status   ? help   Ctrl+B sends it",
+                                  "d leave  l list  c new  s status  ? help",
+                                  "d l c s ?"},
+                                 columns);
+        }
+        const std::string leave = kLeaveName;
+        switch (pane_->view().state()) {
+        case TerminalView::State::Live:
+            if (hintUntil_) {
+                return firstThatFits(
+                    {leave + " leaves to the list; the terminal keeps running",
+                     leave + " leaves to the list"},
+                    columns);
+            }
+            if (statusOn_) {
+                return firstThatFits(
+                    {paneTitle_ +
+                         "   Ctrl+B: d leave  l list  c new  s status  ? help",
+                     paneTitle_ + "   Ctrl+B ? help",
+                     "Ctrl+B ? help"},
+                    columns);
+            }
+            return {};
+        case TerminalView::State::Replaced:
+            return firstThatFits(
+                {"Taken over by another client.  Enter: take it back   " +
+                     leave + ": list",
+                 "Taken over. Enter: take back, " + leave + ": list",
+                 "Taken over. Enter: take back"},
+                columns);
+        case TerminalView::State::Disconnected:
+            return firstThatFits(
+                {"Connection lost.  Enter: connect again   " + leave + ": list",
+                 "Connection lost. Enter: retry, " + leave + ": list",
+                 "Connection lost. Enter: retry"},
+                columns);
+        case TerminalView::State::Unavailable:
+            return firstThatFits(
+                {"This terminal is gone.  Enter or " + leave + ": list",
+                 "Gone. Enter: list"},
+                columns);
+        case TerminalView::State::Exited:
+            return {}; // programEnded() has taken it away already.
+        }
+        return {};
     }
 
     void applyModes() {
@@ -368,8 +578,22 @@ private:
         }
     }
 
-    std::pair<int, int> size() const {
-        return {host_.screen().columns(), host_.screen().rows()};
+    void drawHelp(::tty::Canvas &canvas, int columns, int rows) {
+        static const char *const lines[] = {
+            "Ctrl+B d   leave; the terminal keeps running",
+            "Ctrl+B l   the list of terminals (Ctrl+] too)",
+            "Ctrl+B c   a new terminal",
+            "Ctrl+B s   the status line on or off",
+            "Ctrl+B Ctrl+B   send Ctrl+B to the program",
+            "any key closes this",
+        };
+        const int count = int(sizeof lines / sizeof *lines);
+        for (int i = 0; i < count && rows - count + i >= 0; ++i) {
+            const int y = rows - count + i;
+            fillRow(canvas, y, kBarFg, kBarBg);
+            put(canvas, 1, y, lines[i], kBarFg, kBarBg);
+        }
+        (void)columns;
     }
 
     void draw() {
@@ -389,7 +613,11 @@ private:
             cursor.visible = cursor.visible && frame.cursor.column < columns &&
                              frame.cursor.row < rows;
             const std::string status = statusText(columns);
-            if (!status.empty() && rows >= 2) {
+            if (helpShown_ && rows >= 8) {
+                drawHelp(canvas, columns, rows);
+                cursor.visible = false;
+            }
+            else if (!status.empty() && rows >= 2) {
                 fillRow(canvas, rows - 1, kBarFg, kBarBg);
                 put(canvas, 1, rows - 1, status, kBarFg, kBarBg);
                 if (cursor.row == rows - 1) {
@@ -412,12 +640,18 @@ private:
     ListModel list_;
     HostInputDecoder decoder_;
     std::unique_ptr<AttachedPane> pane_;
+    std::string paneTitle_;
+    std::string farewell_;
+    int exitCode_ = 0;
     std::int64_t now_ = 0;
     std::int64_t hintUntil_ = 0;
     bool hinted_ = false;
     bool finished_ = false;
     bool dirty_ = true;
     bool modesSet_ = false;
+    bool statusOn_ = false;
+    bool prefixPending_ = false;
+    bool helpShown_ = false;
     HostInputModes modes_;
 };
 

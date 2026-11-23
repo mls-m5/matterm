@@ -9,6 +9,7 @@
 #include "tty/posix/terminal.h"
 #include "ttyattach.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -176,8 +177,13 @@ private:
 
 class DaemonSource final : public SessionSource {
 public:
-    explicit DaemonSource(std::string socket)
-        : socket_(std::move(socket)) {}
+    // `ownSession`: the terminal this program runs in (MATTERM_SESSION), marked
+    // in the list. `cwd`: the folder a new terminal starts in (empty for a
+    // daemon on another computer: its own folder).
+    DaemonSource(std::string socket, std::string ownSession, std::string cwd)
+        : socket_(std::move(socket))
+        , own_(std::move(ownSession))
+        , cwd_(std::move(cwd)) {}
 
     std::vector<ListEntry> list(std::string &error) override {
         std::vector<ListEntry> entries;
@@ -210,7 +216,8 @@ public:
                                     // list already says.
                 }
             }
-            entries.push_back(makeListEntry(entry, info ? &*info : nullptr));
+            entries.push_back(
+                makeListEntry(entry, info ? &*info : nullptr, own_));
         }
         return entries;
     }
@@ -227,6 +234,40 @@ public:
         return pane;
     }
 
+    std::string create(const NewTerminal &what,
+                       int columns,
+                       int rows,
+                       std::string &error) override {
+        std::string why;
+        if (!what.command.empty()) {
+            error = "Starting a program needs the newer daemon request (not in "
+                    "this build yet)";
+            return {};
+        }
+        const auto reply = askDaemon(
+            socket_,
+            mtd::CreateSession{cwd_,
+                               std::uint16_t(std::clamp(columns, 1, 500)),
+                               std::uint16_t(std::clamp(rows, 1, 500))},
+            why);
+        const auto *created =
+            reply ? std::get_if<mtd::SessionCreated>(&*reply) : nullptr;
+        if (!created) {
+            const auto *refused =
+                reply ? std::get_if<mtd::ControlError>(&*reply) : nullptr;
+            error = "The daemon could not start a terminal: " +
+                    (refused ? refused->reason : daemonProblem(why));
+            return {};
+        }
+        if (!what.name.empty() && mtd::validTerminalName(what.name)) {
+            std::string ignored;
+            askDaemon(socket_,
+                      mtd::SetName{created->id, what.name},
+                      ignored); // A name is a nicety.
+        }
+        return created->id;
+    }
+
 private:
     std::string daemonProblem(const std::string &why) const {
         if (why.find("No such file") != std::string::npos ||
@@ -236,6 +277,8 @@ private:
         return "Cannot ask the daemon: " + why;
     }
     std::string socket_;
+    std::string own_;
+    std::string cwd_;
 };
 
 } // namespace
@@ -250,15 +293,33 @@ int runAttachTty(const DaemonOptions &daemonIn) {
     }
     // A daemon of an incompatible version is refused, or a new one offered next
     // to it.
-    if (const auto error = selectDaemon(daemon, tunnel != nullptr, false);
+    if (const auto error =
+            selectDaemon(daemon, tunnel != nullptr, daemon.attachNew);
         !error.empty()) {
         std::cerr << "matterm: " << error << "\n";
         return 1;
     }
-    DaemonSource source(daemonSocket(daemon.socketPath));
-    (void)::signal(SIGPIPE, SIG_IGN); // A write to a gone terminal is an error return, not a signal.
+    const char *ownText = std::getenv(
+        "MATTERM_SESSION"); // Set by the daemon in every terminal it starts.
+    const std::string own = ownText ? ownText : "";
+    std::string cwd;
+    if (tunnel == nullptr) {
+        char buffer[4096];
+        if (::getcwd(buffer, sizeof buffer)) {
+            cwd = buffer;
+        }
+    }
+    DaemonSource source(daemonSocket(daemon.socketPath), own, cwd);
+    (void)::signal(SIGPIPE, SIG_IGN); // A write to a gone terminal is an error
+                                      // return, not a signal.
     TtyHost host;
-    AttachTty mode(host, source);
+    AttachTty::Options options;
+    options.ownSession = own;
+    options.startNew = daemon.attachNew;
+    options.exitWhenEnded = daemon.attachNew;
+    options.newTerminal.name = daemon.attachName;
+    options.newTerminal.command = daemon.attachCommand;
+    AttachTty mode(host, source, options);
     mode.start(steadyMs());
     std::int64_t lastInput = steadyMs();
     bool running = true;
@@ -304,5 +365,8 @@ int runAttachTty(const DaemonOptions &daemonIn) {
         mode.tick(now);
     }
     host.restore();
-    return 0;
+    if (!mode.farewell().empty()) {
+        std::cout << mode.farewell() << "\n"; // After the terminal is back.
+    }
+    return mode.exitCode();
 }

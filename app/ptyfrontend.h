@@ -16,6 +16,10 @@ struct DaemonOptions {
     bool assumeYes = false;     // --yes: copy it without asking.
     std::string tabActivity = "icon"; // --tab-activity icon|pulse|off (--no-tab-pulse = off)
     bool borderless = true;           // Our own frame (the default; --system-frame turns it off, docs/TABS_PLAN.md section 16)
+    // matterm --attach-tty / matterm-attach: start a terminal at once (--new [--name N] [-- COMMAND...]).
+    bool attachNew = false;
+    std::string attachName;
+    std::vector<std::string> attachCommand;
     bool layoutSmoke = false;         // --pty-layout-smoke-test (hidden): Detach tab, then Attach tab... is offered
 };
 

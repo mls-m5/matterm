@@ -202,4 +202,19 @@ TEST_CASE("Deleting a saved session asks first, defaults to Cancel and warns whe
     EXPECT_EQ(deleteSessionDialog("work\x1b", true)->selected(), std::size_t(1));
 }
 
+TEST_CASE("The terminal the window runs in is marked in the attach list") {
+    AttachableSession own;
+    own.id = "aaaa";
+    own.thisTerminal = true;
+    own.attached = true;
+    AttachableSession other;
+    other.id = "bbbb";
+    const auto items = attachItems({own, other});
+    EXPECT_EQ(items.size(), std::size_t(2));
+    EXPECT(items[0].detail.find("(this terminal)") != std::string::npos);
+    EXPECT(items[0].detail.find("another window") == std::string::npos);
+    EXPECT(items[1].detail.find("(this terminal)") == std::string::npos);
+    EXPECT(std::string(thisTerminalNotice()).find("feed it to itself") != std::string::npos);
+}
+
 TEST_SUIT_END

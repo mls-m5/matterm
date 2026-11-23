@@ -134,6 +134,9 @@ void printUsage(std::ostream &out, const char *program) {
            "many terminals end).\n"
            "                       Works for any version; name one with "
            "--daemon-socket if several run.\n"
+           "  --new [--name N] [-- COMMAND...]\n"
+           "                       With --attach-tty: start a terminal (your shell, or COMMAND) in the\n"
+           "                       daemon and attach to it at once; the program ends the client.\n"
            "  --smooth-cursor      Animate cursor movement (native PTY only; "
            "default: off).\n"
            "  --record-output FILE Record raw PTY output to a new file (max 64 "
@@ -494,6 +497,8 @@ int main(int argc, char **argv) {
     bool systemFrameFlag = false;
     bool windowTestOnly = false;
     bool attachTty = false;
+    bool attachNew = false;
+    std::string attachName;
     bool daemonList = false, daemonStop = false;
     std::string tabActivity = "icon";
     std::string daemonSocket;
@@ -563,6 +568,12 @@ int main(int argc, char **argv) {
         }
         else if (arg == "--attach-tty") {
             attachTty = true;
+        }
+        else if (arg == "--new") {
+            attachNew = true;
+        }
+        else if (arg == "--name" && i + 1 < argc) {
+            attachName = argv[++i];
         }
         else if (arg == "--daemon-list") {
             daemonList = true;
@@ -638,12 +649,12 @@ int main(int argc, char **argv) {
             valid = false;
         }
     }
-    const bool daemonConflict = !command.empty() || inputPath || smokeTest || showcase ||
+    const bool daemonConflict = (!command.empty() && !attachTty) || inputPath || smokeTest || showcase ||
                                 ptySmokeTest || ptyTabsSmokeTest;
     if (useDaemon && !daemonExplicit && daemonConflict) {
         useDaemon = false; // A command, input file or test: run it here.
     }
-    if (useDaemon && (!command.empty() || inputPath || smokeTest || showcase || ptySmokeTest ||
+    if (useDaemon && ((!command.empty() && !attachTty) || inputPath || smokeTest || showcase || ptySmokeTest ||
                       ptyTabsSmokeTest)) {
         std::cerr << "--daemon runs the daemon's shell ($SHELL); it cannot be combined with a "
                      "command, --input, --showcase or the smoke tests\n";
@@ -711,16 +722,24 @@ int main(int argc, char **argv) {
         std::cerr << "--pty-layout-smoke-test needs the daemon and nothing else (no command, no other mode)\n";
         return 1;
     }
+    if ((attachNew || !attachName.empty()) && !attachTty) {
+        std::cerr << "--new and --name belong to --attach-tty\n";
+        return 1;
+    }
+    if (!attachNew && !attachName.empty()) {
+        std::cerr << "--name names the terminal that --new starts\n";
+        return 1;
+    }
     if (attachTty) {
         if (!valid) {
             printUsage(std::cerr, argv[0]);
             return 1;
         }
-        if (inputPath || recordPath || smokeTest || showcase || ptySmokeTest || ptyTabsSmokeTest || !command.empty() ||
-            smoothCursor || !useDaemon || borderlessFlag || systemFrameFlag) {
+        if (inputPath || recordPath || smokeTest || showcase || ptySmokeTest || ptyTabsSmokeTest ||
+            (!command.empty() && !attachNew) || smoothCursor || !useDaemon || borderlessFlag || systemFrameFlag) {
             std::cerr << "--attach-tty takes over a terminal of the daemon, without a window: it cannot be combined "
-                         "with a command, --no-daemon, --input, --showcase, --record-output, the frame options or "
-                         "the smoke tests\n";
+                         "with --no-daemon, --input, --showcase, --record-output, the frame options or the smoke "
+                         "tests, and a command only with --new\n";
             return 1;
         }
 #ifdef MATTERM_HAS_ATTACH_TTY
@@ -732,6 +751,9 @@ int main(int argc, char **argv) {
             options.sshArguments = sshArguments;
             options.installAlways = daemonInstall;
             options.assumeYes = assumeYes;
+            options.attachNew = attachNew;
+            options.attachName = attachName;
+            options.attachCommand = command;
             return runAttachTty(options);
         }
         catch (const std::exception &error) {

@@ -211,6 +211,7 @@ struct AttachableSession {
     bool attached = false;            // Some window shows it now.
     bool shared = false;
     bool inThisWindow = false;        // This window shows it (not offered).
+    bool thisTerminal = false;        // The window itself runs inside it (MATTERM_SESSION): attaching would loop.
     std::string name;                 // Given by the owner (Rename terminal...); empty: none.
 };
 
@@ -259,7 +260,8 @@ inline std::vector<ui::PickList::Item> attachItems(const std::vector<AttachableS
         std::string command;
         for (const auto &word : s.command) command += (command.empty() ? "" : " ") + word;
         std::string detail = command.empty() ? "shell" : attachdetail::plain(command, 24);
-        if (s.attached) detail += " (in another window)";
+        if (s.thisTerminal) detail += " (this terminal)";
+        else if (s.attached) detail += " (in another window)";
         if (s.shared) detail += " (shared)";
         // A named terminal is listed by its name, with the folder after it.
         const std::string label = s.name.empty() ? shortFolder(s.cwd)
@@ -267,6 +269,11 @@ inline std::vector<ui::PickList::Item> attachItems(const std::vector<AttachableS
         items.push_back({label, detail, std::string(action) + ":" + s.id});
     }
     return items;
+}
+
+// What the owner is told when an attach is refused because the window itself runs in that terminal.
+inline const char *thisTerminalNotice() {
+    return "you are in that terminal: attaching it would feed it to itself";
 }
 
 // What the owner is told when another window took a terminal over.

@@ -15,7 +15,13 @@ int main(int argc, char **argv) {
         if (arg == "--attach-tty") {
             continue; // So that the same test drives matterm and this.
         }
-        if (arg == "--daemon-socket" && i + 1 < argc) {
+        if (arg == "--new") {
+            options.attachNew = true;
+        }
+        else if (arg == "--name" && i + 1 < argc) {
+            options.attachName = argv[++i];
+        }
+        else if (arg == "--daemon-socket" && i + 1 < argc) {
             options.socketPath = argv[++i];
         }
         else {

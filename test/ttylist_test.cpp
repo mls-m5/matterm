@@ -91,27 +91,30 @@ TEST_CASE("Control characters in a command line never reach the screen") {
 TEST_CASE(
     "Up, down, first, last and digits move the chosen row inside the list") {
     ListModel model = threeRows();
-    EXPECT_EQ(model.index(), std::size_t(0));
+    EXPECT_EQ(model.index(),
+              std::size_t(1)); // The first terminal, not "New terminal".
     model.key(ListKey::Up);
-    EXPECT_EQ(model.index(), std::size_t(0));
-    model.key(ListKey::Down);
-    model.key(ListKey::Down);
-    model.key(ListKey::Down);
-    EXPECT_EQ(model.index(), std::size_t(2));
+    EXPECT(model.newSelected());
+    model.key(ListKey::Up);
+    EXPECT(model.newSelected());
+    for (int i = 0; i < 5; ++i) {
+        model.key(ListKey::Down);
+    }
+    EXPECT_EQ(model.index(), std::size_t(3));
     model.key(ListKey::First);
     EXPECT_EQ(model.index(), std::size_t(0));
     model.key(ListKey::Last);
-    EXPECT_EQ(model.index(), std::size_t(2));
+    EXPECT_EQ(model.index(), std::size_t(3));
     model.key(ListKey::Digit, 2);
-    EXPECT_EQ(model.index(), std::size_t(1));
-    model.key(ListKey::Digit, 9); // No ninth row: stays.
-    EXPECT_EQ(model.index(), std::size_t(1));
+    EXPECT_EQ(model.index(), std::size_t(2));
+    model.key(ListKey::Digit, 9); // No ninth terminal: stays.
+    EXPECT_EQ(model.index(), std::size_t(2));
 }
 
 TEST_CASE("Enter opens the chosen terminal, even when it is the only one") {
     ListModel model;
     EXPECT(model.key(ListKey::Open).kind ==
-           ListAction::Kind::None); // Nothing to open.
+           ListAction::Kind::New); // Nothing else to open: a new terminal.
     model.setEntries({makeListEntry(entry("only"), nullptr)});
     const auto action = model.key(ListKey::Open);
     EXPECT(action.kind == ListAction::Kind::Open);
@@ -130,7 +133,26 @@ TEST_CASE("A refresh keeps the chosen terminal when it is still there") {
     EXPECT_EQ(model.selected()->id, std::string("bbbbbbbb22"));
     model.setEntries(
         {makeListEntry(entry("zzz"), nullptr)}); // Gone: back to the first.
-    EXPECT_EQ(model.index(), std::size_t(0));
+    EXPECT_EQ(model.index(), std::size_t(1));
+}
+
+TEST_CASE("\"New terminal\" is the first row, also with n; the terminal this "
+          "program runs in is refused") {
+    ListModel model = threeRows();
+    model.key(ListKey::First);
+    EXPECT(model.key(ListKey::Open).kind == ListAction::Kind::New);
+    EXPECT(model.key(ListKey::New).kind == ListAction::Kind::New);
+    ListModel own;
+    own.setEntries({makeListEntry(entry("mine"), nullptr, "mine"),
+                    makeListEntry(entry("other"), nullptr, "mine")});
+    EXPECT(own.entries()[0].thisTerminal && !own.entries()[1].thisTerminal);
+    EXPECT(own.key(ListKey::Open).kind ==
+           ListAction::Kind::None); // The chosen one is the first terminal.
+    EXPECT(own.message().find("feed it to itself") != std::string::npos);
+    own.key(ListKey::Down);
+    EXPECT(own.key(ListKey::Open).kind == ListAction::Kind::Open);
+    const ::tty::Canvas image = drawn(own, 70, 10);
+    EXPECT(rowText(image, 3).find("(this terminal)") != std::string::npos);
 }
 
 TEST_CASE("Keys of the host terminal map to list keys") {
@@ -153,6 +175,7 @@ TEST_CASE("Keys of the host terminal map to list keys") {
     EXPECT(map("j") == ListKey::Down);
     EXPECT(map("k") == ListKey::Up);
     EXPECT(map("r") == ListKey::Refresh);
+    EXPECT(map("n") == ListKey::New);
     EXPECT(map("3") == ListKey::Digit && digit == 3);
     EXPECT(map("x") == ListKey::None);
 }
@@ -162,14 +185,15 @@ TEST_CASE("The list is drawn with a header, the rows, the mark for in use and "
     const ListModel model = threeRows();
     const ::tty::Canvas image = drawn(model, 70, 10);
     EXPECT_EQ(rowText(image, 0), std::string(" matterm: running terminals"));
-    EXPECT(rowText(image, 2).find("1 build") != std::string::npos);
-    EXPECT(rowText(image, 3).find("2 terminal bbbbbbbb") != std::string::npos);
-    EXPECT(rowText(image, 3).find("(in use)") != std::string::npos);
-    EXPECT(rowText(image, 2).find("(in use)") == std::string::npos);
+    EXPECT(rowText(image, 2).find("n New terminal") != std::string::npos);
+    EXPECT(rowText(image, 3).find("1 build") != std::string::npos);
+    EXPECT(rowText(image, 4).find("2 terminal bbbbbbbb") != std::string::npos);
+    EXPECT(rowText(image, 4).find("(in use)") != std::string::npos);
+    EXPECT(rowText(image, 3).find("(in use)") == std::string::npos);
     EXPECT(rowText(image, 8).empty()); // The chosen row is free: no remark.
     EXPECT(rowText(image, 9).find("q quit") != std::string::npos);
     // The chosen row is drawn inverted: dark on light.
-    EXPECT(image.at(5, 2).background.r > image.at(5, 3).background.r);
+    EXPECT(image.at(5, 3).background.r > image.at(5, 4).background.r);
 }
 
 TEST_CASE(
@@ -179,7 +203,7 @@ TEST_CASE(
         info("/home/someone/projects/a/very/deep/folder/tree/that/goes/on");
     model.setEntries({makeListEntry(entry("aaaaaaaa11", true), &far)});
     const ::tty::Canvas image = drawn(model, 40, 8);
-    EXPECT(rowText(image, 2).find("(in use)") != std::string::npos);
+    EXPECT(rowText(image, 3).find("(in use)") != std::string::npos);
     EXPECT(rowText(image, 6).find("opening takes it over") !=
            std::string::npos);
 }
@@ -187,7 +211,7 @@ TEST_CASE(
 TEST_CASE("An empty list says so and still has its footer") {
     ListModel model;
     const ::tty::Canvas image = drawn(model, 60, 8);
-    EXPECT(rowText(image, 2).find("No terminals are running") !=
+    EXPECT(rowText(image, 3).find("No terminals are running") !=
            std::string::npos);
     EXPECT(rowText(image, 7).find("q quit") != std::string::npos);
 }

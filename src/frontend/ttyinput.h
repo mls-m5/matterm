@@ -23,14 +23,18 @@ namespace frontend::ttymode {
 // prompt" key of telnet and ssh's cousins; programs almost never use it.
 inline constexpr char kLeaveByte = 0x1d;
 inline constexpr const char *kLeaveName = "Ctrl+]";
+// The prefix key, Ctrl+B: the same as the window's (src/frontend/prefixkeys.h).
+// Twice sends one to the program.
+inline constexpr char kPrefixByte = 0x02;
 
 struct InputEvent {
     enum class Kind {
         Bytes, // Anything not decoded: sent on as it came.
         Key,
         Mouse,
-        Paste, // Text of a bracketed paste, markers removed.
-        Leave, // The leave key.
+        Paste,  // Text of a bracketed paste, markers removed.
+        Leave,  // The leave key.
+        Prefix, // Ctrl+B, the prefix of the commands (like the window's).
     };
     Kind kind = Kind::Bytes;
     std::string text; // Bytes, Paste.
@@ -316,6 +320,13 @@ private:
                 ++pos;
                 continue;
             }
+            if (c == static_cast<unsigned char>(kPrefixByte)) {
+                InputEvent e;
+                e.kind = InputEvent::Kind::Prefix;
+                out.push_back(e);
+                ++pos;
+                continue;
+            }
             if (c == '\r') {
                 out.push_back(key(InputEncoder::Key::Enter));
                 ++pos;
@@ -323,7 +334,8 @@ private:
             }
             std::size_t end = pos + 1;
             while (end < in.size() && in[end] != 0x1b &&
-                   in[end] != kLeaveByte && in[end] != '\r') {
+                   in[end] != kLeaveByte && in[end] != kPrefixByte &&
+                   in[end] != '\r') {
                 ++end;
             }
             rawRun(pos, end);
@@ -391,6 +403,7 @@ inline std::string encodeForProgram(const InputEvent &event,
         return InputEncoder::mouse(event.mouse, modes);
     case InputEvent::Kind::Paste:
         return InputEncoder::paste(event.text, modes);
+    case InputEvent::Kind::Prefix:
     case InputEvent::Kind::Leave:
         break;
     }

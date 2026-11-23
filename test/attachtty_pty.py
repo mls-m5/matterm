@@ -19,9 +19,11 @@ def check(ok, what):
 
 
 class Tty:
-    def __init__(self, socket, rows=24, cols=80, extra=()):
+    def __init__(self, socket, rows=24, cols=80, extra=(), env=None):
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
+            if env:
+                os.environ.update(env)
             os.execv(matterm, [matterm, "--attach-tty", "--daemon-socket", socket, *extra])
         self.resize(rows, cols, signal_child=False)
         self.raw = b""
@@ -88,7 +90,8 @@ helper = subprocess.Popen([helper_path, "--socket", socket, "--sessions", "1", "
                            "--max-seconds", "120"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
 ttys = []
 try:
-    json.loads(helper.stdout.readline())
+    started = json.loads(helper.stdout.readline())
+    first_id = started["sessions"][0]["id"]
 
     a = Tty(socket)
     ttys.append(a)
@@ -96,29 +99,29 @@ try:
     check("\x1b[?1049h" in a.raw.decode("utf8", "replace"), "the alternate screen is used")
     a.send(b"\r")
     check(a.wait_for("hello-from-daemon"), "Enter takes the terminal over and the screen is rebuilt from the replay")
-    check(a.wait_for("Ctrl+] leave"), "the first time, the leave key is announced")
+    check(a.wait_for("Ctrl+B"), "the status line names the prefix key")
     a.send(b"echo typed-here; stty size\r")
-    check(a.wait_for("typed-here") and a.wait_for("24 80"), "typing reaches the terminal, which has the size of the screen")
+    check(a.wait_for("typed-here") and a.wait_for("23 80"), "typing reaches the terminal, which has the screen minus the status line")
 
     a.resize(30, 100)
     a.pump(0.5)
     a.send(b"stty size\r")
-    check(a.wait_for("30 100"), "resizing the screen resizes the terminal")
+    check(a.wait_for("29 100"), "resizing the screen resizes the terminal")
 
     b = Tty(socket, 24, 80)
     ttys.append(b)
     check(b.wait_for("(in use)"), "the list of a second client says that the terminal is in use")
     b.send(b"\r")
     check(b.wait_for("hello-from-daemon"), "the second client takes it over")
-    check(a.wait_for("Taken over by another client", 10), "the first client is told that it was taken over")
+    check(a.wait_for("Taken", 10), "the first client is told that it was taken over")
     a.send(b"zzz")
     b.pump(0.5)
     check("zzz" not in b.text(), "keys typed while taken over are not sent")
     b.send(b"echo from-b\r")
     check(b.wait_for("from-b"), "the second client types")
     a.send(b"\r")
-    check(a.wait_for("from-b") and "Takenover" not in a.text()[-300:], "Enter takes it back, with what happened meanwhile")
-    check(b.wait_for("Taken over by another client", 10), "and the second client is kicked in turn")
+    check(a.wait_for("from-b") and "Taken" not in a.text()[-300:], "Enter takes it back, with what happened meanwhile")
+    check(b.wait_for("Taken", 10), "and the second client is kicked in turn")
 
     b.send(b"\x1d")
     check(b.wait_for("Left terminal") or b.wait_for("keeps running"), "the leave key goes back to the list")
@@ -141,6 +144,50 @@ try:
     c.wait_for("keeps running")
     c.send(b"\x03")
     check(c.wait_exit(), "Ctrl+C in the list ends the program")
+
+
+    # The terminal this program runs in cannot be attached (the daemon sets MATTERM_SESSION; here we do).
+    f = Tty(socket, env={"MATTERM_SESSION": first_id})
+    ttys.append(f)
+    check(f.wait_for("(this terminal)"), "the own terminal is marked in the list")
+    f.send(b"\r")
+    check(f.wait_for("feed it to itself"), "and cannot be chosen")
+    f.send(b"q")
+    check(f.wait_exit(), "the list still ends with q")
+
+    # --new: a terminal of its own, left with Ctrl+B d, still running afterwards; the program ending ends the client.
+    g = Tty(socket, extra=("--new", "--name", "smoke"))
+    ttys.append(g)
+    check(g.wait_for("Ctrl+B"), "--new attaches to a new terminal at once, with the status line")
+    g.send(b"echo made-by-new; stty size\r")
+    check(g.wait_for("made-by-new") and g.wait_for("23 80"), "typing works there")
+    g.send(b"\x02")
+    check(g.wait_for("sends"), "Ctrl+B shows the keys")
+    g.send(b"d")
+    check(g.wait_exit() and os.WIFEXITED(g.status) and os.WEXITSTATUS(g.status) == 0, "Ctrl+B d ends the client")
+    check("keeps running" in g.text().replace(" ", "") or "keepsrunning" in g.text(), "and says that the terminal keeps running")
+    h = Tty(socket)
+    ttys.append(h)
+    check(h.wait_for("smoke"), "the named terminal is in the list")
+    h.send(b"q")
+    h.wait_exit()
+    k = Tty(socket, extra=("--new",))
+    ttys.append(k)
+    check(k.wait_for("Ctrl+B"), "another --new")
+    k.send(b"exit 3\r")
+    check(k.wait_exit() and os.WIFEXITED(k.status) and os.WEXITSTATUS(k.status) == 3, "when the program ends the client ends with its exit code")
+    check(k.wait_for("exit code 3") or "exitcode3" in k.text(), "and says how it ended")
+
+    # From the list: n makes a terminal; the program ending brings back the list.
+    m = Tty(socket)
+    ttys.append(m)
+    m.wait_for("terminal")
+    m.send(b"n")
+    check(m.wait_for("Ctrl+B"), "n in the list starts a new terminal")
+    m.send(b"exit 5\r")
+    check(m.wait_for("exit code 5") and m.wait_for("running terminals"), "when its program ends the list is back, saying so")
+    m.send(b"q")
+    check(m.wait_exit(), "and q ends")
 
     # SIGTERM (a closed ssh session, a kill) puts the terminal back too.
     e = Tty(socket)
