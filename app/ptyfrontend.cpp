@@ -1,6 +1,8 @@
 #include "ptyfrontend.h"
 #include "daemonconnect.h"
 #include "restorecwd.h"
+#include "restoreprograms.h"
+#include "ui/programlist.h"
 
 #include "borderless.h"
 
@@ -1017,6 +1019,20 @@ int runPtyFrontend(const char *font,
             autoSavedName = name;
         }
     };
+    // Notes and typed text for a restored pane wait until its connection runs: a daemon pane that is still
+    // connecting would refuse the input and lose the notes to the replay.
+    struct Delivery {
+        PaneId pane = 0;
+        std::string note;
+        std::string input; // Typed into the shell after the note; may be empty.
+        Uint64 until = 0;  // Dropped after this (the pane never came up).
+    };
+    std::vector<Delivery> deliveries;
+    const auto deliver = [&](PaneId pane, std::string note, std::string input) {
+        deliveries.push_back({pane, std::move(note), std::move(input), SDL_GetTicks64() + 15000});
+    };
+    // The programs of the session just opened, waiting for the answer to "Start N programs again?".
+    std::vector<OfferedProgram> pendingPrograms;
     const auto restoreByName = [&](const std::string &name) {
         const auto snapshot = sessionFiles.load(name);
         if (!snapshot) {
@@ -1029,6 +1045,8 @@ int runPtyFrontend(const char *font,
             nextCwd = cwdToRequest(saved.cwd, remoteDaemon, !saved.cwd.empty() && std::filesystem::is_directory(saved.cwd, ec));
         });
         nextCwd.clear();
+        std::vector<ProgramCandidate> candidates;
+        pendingPrograms.clear();
         for (const auto &restored : report.panes) {
             NativePane *pane = workspace.pane(restored.id);
             if (!pane || !restored.saved) {
@@ -1040,20 +1058,38 @@ int runPtyFrontend(const char *font,
             const bool folderGone = remoteDaemon ? restoredElsewhere(saved.cwd, pane->daemon ? paneState(*pane).cwd : std::string())
                                                  : !saved.cwd.empty() && !std::filesystem::is_directory(saved.cwd, ec);
             if (folderGone) {
-                pane->v.note("restored without its folder (gone): " + CloseRequest::shown(saved.cwd));
+                deliver(restored.id, "restored without its folder (gone): " + CloseRequest::shown(saved.cwd), {});
             }
             if (!saved.text.empty()) {
                 std::string crlf;
                 for (const char c : saved.text) {
                     crlf += c == '\n' ? std::string("\r\n") : std::string(1, c);
                 }
-                pane->v.note("previous screen:\r\n" + crlf);
+                deliver(restored.id, "previous screen:\r\n" + crlf, {});
             }
-            if (const auto offer = offerText(saved); !offer.empty()) {
-                pane->v.note(offer);
+            // A program that can be started again is asked about once, below; the others (folder gone, no
+            // terminal) only get the offer on the prompt line.
+            ProgramCandidate candidate;
+            candidate.pane = restored.id;
+            candidate.saved = saved;
+            candidate.folderGone = folderGone;
+            candidate.noTerminal = pane->v.ended() || (daemonOptions.enabled && !pane->link && !pane->daemon);
+            if (!offeredPrograms({candidate}).empty()) {
+                candidates.push_back(std::move(candidate));
+            }
+            else if (const auto offer = offerText(saved); !offer.empty()) {
                 // On the prompt line, without a newline: the owner presses Enter, edits or ignores it.
-                send(*pane, rerunInput(saved));
+                deliver(restored.id, offer, rerunInput(saved));
             }
+        }
+        pendingPrograms = offeredPrograms(candidates);
+        if (!pendingPrograms.empty()) {
+            std::vector<std::string> lines;
+            for (const auto &program : pendingPrograms) {
+                lines.push_back(program.line);
+            }
+            wv.pushLayer(std::make_unique<ui::ProgramListDialog>(startQuestion(pendingPrograms.size()), std::move(lines),
+                                                                 restoreaction::start, restoreaction::skip));
         }
         if (report.refused > 0) {
             notify("session partly restored: no room for everything");
@@ -1184,6 +1220,24 @@ int runPtyFrontend(const char *font,
                 }
                 else if (result.empty) {
                     running = false;
+                }
+            }
+        }
+        else if (id == restoreaction::start || id == restoreaction::skip) {
+            // The answer to "Start N programs again?": type the commands and Enter, or leave them on the
+            // prompt lines as before. Panes that were closed meanwhile are skipped.
+            const auto programs = std::move(pendingPrograms);
+            pendingPrograms.clear();
+            for (const auto &program : programs) {
+                NativePane *pane = workspace.pane(program.pane);
+                if (!pane) {
+                    continue;
+                }
+                if (id == restoreaction::start) {
+                    deliver(program.pane, "starting again: " + CloseRequest::shown(program.command), startInput(program));
+                }
+                else if (const auto offer = offerText(program.saved); !offer.empty()) {
+                    deliver(program.pane, offer, rerunInput(program.saved));
                 }
             }
         }
@@ -1658,7 +1712,13 @@ int runPtyFrontend(const char *font,
             break;
         case 1:
             expectThat(connected(workspace.focusedPane()), "the first terminal is attached to the daemon");
-            if (variant == "cwd") {
+            if (variant == "programs" || variant == "programs-skip") {
+                handleAction("session.open:progtest");
+                expectThat(wv.hasLayer() && pendingPrograms.size() == 2, "Open session asks once about the two programs");
+                handleAction(variant == "programs" ? restoreaction::start : restoreaction::skip);
+                later(2500);
+            }
+            else if (variant == "cwd") {
                 // A saved session whose folders are known to the daemon's computer: one exists, one does not.
                 handleAction("session.open:cwdtest");
                 later(2500);
@@ -1680,6 +1740,21 @@ int runPtyFrontend(const char *font,
             }
             break;
         case 2:
+            if (variant == "programs" || variant == "programs-skip") {
+                std::string all;
+                workspace.forEachPane([&](PaneId, NativePane &p, bool) { all += visibleText(p.v.model()) + "\n"; });
+                if (variant == "programs") {
+                    expectThat(all.find("starting again: sleep 1") != std::string::npos, "Start them types the programs");
+                    expectThat(all.find("was running") == std::string::npos, "and leaves no prompt-line offers");
+                }
+                else {
+                    expectThat(all.find("was running: sleep 1") != std::string::npos, "Not now leaves the prompt-line offers");
+                    expectThat(all.find("starting again") == std::string::npos, "and starts nothing");
+                }
+                scriptDone = true;
+                running = false;
+                break;
+            }
             if (variant == "cwd") {
                 const char *okText = std::getenv("MATTERM_SMOKE_CWD_OK");
                 const char *missingText = std::getenv("MATTERM_SMOKE_CWD_MISSING");
@@ -2398,6 +2473,22 @@ int runPtyFrontend(const char *font,
                 ended.push_back(id);
             }
         });
+        for (auto it = deliveries.begin(); it != deliveries.end();) {
+            NativePane *pane = workspace.pane(it->pane);
+            const bool up = pane && (!pane->daemon || pane->daemon->session().state() == ClientSession::State::Running);
+            if (up) {
+                pane->v.note(it->note);
+                if (!it->input.empty()) {
+                    send(*pane, it->input);
+                }
+            }
+            if (up || !pane || SDL_GetTicks64() > it->until) {
+                it = deliveries.erase(it);
+            }
+            else {
+                ++it;
+            }
+        }
         for (const PaneId id : ended) {
             if (auto *pane = workspace.pane(id)) {
                 lastExit = pane->exitStatus();

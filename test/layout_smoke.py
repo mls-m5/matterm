@@ -30,13 +30,24 @@ try:
     ok_dir = tmp + "/okdir"
     os.makedirs(ok_dir)
     missing_dir = tmp + "/missing-on-the-other-computer"
-    for variant in ("", "detach-only", "check", "cwd"):
+    for variant in ("", "detach-only", "check", "cwd", "programs", "programs-skip"):
         run_env = dict(env)
         run_env["MATTERM_LAYOUT_SMOKE"] = variant
         if variant == "":
             shutil.rmtree(tmp + "/config", ignore_errors=True)
         if variant == "detach-only":
             shutil.rmtree(tmp + "/config", ignore_errors=True)
+        if variant in ("programs", "programs-skip"):
+            shutil.rmtree(tmp + "/config", ignore_errors=True)
+            sessions = tmp + "/config/matterm/sessions"
+            os.makedirs(sessions, mode=0o700)
+            os.chmod(tmp + "/config/matterm", 0o700)
+            os.chmod(tmp + "/config", 0o700)
+            node = ('{"split":"h","ratio":500,"a":{"pane":{"cwd":"%s","command":["sleep","1"]}},'
+                    '"b":{"pane":{"cwd":"%s","command":["sleep","1"]}}}' % (ok_dir, ok_dir))
+            with open(sessions + "/progtest.json", "w") as f:
+                f.write('{"version":1,"name":"progtest","saved":1,"active":0,"tabs":[{"title":"","focus":0,"layout":%s}]}' % node)
+            os.chmod(sessions + "/progtest.json", 0o600)
         if variant == "cwd":
             shutil.rmtree(tmp + "/config", ignore_errors=True)
             sessions = tmp + "/config/matterm/sessions"
