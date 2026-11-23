@@ -51,6 +51,11 @@ TEST_CASE("Totals weight CPU by actual partial interval and merge samples") {
            std::string::npos);
     EXPECT(perf::verdict({}) == "unknown");
 }
+TEST_CASE("Numeric formatting bounds precision and does not truncate doubles") {
+    EXPECT(perf::number(std::numeric_limits<double>::max()).size() > 300u);
+    EXPECT_EQ(perf::number(1.25, 8), std::string("1.250000"));
+    EXPECT_EQ(perf::number(1.25, -1), std::string("1"));
+}
 TEST_CASE("Writer flushes partial intervals and finishes exactly once") {
     const std::string path = "/tmp/matterm-perflog-" + std::to_string(getpid());
     ::unlink(path.c_str());
