@@ -219,6 +219,9 @@ These describe much more functionality than matterm currently implements.
 - [ ] Animated text reveal: demo pacing first, then an opt-in renderer effect for the regular terminal. See docs/tasks/text-reveal-animation.md.
 - [x] Mattrix OS as a separate terminal program (`mattrix`, see docs/FAKEOS.md; original note:): a standalone binary (e.g. `mattrix`) running the fakeos core in a regular terminal, building on `matterm-demo --tty`. Name it "Mattrix OS" in its own text so it is not confused with matterm (the emulator); web and native-window demos can say "powered by matterm". Renderer-only effects (smooth cursor, fades) need simpler tty fallbacks (256-colour steps). Distribution (install target, static binary) undecided.
 - [ ] Session ideas after the tmux comparison (checkpoints, scrollback spill to disk, shell-integration marks): docs/MULTI_TERMINAL.md section 12. Not scheduled.
+- [ ] Later, owner thinks about it (2026-11-23): the browser client as an installable web app (PWA:
+  an icon on the phone's home screen, full screen, no address bar; little code, still needs a
+  reachable server) and/or a thin Android app. For now the phone uses Termux with `matmux` over ssh.
 - [ ] Replay: measure, batch and checkpoint (owner's notes, 2026-11-23; docs/tasks/replay-performance.md).
   After a reattach the daemon's replay arrives in one large batch and the pane visibly scrolls
   through it while it is processed. Ideas: (1) measure start-up and reattach time (restoring a
