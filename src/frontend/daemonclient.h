@@ -144,8 +144,20 @@ inline std::optional<std::string> createTerminal(
     const mtd::CreateTerminal &request,
     std::string &error) {
     auto reply = askDaemon(socketPath, request, error);
-    if (!reply && request.command.empty() && request.name.empty() &&
-        error.find("closed") != std::string::npos) {
+    // An older daemon does not know the request: it answers "bad control
+    // message" (or just closes the connection).
+    const auto *first =
+        reply ? std::get_if<mtd::ControlError>(&*reply) : nullptr;
+    const bool oldDaemon =
+        (!reply && error.find("closed") != std::string::npos) ||
+        (first && first->code == mtd::ControlErrorCode::BadMessage);
+    if (oldDaemon) {
+        if (!request.command.empty() || !request.name.empty()) {
+            error =
+                "this daemon is older than 1.3.3 and cannot start a program or "
+                "give a name; stop it (matmux --daemon-stop) and try again";
+            return std::nullopt;
+        }
         error.clear();
         reply = askDaemon(
             socketPath,
