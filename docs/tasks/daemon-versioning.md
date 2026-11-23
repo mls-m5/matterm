@@ -51,3 +51,10 @@ clang-tidy, the integrator runs it), small commits, feature descriptions in
 - The installed file names carry the version: `matterm-daemon-<format>.<breaking>.<additive>-<hash8>` and the same for `matterm-attach-...` (today the name is the content hash). Lists (`--daemon-list`, install messages) sort by the numbers, as numbers (1.10.0 after 1.9.0). A running file is never overwritten.
 - Cleanup of old versions is done by the installer (`--daemon-install`) after it has copied the new files: only files matching those two name patterns in matterm's own install directory; never a file that a process runs (`/proc/*/exe`); keep the newest older version as a fallback; no question, but print what was removed. Not done: the daemon cleaning up after itself (maybe later; ask the owner first).
 - A new daemon/attach binary must be able to stop older daemons (see the stop part above).
+- Several daemons at once (owner's question 2026-11-23): a daemon is identified by its socket. The
+  default socket name carries the version (`daemon-<format>.<breaking>.<additive>.sock` next to
+  today's `daemon.sock`, which stays working for older builds). `--daemon-list` finds all sockets
+  in the runtime directory and asks each (frozen handshake): version, hash, pid, number of
+  terminals. Window and `--attach-tty` pick: one socket -> it; several -> the newest compatible one,
+  with a question when more than one fits; `--daemon-socket` always wins. "Open next to the old one"
+  = a new daemon on its own socket; "stop the old one" names it by socket.
