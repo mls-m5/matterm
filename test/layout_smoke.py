@@ -30,7 +30,7 @@ try:
     ok_dir = tmp + "/okdir"
     os.makedirs(ok_dir)
     missing_dir = tmp + "/missing-on-the-other-computer"
-    for variant in ("", "detach-only", "check", "cwd", "programs", "programs-skip"):
+    for variant in ("", "detach-only", "check", "cwd", "programs", "programs-skip", "emptyshell", "emptyshell-typed"):
         run_env = dict(env)
         run_env["MATTERM_LAYOUT_SMOKE"] = variant
         if variant == "":

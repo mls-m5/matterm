@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -101,14 +102,31 @@ enum class ListKey {
     Refresh,
     Quit,
     Digit,
-    New
+    New,
+    End, // x or Delete: end the chosen terminal (after a question).
+    Yes  // y: the answer "end it" while the question is open.
 };
 
 struct ListAction {
-    enum class Kind { None, Open, New, Refresh, Quit };
+    enum class Kind { None, Open, New, Refresh, Quit, End };
     Kind kind = Kind::None;
-    std::string id; // Open.
+    std::string id;    // Open, End.
+    std::string title; // End: its name, for the note afterwards.
 };
+
+// One line: End "matterm" (vim)? y = end, n/Esc = keep. Names what runs when
+// known, and says when another client has it open.
+inline std::string endQuestion(const ListEntry &entry) {
+    std::string text = "End \"" + entry.title + "\"";
+    if (!entry.what.empty()) {
+        text += " (" + entry.what + ")";
+    }
+    text += "?";
+    if (entry.inUse) {
+        text += " (also open in another client)";
+    }
+    return text + " y = end, n/Esc = keep";
+}
 
 // The rows are "New terminal" first, then the terminals of the daemon.
 class ListModel {
@@ -123,6 +141,14 @@ public:
             if (!chosen.empty() && entries_[i].id == chosen) {
                 index_ = i + 1;
             }
+        }
+        confirming_.clear(); // The list changed under the question.
+        if (anchor_) {       // A terminal was ended: stay near where it was.
+            index_ =
+                entries_.empty()
+                    ? 0
+                    : std::clamp<std::size_t>(*anchor_, 1, entries_.size());
+            anchor_.reset();
         }
     }
     // "New terminal" is the row chosen at first (matmux without arguments)
@@ -155,9 +181,49 @@ public:
     const std::string &message() const {
         return message_;
     }
+    // The question while ending a terminal is asked, else empty.
+    const std::string &question() const {
+        return question_;
+    }
+    // Ending failed: the list did not change, so the row needs no nudge.
+    void cancelAnchor() {
+        anchor_.reset();
+    }
+    bool confirming() const {
+        return !confirming_.empty();
+    }
 
     ListAction key(ListKey key, int digit = 0, int pageSize = 10) {
         ListAction action;
+        if (confirming()) { // The answer is y; anything else keeps the terminal
+                            // (the default).
+            const ListEntry *entry = selected();
+            const bool yes =
+                key == ListKey::Yes && entry && entry->id == confirming_;
+            if (yes) {
+                action.kind = ListAction::Kind::End;
+                action.id = entry->id;
+                action.title = entry->title;
+                anchor_ = index_;
+            }
+            confirming_.clear();
+            question_.clear();
+            return action;
+        }
+        if (key == ListKey::End) {
+            if (const ListEntry *entry = selected()) {
+                if (entry->thisTerminal) {
+                    message_ = "You are in this terminal: ending it would end "
+                               "this program too";
+                }
+                else {
+                    confirming_ = entry->id;
+                    question_ = endQuestion(*entry);
+                    message_.clear();
+                }
+            }
+            return action;
+        }
         const std::size_t last = entries_.size();
         switch (key) {
         case ListKey::Up:
@@ -210,6 +276,8 @@ public:
         case ListKey::Quit:
             action.kind = ListAction::Kind::Quit;
             break;
+        case ListKey::End: // Handled above.
+        case ListKey::Yes:
         case ListKey::None:
             break;
         }
@@ -221,6 +289,9 @@ private:
     std::size_t index_ = 0;
     bool preferNew_ = false;
     std::string message_;
+    std::string question_;
+    std::string confirming_;            // The id the question is about.
+    std::optional<std::size_t> anchor_; // Where a terminal was ended.
 };
 
 // What a decoded input event means in the list. A digit chooses that row (1-9).
@@ -242,6 +313,8 @@ inline ListKey listKeyOf(const InputEvent &event, int &digit) {
             return ListKey::PageUp;
         case K::PageDown:
             return ListKey::PageDown;
+        case K::Delete:
+            return ListKey::End;
         case K::Enter:
             return ListKey::Open;
         case K::Escape:
@@ -268,6 +341,12 @@ inline ListKey listKeyOf(const InputEvent &event, int &digit) {
             }
             if (c == 'G') {
                 return ListKey::Last;
+            }
+            if (c == 'x' || c == 'X') {
+                return ListKey::End;
+            }
+            if (c == 'y' || c == 'Y') {
+                return ListKey::Yes;
             }
             if (c == 'n' || c == 'N') {
                 return ListKey::New;
@@ -361,11 +440,15 @@ inline void renderList(const ListModel &model, ::tty::Canvas &canvas) {
     if (!model.message().empty()) {
         put(canvas, 1, rows - 2, model.message(), kWarn);
     }
+    if (model.confirming()) {
+        fillRow(canvas, rows - 2, kBarFg, kWarn);
+        put(canvas, 1, rows - 2, model.question(), kBarFg, kWarn, true);
+    }
     fillRow(canvas, rows - 1, kBarFg, kBarBg);
     put(canvas,
         1,
         rows - 1,
-        "Up/Down choose   Enter open   n new   r refresh   q quit",
+        "Up/Down choose  Enter open  n new  x end  r refresh  q quit",
         kBarFg,
         kBarBg);
 }

@@ -1,6 +1,7 @@
 #include "ptyfrontend.h"
 #include "daemonconnect.h"
 #include "restorecwd.h"
+#include "emptyshell.h"
 #include "restoreprograms.h"
 #include "ui/programlist.h"
 
@@ -1153,6 +1154,55 @@ int runPtyFrontend(const char *font,
         }
         return true;
     };
+    // The tab in front, when it is an empty shell (emptyshell.h): its pane, else 0. Asked before an attach
+    // command runs; the tab is closed afterwards by closeEmptyShell().
+    struct EmptyShell {
+        PaneId pane = 0;
+        std::size_t tabs = 0; // The tabs of the window before.
+    };
+    const auto emptyShellNow = [&]() -> EmptyShell {
+        NativePane *pane = workspace.focusedPane();
+        if (!pane || pane->v.ended()) {
+            return {};
+        }
+        ShellFacts facts;
+        facts.panesInTab = activeTabPanes().size();
+        facts.inputBytes = pane->v.inputBytes();
+        facts.scrollbackRows = pane->v.model().historySize();
+        facts.selecting = pane->v.copyMode.has_value() || pane->v.selection.has_value();
+        if (pane->daemon) {
+            std::string error;
+            const auto reply =
+                pane->daemon->sessionId().empty()
+                    ? std::nullopt
+                    : askDaemon(daemonPath, mtd::GetSessionInfo{pane->daemon->sessionId()}, error, 500);
+            if (const auto *info = reply ? std::get_if<mtd::SessionInfo>(&*reply) : nullptr) {
+                facts.probeKnown = true;
+                facts.busy = info->busy;
+            }
+        }
+        else {
+            facts.probeKnown = true;
+            facts.busy = paneState(*pane).busy;
+        }
+        return isEmptyShell(facts) ? EmptyShell{workspace.focusedPaneId(), workspace.tabCount()} : EmptyShell{};
+    };
+    // After the attach worked (a new tab exists): the empty shell goes, and its fresh terminal ends in the
+    // daemon (closing a pane ends its terminal). True when it was closed.
+    const auto closeEmptyShell = [&](const EmptyShell &empty) {
+        if (empty.pane == 0 || workspace.tabCount() <= empty.tabs) {
+            return false; // Nothing to close, or the attach made no tab: never the last one.
+        }
+        NativePane *pane = workspace.pane(empty.pane);
+        if (!pane || pane->v.inputBytes() != 0) {
+            return false;
+        }
+        pane->endInDaemon = true;
+        if (workspace.closePaneAnywhere(empty.pane) == Outcome::Empty) {
+            running = false;
+        }
+        return true;
+    };
     // What the palette offers besides the built-in commands, from the window's state right now.
     const auto paletteExtra = [&] {
         std::vector<CommandEntry> extra = {
@@ -1518,6 +1568,7 @@ int runPtyFrontend(const char *font,
                     wv.pushLayer(takeOverLayoutDialog(layoutName, plan.takeOver));
                 }
                 else {
+                    const EmptyShell empty = emptyShellNow();
                     // Panes are made in the restore's own order, so a terminal is found by its id.
                     std::set<std::string> usable;
                     for (const auto &u : plan.use) {
@@ -1548,7 +1599,8 @@ int runPtyFrontend(const char *font,
                     }
                     else {
                         layoutFiles.remove(layoutName); // It is attached now, no longer detached.
-                        notify("layout '" + layoutName + "' attached");
+                        const bool closed = closeEmptyShell(empty);
+                        notify("layout '" + layoutName + "' attached" + (closed ? "; empty shell closed" : ""));
                     }
                 }
             }
@@ -1576,7 +1628,10 @@ int runPtyFrontend(const char *font,
                 wv.pushLayer(takeOverDialog(sessionId, shortFolder(found->cwd)));
             }
             else {
-                attachSession(sessionId);
+                const EmptyShell empty = emptyShellNow();
+                if (attachSession(sessionId) && closeEmptyShell(empty)) {
+                    notify("empty shell closed");
+                }
             }
         }
         else if (id == daemonaction::attachAll) {
@@ -1592,10 +1647,18 @@ int runPtyFrontend(const char *font,
             }
         }
         else if (id == daemonaction::attachAllGo) {
+            const EmptyShell empty = emptyShellNow();
+            bool any = false;
             for (const auto &s : daemonSessions(false)) {
-                if (!s.attached && !s.inThisWindow && !attachSession(s.id)) {
-                    break;
+                if (!s.attached && !s.inThisWindow) {
+                    if (!attachSession(s.id)) {
+                        break;
+                    }
+                    any = true;
                 }
+            }
+            if (any && closeEmptyShell(empty)) {
+                notify("empty shell closed");
             }
         }
         else if (id == daemonaction::attachCancel) {
@@ -1703,6 +1766,8 @@ int runPtyFrontend(const char *font,
         SDL_PushEvent(&e);
     };
     // --pty-layout-smoke-test: Detach tab, then the palette offers Attach tab... (docs/tasks/daemon-versioning.md).
+    std::string smokeAttachId;
+    std::size_t smokeCount = 0;
     const auto layoutScript = [&] {
         const auto later = [&](Uint64 ms) { scriptDue = SDL_GetTicks64() + ms; };
         const auto connected = [](const NativePane *p) { return p && p->daemon && !p->daemon->sessionId().empty(); };
@@ -1716,7 +1781,21 @@ int runPtyFrontend(const char *font,
             break;
         case 1:
             expectThat(connected(workspace.focusedPane()), "the first terminal is attached to the daemon");
-            if (variant == "programs" || variant == "programs-skip") {
+            if (variant == "emptyshell" || variant == "emptyshell-typed") {
+                // A terminal that no window shows, and the fresh shell in front: Attach terminal... closes
+                // the fresh shell only when nothing was typed in it.
+                std::string error;
+                const auto reply = askDaemon(daemonPath, mtd::CreateSession{"", 80, 24}, error, 2000);
+                const auto *created = reply ? std::get_if<mtd::SessionCreated>(&*reply) : nullptr;
+                expectThat(created != nullptr, "the daemon makes a second terminal");
+                smokeAttachId = created->id;
+                if (variant == "emptyshell-typed") {
+                    expectThat(workspace.focusedPane()->v.sendInput("x"), "something is typed into the first shell");
+                }
+                later(1500); // The typed byte is sent and the shell has shown its prompt.
+                scriptStep = 100;
+            }
+            else if (variant == "programs" || variant == "programs-skip") {
                 handleAction("session.open:progtest");
                 expectThat(wv.hasLayer() && pendingPrograms.size() == 2, "Open session asks once about the two programs");
                 handleAction(variant == "programs" ? restoreaction::start : restoreaction::skip);
@@ -1743,6 +1822,35 @@ int runPtyFrontend(const char *font,
                 later(2000);
             }
             break;
+        case 100: {
+            std::string error;
+            const auto reply = askDaemon(daemonPath, mtd::ListSessions{}, error, 2000);
+            if (const auto *list = reply ? std::get_if<mtd::SessionList>(&*reply) : nullptr) {
+                smokeCount = list->sessions.size(); // Earlier variants may have left terminals in the daemon.
+            }
+            handleAction(std::string(daemonaction::attachGo) + ":" + smokeAttachId);
+            later(2500);
+            scriptStep = 101;
+            break;
+        }
+        case 101: {
+            const bool typed = variant == "emptyshell-typed";
+            expectThat(workspace.tabCount() == (typed ? 2u : 1u),
+                       typed ? "a shell that was typed in stays" : "the empty shell closed after the attach");
+            const NativePane *shown = workspace.focusedPane();
+            expectThat(shown && shown->daemon && shown->daemon->sessionId() == smokeAttachId, "the attached terminal is in front");
+            std::size_t terminals = 0;
+            std::string error;
+            const auto reply = askDaemon(daemonPath, mtd::ListSessions{}, error, 2000);
+            if (const auto *list = reply ? std::get_if<mtd::SessionList>(&*reply) : nullptr) {
+                terminals = list->sessions.size();
+            }
+            expectThat(terminals == (typed ? smokeCount : smokeCount - 1),
+                       typed ? "both terminals still run" : "and the fresh terminal ended in the daemon");
+            scriptDone = true;
+            running = false;
+            break;
+        }
         case 2:
             if (variant == "programs" || variant == "programs-skip") {
                 std::string all;

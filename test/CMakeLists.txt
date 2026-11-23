@@ -160,6 +160,11 @@ if(BUILD_TESTING)
     target_link_libraries(passthrough_test PRIVATE matterm::transport matterm::vt matterm::terminal matterm::ttymatterm)
     add_test(NAME passthrough COMMAND passthrough_test)
 
+    add_executable(emptyshell_test emptyshell_test.cpp)
+    target_link_libraries(emptyshell_test PRIVATE mls_unit_test_main)
+    target_include_directories(emptyshell_test PRIVATE ../src/frontend)
+    add_test(NAME empty_shell COMMAND emptyshell_test)
+
     add_executable(restorecwd_test restorecwd_test.cpp)
     target_link_libraries(restorecwd_test PRIVATE mls_unit_test_main)
     target_include_directories(restorecwd_test PRIVATE ../src/frontend)

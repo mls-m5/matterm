@@ -259,6 +259,16 @@ public:
         return socket_;
     }
 
+    // Ends the terminal in the daemon (frontend::endSession: EndSession, control 1.3.4); an older daemon says so.
+    bool end(const std::string &id, std::string &error) override {
+        std::string why;
+        if (endSession(socket_, id, why)) {
+            return true;
+        }
+        error = why.empty() ? "The daemon could not end the terminal" : why;
+        return false;
+    }
+
     std::string create(const NewTerminal &what,
                        int columns,
                        int rows,

@@ -122,7 +122,7 @@ private Unix socket, so they survive closing the window or a crash of the GUI.
   of the daemon, takes the one you choose over and shows it full screen in that terminal (`--new` starts a terminal
   first, a small tmux); Ctrl+B d leaves it running, Ctrl+B l goes back to the list. `matmux` is the same without the
   window libraries, one static file (`--daemon-install` copies it to the other computer): `matmux` shows the list (New
-  terminal chosen; when nothing runs it starts a terminal at once), `matmux --attach` lists with the first terminal chosen, `matmux --new --name work -- htop`. matmux passes the program's output through to your terminal, so its own scrollback, selection and touch scrolling work (`--rendered` draws it cell by cell instead). See
+  terminal chosen; when nothing runs it starts a terminal at once), `matmux --attach` lists with the first terminal chosen (`x` ends a terminal after a question), `matmux --new --name work -- htop`. matmux passes the program's output through to your terminal, so its own scrollback, selection and touch scrolling work (`--rendered` draws it cell by cell instead). See
   [docs/REMOTE_DAEMON.md](docs/REMOTE_DAEMON.md) section d.
 - Details: [docs/tasks/daemon.md](docs/tasks/daemon.md), [docs/PROTOCOL.md](docs/PROTOCOL.md)
   section 12, [docs/TABS_PLAN.md](docs/TABS_PLAN.md) sections 10-11.

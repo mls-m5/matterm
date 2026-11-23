@@ -83,6 +83,9 @@ public:
                                                std::string &error) = 0;
     // Starts a terminal in the daemon (in the current folder) and returns its
     // id; empty with `error` set when it cannot.
+    // Ends the terminal in the daemon (its program too). False with `error` set
+    // when it cannot (an older daemon, or it is gone already).
+    virtual bool end(const std::string &id, std::string &error) = 0;
     virtual std::string create(const NewTerminal &what,
                                int columns,
                                int rows,
@@ -268,9 +271,14 @@ private:
         }
     }
 
-    void refresh() {
+    // `gone`: a terminal that was just ended; the daemon may still list it for a moment.
+    void refresh(const std::string &gone = {}) {
         std::string error;
         auto entries = source_.list(error);
+        if (!gone.empty()) {
+            entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const ListEntry &e) { return e.id == gone; }),
+                          entries.end());
+        }
         list_.setEntries(std::move(entries));
         list_.setMessage(error);
         dirty_ = true;
@@ -331,6 +339,19 @@ private:
         case ListAction::Kind::Refresh:
             refresh();
             break;
+        case ListAction::Kind::End: {
+            std::string error;
+            if (source_.end(action.id, error)) {
+                refresh(action.id); // The selection stays near where the terminal was.
+                list_.setMessage("Ended " + action.title);
+            }
+            else {
+                list_.cancelAnchor();
+                list_.setMessage(
+                    error.empty() ? "The terminal could not be ended" : error);
+            }
+            break;
+        }
         case ListAction::Kind::Open:
             if (options_.listOnly) {
                 choice_ = {Choice::Kind::Open,

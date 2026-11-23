@@ -17,11 +17,13 @@ def check(ok, what):
 
 
 class Tty:
-    def __init__(self, socket, args=(), rows=24, cols=80, cwd=None):
+    def __init__(self, socket, args=(), rows=24, cols=80, cwd=None, env=None):
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             if cwd:
                 os.chdir(cwd)
+            if env:
+                os.environ.update(env)
             os.execv(matmux, [matmux, "--daemon-socket", socket, *args])
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         self.raw = b""
@@ -104,6 +106,21 @@ def open_marked(client, marker, seconds=2.0):
     return False
 
 
+def find_row(client, text, key=b"x", seconds=0.8):
+    """In the list: press a digit and `key` until what the list says contains `text` (no search in the list);
+    leaves the question open when found."""
+    for digit in b"123456789":
+        client.raw = b""
+        client.send(bytes([digit]))
+        client.pump(0.1)
+        client.send(key)
+        if client.wait_for(text, seconds):
+            return True
+        client.send(b"n")  # Keeps whatever the question was about.
+        client.pump(0.2)
+    return False
+
+
 tmp = tempfile.mkdtemp(prefix="matmuxpty")
 socket = tmp + "/d.sock"
 helper = subprocess.Popen([helper_path, "--socket", socket, "--sessions", "1", "--send", "echo hello-from-daemon",
@@ -111,7 +128,8 @@ helper = subprocess.Popen([helper_path, "--socket", socket, "--sessions", "1", "
 ttys = []
 RESTORE_CURSOR = b"\x1b[?25h"
 try:
-    json.loads(helper.stdout.readline())
+    started = json.loads(helper.stdout.readline())
+    first_id = started["sessions"][0]["id"]
 
     # --new -- COMMAND: a long history, then a program that goes on. Time to the first screen.
     a = Tty(socket, ("--new", "--", "sh", "-c", "seq 1 20000; echo history-end; sleep 60"))
@@ -214,6 +232,18 @@ try:
     check(lst.wait_for("shell") and lst.wait_for(tmp + "/projects/matterm-demo"), "then what runs and the full folder")
     lst.send(b"q")
     lst.wait_exit()
+    # A program started with -- COMMAND shows in the list when it is not a shell (sh -c looks like a shell to the
+    # daemon's reading of /proc).
+    pr = Tty(socket, ("--new", "--name", "slumber", "--", "sleep", "61"))
+    ttys.append(pr)
+    pr.pump(1.0)
+    pr.send(b"\x02d")
+    pr.wait_exit()
+    lst2 = Tty(socket, ("--attach",))
+    ttys.append(lst2)
+    check(lst2.wait_for("slumber") and lst2.wait_for("sleep 61"), "a terminal started with a program shows that program in the list")
+    lst2.send(b"q")
+    lst2.wait_exit()
     d0 = Tty(socket)  # No arguments, terminals run: the list, New terminal chosen.
     ttys.append(d0)
     check(d0.wait_for("running terminals") and d0.wait_for("New terminal"), "matmux without arguments shows the list when terminals run")
@@ -234,6 +264,49 @@ try:
     check(count_sessions() == before, "matmux --attach has the first terminal chosen: Enter opens it, not a new one")
     d1.send(b"\x02d")
     d1.wait_exit()
+
+    # Ending a terminal from the list: x asks, only y ends; busy and idle ones; the own terminal is refused.
+    for args in (("--new", "--name", "idleone"), ("--new", "--name", "busyone", "--", "sleep", "62")):
+        t = Tty(socket, args)
+        ttys.append(t)
+        t.wait_for("Ctrl+B")
+        t.send(b"\x02d")
+        t.wait_exit()
+    base = count_sessions()
+    e1 = Tty(socket, ("--attach",))
+    ttys.append(e1)
+    e1.wait_for("running terminals")
+    check(find_row(e1, 'End"idleone"'), "x on a row asks, naming the terminal")
+    e1.send(b"\r")  # Enter keeps it.
+    e1.pump(0.6)
+    check(count_sessions() == base, "Enter keeps the terminal (the default is no)")
+    e1.send(b"q")
+    e1.wait_exit()
+    e2 = Tty(socket, ("--attach",))
+    ttys.append(e2)
+    e2.wait_for("running terminals")
+    check(find_row(e2, 'End"busyone"(sleep62)'), "the question names the program that runs")
+    e2.send(b"y")
+    check(e2.wait_for("Endedbusyone"), "y ends it and the note says so")
+    e2.pump(1.0)
+    check(count_sessions() == base - 1, "the busy terminal is gone from the daemon")
+    e2.raw = b""
+    check(find_row(e2, 'End"idleone"'), "an idle shell asks too")
+    e2.send(b"y")
+    check(e2.wait_for("Endedidleone"), "and is ended")
+    e2.pump(1.0)
+    check(count_sessions() == base - 2, "the idle terminal is gone from the daemon")
+    e2.send(b"q")
+    e2.wait_exit()
+    own = Tty(socket, ("--attach",), env={"MATTERM_SESSION": first_id})
+    ttys.append(own)
+    own.wait_for("running terminals")
+    check(find_row(own, "endthisprogramtoo", seconds=0.6), "the terminal matmux runs in cannot be ended from its own list")
+    own.send(b"y")
+    own.pump(0.5)
+    check(count_sessions() >= base - 2, "and y did nothing")
+    own.send(b"q")
+    own.wait_exit()
 
     # SIGTERM restores the terminal.
     k = Tty(socket, ("--new",))

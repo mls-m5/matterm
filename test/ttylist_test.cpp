@@ -218,6 +218,97 @@ TEST_CASE("\"New terminal\" is the first row, also with n; the terminal this "
     EXPECT(rowText(image, 3).find("(this terminal)") != std::string::npos);
 }
 
+TEST_CASE("x asks before a terminal is ended: the question names it and what "
+          "runs, the default is to keep it") {
+    ListModel model;
+    auto vim = info("/home/a/projects/matterm", true, {"vim", "x.cpp"});
+    model.setEntries({makeListEntry(entry("aaaaaaaa11"), &vim),
+                      makeListEntry(entry("bbbbbbbb22", true), nullptr)});
+    EXPECT(model.key(ListKey::End).kind ==
+           ListAction::Kind::None); // Only asks.
+    EXPECT(model.confirming());
+    EXPECT_EQ(
+        model.question(),
+        std::string("End \"matterm\" (vim x.cpp)? y = end, n/Esc = keep"));
+    model.key(ListKey::Open); // Enter keeps it.
+    EXPECT(!model.confirming());
+    // Escape, n, anything but y keeps it; the question is gone.
+    for (const ListKey no : {ListKey::Open,
+                             ListKey::Quit,
+                             ListKey::New,
+                             ListKey::Down,
+                             ListKey::None}) {
+        EXPECT(model.key(ListKey::End).kind == ListAction::Kind::None);
+        EXPECT(model.confirming());
+        const auto action = model.key(no);
+        EXPECT(action.kind == ListAction::Kind::None);
+        EXPECT(!model.confirming() && model.question().empty());
+    }
+    EXPECT_EQ(model.entries().size(), std::size_t(2));
+    model.key(ListKey::End);
+    const auto yes = model.key(ListKey::Yes);
+    EXPECT(yes.kind == ListAction::Kind::End);
+    EXPECT_EQ(yes.id, std::string("aaaaaaaa11"));
+    EXPECT_EQ(yes.title, std::string("matterm"));
+    EXPECT(!model.confirming());
+    EXPECT(model.key(ListKey::Yes).kind ==
+           ListAction::Kind::None); // y without a question does nothing.
+}
+
+TEST_CASE("The question says when another client has the terminal; the own "
+          "terminal and New terminal cannot be ended") {
+    ListModel model;
+    auto sh = info("/srv/www");
+    auto taken = makeListEntry(entry("bbbbbbbb22", true), &sh);
+    model.setEntries({makeListEntry(entry("mine"), &sh, "mine"), taken});
+    model.key(
+        ListKey::End); // The chosen row is the first terminal: the own one.
+    EXPECT(!model.confirming());
+    EXPECT(model.message().find("end this program too") != std::string::npos);
+    model.key(ListKey::Down);
+    model.key(ListKey::End);
+    EXPECT(model.confirming());
+    EXPECT(model.question().find("(also open in another client)") !=
+           std::string::npos);
+    EXPECT(model.question().find("y = end, n/Esc = keep") != std::string::npos);
+}
+
+TEST_CASE("After a terminal was ended the chosen row stays near where it was") {
+    ListModel model;
+    std::vector<ListEntry> three = {makeListEntry(entry("a"), nullptr),
+                                    makeListEntry(entry("b"), nullptr),
+                                    makeListEntry(entry("c"), nullptr)};
+    model.setEntries(three);
+    model.key(ListKey::Down); // b
+    model.key(ListKey::End);
+    model.key(ListKey::Yes);
+    model.setEntries({three[0], three[2]});            // b is gone.
+    EXPECT_EQ(model.selected()->id, std::string("c")); // The next one.
+    model.key(ListKey::Down); // Last row (c is at row 2).
+    model.key(ListKey::End);
+    model.key(ListKey::Yes);
+    model.setEntries({three[0]});
+    EXPECT_EQ(model.selected()->id,
+              std::string("a")); // The last one was ended: the one before.
+    model.key(ListKey::End);
+    model.key(ListKey::Yes);
+    model.setEntries({});
+    EXPECT(model.newSelected()); // None left.
+}
+
+TEST_CASE(
+    "The question is on screen in the note line, and the footer names x") {
+    ListModel model;
+    auto vim = info("/home/a/projects/matterm", true, {"vim"});
+    model.setEntries({makeListEntry(entry("a"), &vim)});
+    model.key(ListKey::End);
+    const ::tty::Canvas image = drawn(model, 80, 10);
+    EXPECT(rowText(image, 8).find(
+               "End \"matterm\" (vim)? y = end, n/Esc = keep") !=
+           std::string::npos);
+    EXPECT(rowText(image, 9).find("x end") != std::string::npos);
+}
+
 TEST_CASE("Keys of the host terminal map to list keys") {
     HostInputDecoder decoder;
     int digit = 0;
@@ -239,8 +330,11 @@ TEST_CASE("Keys of the host terminal map to list keys") {
     EXPECT(map("k") == ListKey::Up);
     EXPECT(map("r") == ListKey::Refresh);
     EXPECT(map("n") == ListKey::New);
+    EXPECT(map("x") == ListKey::End);
+    EXPECT(map("\x1b[3~") == ListKey::End); // Delete.
+    EXPECT(map("y") == ListKey::Yes);
     EXPECT(map("3") == ListKey::Digit && digit == 3);
-    EXPECT(map("x") == ListKey::None);
+    EXPECT(map("w") == ListKey::None);
 }
 
 TEST_CASE("The list is drawn with a header, the rows, the mark for in use and "

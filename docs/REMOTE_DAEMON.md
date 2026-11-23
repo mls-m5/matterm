@@ -245,6 +245,8 @@ Each row starts with the name of the terminal's top folder (`~/projects/matterm`
 root or an unknown folder), or the name it was given with `--name` / Rename terminal..., which wins; then
 what runs (the command, or `shell`) and the full folder.
 
+**Ending a terminal** from the list: `x` (or Delete) on a row asks in the note line `End "matterm" (vim)? y = end, n/Esc = keep` (it adds "also open in another client" when someone has it open); only `y` ends it, Enter, Escape or any other key keeps it. The terminal you run matmux in cannot be ended from its own list. After ending, the list is read again and the chosen row stays near. A daemon that is too old for this says so in the note line.
+
 The list has **New terminal** as its first row (key `n`; your shell, in the folder you are in), then
 the terminals of the daemon (name, what runs, `(in use)` if another client has it). Choose with
 Up/Down (or `j`/`k`, `g`/`G`, or a digit) and Enter; choosing is the confirmation: another client
@@ -258,6 +260,7 @@ be chosen (attaching it would feed it to itself; the daemon tells each terminal 
 | list | Up/Down, `j`/`k`, `g`/`G`, 1..9 | choose |
 | list | Enter | open the chosen row (`New terminal` starts one) |
 | list | `n` / `r` | new terminal / read the list again |
+| list | `x` or Delete | end the chosen terminal (and its program) after a question: `y` ends, anything else keeps it |
 | list | `q`, Esc, Ctrl+C | quit |
 | terminal | **Ctrl+B** then `d` | leave: the client ends, the terminal keeps running |
 | terminal | Ctrl+B then `l` | back to the list (Ctrl+] does the same, as a spare) |

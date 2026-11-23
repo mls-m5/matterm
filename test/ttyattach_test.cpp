@@ -156,6 +156,23 @@ struct FakeSource : SessionSource {
         last = pane.get();
         return pane;
     }
+    std::vector<std::string> ended;
+    std::string endError;
+    bool lingers = false; // The list still shows an ended terminal.
+    bool end(const std::string &id, std::string &error) override {
+        if (!endError.empty()) {
+            error = endError;
+            return false;
+        }
+        ended.push_back(id);
+        for (auto it = entries.begin(); !lingers && it != entries.end(); ++it) {
+            if (it->id == id) {
+                entries.erase(it);
+                break;
+            }
+        }
+        return true;
+    }
     std::string create(const NewTerminal &what,
                        int,
                        int,
@@ -639,7 +656,75 @@ TEST_CASE("Ctrl+B d leaves the client and the terminal keeps running; Ctrl+B l "
     EXPECT(other.host.shows("keeps running"));
 }
 
-TEST_CASE("With selectNew Enter in the list starts a new terminal; the other rows are one key away") {
+TEST_CASE("x then y ends the chosen terminal, the list is read again and the "
+          "row stays near") {
+    Rig rig({entry("a", "alpha"), entry("b", "beta"), entry("c", "gamma")});
+    rig.type("\x1b[B"); // beta
+    rig.type("x");
+    EXPECT(rig.host.shows("End \"beta\""));
+    EXPECT(rig.source.ended.empty()); // Only asked.
+    rig.type("y");
+    EXPECT_EQ(rig.source.ended.size(), std::size_t(1));
+    EXPECT_EQ(rig.source.ended[0], std::string("b"));
+    EXPECT(rig.host.shows("Ended beta"));
+    EXPECT(!rig.host.shows("beta  "));
+    EXPECT_EQ(rig.mode->list().selected()->id,
+              std::string("c")); // The next one.
+    rig.type("\x1b[3~");         // Delete asks too.
+    EXPECT(rig.host.shows("End \"gamma\""));
+}
+
+TEST_CASE("A terminal the daemon still lists for a moment after it was ended is not shown") {
+    Rig rig({entry("a", "alpha"), entry("b", "beta")});
+    rig.source.lingers = true; // The daemon's list still has it.
+    rig.type("x");
+    rig.type("y");
+    EXPECT_EQ(rig.mode->list().entries().size(), std::size_t(1));
+    EXPECT_EQ(rig.mode->list().entries()[0].id, std::string("b"));
+}
+
+TEST_CASE("Enter, Escape and n keep the terminal; nothing is ended without y") {
+    Rig rig;
+    for (const std::string key : {"\r", "\x1b", "n", "q", "j"}) {
+        rig.type("x");
+        rig.type(key);
+        rig.mode->quiet(rig.now + 100);
+        EXPECT(rig.source.ended.empty());
+        EXPECT(!rig.mode->finished() || key == "q");
+        if (rig.mode->finished()) {
+            break;
+        }
+    }
+    EXPECT(rig.source.ended.empty());
+    EXPECT(
+        !rig.mode
+             ->inPane()); // Enter and n did not open or create anything either.
+    EXPECT(rig.source.created.empty());
+}
+
+TEST_CASE("A daemon that cannot end terminals says so in the note line and the "
+          "list stays") {
+    Rig rig;
+    rig.source.endError = "This daemon cannot end terminals; update it";
+    rig.type("x");
+    rig.type("y");
+    EXPECT(rig.host.shows("cannot end terminals"));
+    EXPECT_EQ(rig.mode->list().entries().size(), std::size_t(2));
+    EXPECT_EQ(rig.mode->list().selected()->id, std::string("a"));
+}
+
+TEST_CASE("The terminal the client runs in is not ended") {
+    ListEntry own = entry("mine", "me");
+    own.thisTerminal = true;
+    Rig rig({own, entry("b", "beta")});
+    rig.type("x");
+    EXPECT(rig.host.shows("end this program too"));
+    rig.type("y");
+    EXPECT(rig.source.ended.empty());
+}
+
+TEST_CASE("With selectNew Enter in the list starts a new terminal; the other "
+          "rows are one key away") {
     AttachTty::Options options;
     options.selectNew = true;
     Rig rig({entry("a", "alpha"), entry("b", "beta")}, options);
@@ -672,7 +757,8 @@ TEST_CASE("A list that only chooses hands the choice back and opens nothing") {
     EXPECT(fresh.source.created.empty()); // The caller starts it.
     Rig quit({entry("a", "alpha")}, options);
     quit.type("q");
-    EXPECT(quit.mode->finished() && quit.mode->choice().kind == AttachTty::Choice::Kind::None);
+    EXPECT(quit.mode->finished() &&
+           quit.mode->choice().kind == AttachTty::Choice::Kind::None);
 }
 
 TEST_CASE("The farewell names the program to run to come back") {
