@@ -310,6 +310,19 @@ private:
         }
         reply(SessionCreated{*id});
     }
+    void handle(const EndSession &m) {
+        if (mode_ != Mode::Control) {
+            controlError(ControlErrorCode::BadMessage,
+                         "not available to this connection");
+            closeAfterFlush();
+            return;
+        }
+        if (!d_.registry->end(m.id, timeNow())) {
+            controlError(ControlErrorCode::UnknownSession, "no such session");
+            return;
+        }
+        reply(SessionEnded{m.id});
+    }
     void handle(const GetSessionInfo &m) {
         const auto ids = d_.registry->processIds(m.id);
         if (!ids) {

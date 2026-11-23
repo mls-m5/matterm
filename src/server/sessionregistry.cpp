@@ -447,6 +447,25 @@ bool SessionRegistry::setShared(const std::string &id, bool shared) {
     found->second->shared = shared;
     return true;
 }
+bool SessionRegistry::end(const std::string &id, Time now) {
+    const auto found = impl_->entries.find(id);
+    if (found == impl_->entries.end() || found->second->closing ||
+        found->second->ended)
+        return false;
+    auto &entry = *found->second;
+    entry.persistent = false; // Gone for good: no tombstone, nothing to resume.
+    if (entry.attached && entry.session) {
+        std::string close;
+        protocol::encode(protocol::ClientMessage{protocol::Close{}}, close);
+        entry.session->onMessage(close,
+                                 now); // As the client's own Close: the program
+                                       // ends, the client is told.
+    }
+    else {
+        entry.terminateProcess();
+    }
+    return true;
+}
 bool SessionRegistry::setName(const std::string &id, const std::string &name) {
     const auto found = impl_->entries.find(id);
     if (found == impl_->entries.end() || found->second->closing || found->second->ended)

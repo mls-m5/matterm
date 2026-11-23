@@ -17,6 +17,7 @@ enum Type : std::uint8_t {
     tSetName = 0x48,
     tGetActivity = 0x49,
     tCreateTerminal = 0x4a,
+    tEndSession = 0x4b,
     tControlWelcome = 0xc0,
     tSessionList = 0xc1,
     tStatus = 0xc2,
@@ -26,7 +27,8 @@ enum Type : std::uint8_t {
     tSessionInfo = 0xc6,
     tSessionListNamed = 0xc7,
     tSessionInfoNamed = 0xc8,
-    tActivity = 0xc9
+    tActivity = 0xc9,
+    tSessionEnded = 0xca
 };
 constexpr std::size_t kMaxId = 64;
 constexpr std::size_t kMaxText = 256;
@@ -106,6 +108,14 @@ bool write(std::string &o, const CreateTerminal &m) {
             return false;
     }
     return putString(o, m.name, kMaxName);
+}
+bool write(std::string &o, const EndSession &m) {
+    put8(o, tEndSession);
+    return !m.id.empty() && putString(o, m.id, kMaxId);
+}
+bool write(std::string &o, const SessionEnded &m) {
+    put8(o, tSessionEnded);
+    return putString(o, m.id, kMaxId);
 }
 bool write(std::string &o, const GetStatus &) { put8(o, tGetStatus); return true; }
 bool write(std::string &o, const GetActivity &) {
@@ -259,6 +269,12 @@ std::optional<ControlRequest> decodeRequest(std::string_view bytes) {
             return std::nullopt;
         return m;
     }
+    case tEndSession: {
+        EndSession m;
+        if (!r.get(m.id, kMaxId) || m.id.empty() || !r.done())
+            return std::nullopt;
+        return m;
+    }
     case tSetName: {
         SetName m;
         if (!r.get(m.id, kMaxId) || m.id.empty() || !r.get(m.name, kMaxName) || !validTerminalName(m.name) ||
@@ -318,6 +334,12 @@ std::optional<ControlReply> decodeReply(std::string_view bytes) {
         Activity m;
         if (!r.getBool(m.attachedNow) || !r.get(m.secondsSinceClient) ||
             !r.done())
+            return std::nullopt;
+        return m;
+    }
+    case tSessionEnded: {
+        SessionEnded m;
+        if (!r.get(m.id, kMaxId) || !r.done())
             return std::nullopt;
         return m;
     }

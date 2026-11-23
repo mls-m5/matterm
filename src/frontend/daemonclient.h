@@ -179,6 +179,36 @@ inline std::optional<std::string> createTerminal(
     return std::nullopt;
 }
 
+// Ends the terminal `id` in the daemon (what closing a pane does: hang up, kill
+// after a short grace). False with `error` set; an older daemon (before 1.3.4)
+// is named as the reason.
+inline bool endSession(const std::string &socketPath,
+                       const std::string &id,
+                       std::string &error) {
+    const auto reply = askDaemon(socketPath, mtd::EndSession{id}, error);
+    if (!reply) {
+        if (error.find("closed the connection") != std::string::npos ||
+            error.find("unreadable") != std::string::npos) {
+            error = "this daemon is older than 1.3.4 and cannot end a terminal "
+                    "from the list";
+        }
+        return false;
+    }
+    if (std::holds_alternative<mtd::SessionEnded>(*reply)) {
+        return true;
+    }
+    if (const auto *refused = std::get_if<mtd::ControlError>(&*reply)) {
+        error = refused->code == mtd::ControlErrorCode::BadMessage
+                    ? "this daemon is older than 1.3.4 and cannot end a "
+                      "terminal from the list"
+                    : refused->reason;
+    }
+    else {
+        error = "unexpected answer from the daemon";
+    }
+    return false;
+}
+
 // True when something accepts connections on the socket.
 inline bool daemonRunning(const std::string &socketPath) {
     try {

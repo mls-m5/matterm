@@ -61,6 +61,10 @@ public:
     bool setShared(const std::string &id, bool shared);
     // Names a live session (the caller validated the text). False for an unknown or ending one.
     bool setName(const std::string &id, const std::string &name);
+    // Ends a session's program as a client's Close does (hang up, kill after
+    // the grace) and forgets the session when it is gone; an attached client
+    // sees the program end. False for an unknown or ending one.
+    bool end(const std::string &id, protocol::Time now);
     // Starts a persistent session nobody is attached to yet (the client then attaches
     // with Hello{sessionId}). `workingDirectory` empty: the daemon's own. Nullopt when the
     // registry is full, cannot persist sessions, or the process did not start.

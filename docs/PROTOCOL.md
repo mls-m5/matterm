@@ -601,3 +601,12 @@ new; an exposed (web) connection cannot send it. A command that does not start i
 **`MATTERM_SESSION`.** Every terminal the daemon starts has `MATTERM_SESSION=<session id>` in its
 environment (the id of `SessionEntry`). A program that attaches to sessions can tell that it runs inside
 one and refuse to attach to itself (the output would feed its own input).
+
+**Control version 1.3.4 (additive): `EndSession`.** `EndSession` (0x4b): `string id` → `SessionEnded` (0xca): `string id`.
+Ends the terminal's program the way closing a pane does: the daemon hangs up on it (SIGHUP to the process group) and kills it
+after the grace (`terminationGrace`, 500 ms by default), and forgets the session when it is gone (no replay, no tombstone).
+A client attached to the session sees the program end (`Exit`), as when the program ends by itself. The reply comes when the
+request is accepted, not when the process has left: the session leaves the list a moment later. An unknown or already ending id is
+`ControlError` `UnknownSession`. Only a control connection of the socket's owner can send it; an exposed (web) connection is refused
+like for `CreateTerminal`. An older daemon answers `BadMessage` and closes; `frontend::endSession` turns that into
+"this daemon is older than 1.3.4 and cannot end a terminal from the list".

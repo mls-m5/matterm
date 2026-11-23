@@ -27,7 +27,7 @@ constexpr std::uint16_t kControlVersion = 3;
 constexpr std::uint16_t kControlFormat = 1;
 constexpr std::uint16_t kControlBreaking = kControlVersion;
 constexpr std::uint16_t kControlAdditive =
-    3; // 2: GetActivity/Activity; 3: CreateTerminal.
+    4; // 2: GetActivity/Activity; 3: CreateTerminal; 4: EndSession.
 constexpr std::size_t kMaxName = 64;
 constexpr std::size_t kMaxListed = 256;
 constexpr std::size_t kMaxPath = 4096;
@@ -71,6 +71,15 @@ struct CreateTerminal {
         command;      // At most 32 words; the first is the program.
     std::string name; // See SetName; empty: none.
 };
+// Ends a terminal's program the way closing a pane does (hang up, kill after a
+// short grace) and removes the session; clients attached to it see the program
+// end. Answered with SessionEnded (the program may still be leaving: the
+// session is gone from the list when it has). Additive 1.3.4; an older daemon
+// answers BadMessage. Only the owner of the socket; an exposed (web) connection
+// cannot.
+struct EndSession {
+    std::string id;
+};
 // What a session runs, for saving and for the close question (read from /proc by the daemon).
 struct GetSessionInfo { std::string id; };
 // Names a terminal so that it can be told apart in the lists (a laptop window, a browser). At
@@ -103,6 +112,9 @@ struct Status {
     std::uint32_t idleExitSeconds = 0;
 };
 struct SessionCreated { std::string id; };
+struct SessionEnded {
+    std::string id;
+};
 struct Activity {
     bool attachedNow = false; // A terminal client is attached at this moment.
     std::uint32_t secondsSinceClient =
@@ -141,7 +153,8 @@ using ControlRequest = std::variant<ControlHello,
                                     GetSessionInfo,
                                     SetName,
                                     GetActivity,
-                                    CreateTerminal>;
+                                    CreateTerminal,
+                                    EndSession>;
 using ControlReply = std::variant<ControlWelcome,
                                   SessionList,
                                   Status,
@@ -149,7 +162,8 @@ using ControlReply = std::variant<ControlWelcome,
                                   ControlError,
                                   SessionCreated,
                                   SessionInfo,
-                                  Activity>;
+                                  Activity,
+                                  SessionEnded>;
 
 // True for a first byte in the control range (either direction).
 inline bool isControlType(std::uint8_t type) { return (type & 0xf0) == 0x40 || (type & 0xf0) == 0xc0; }
