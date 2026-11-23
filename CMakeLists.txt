@@ -123,9 +123,9 @@ if(UNIX)
 endif()
 
 # The only place the tty layer meets matterm's own cell buffer and cursor.
-add_library(ttymatterm src/tty/matterm/cells.cpp)
+add_library(ttymatterm src/tty/matterm/cells.cpp src/tty/matterm/snapshot.cpp)
 add_library(matterm::ttymatterm ALIAS ttymatterm)
-target_link_libraries(ttymatterm PUBLIC matterm::tty cellbuffer)
+target_link_libraries(ttymatterm PUBLIC matterm::tty cellbuffer matterm::terminal)
 
 # fakeos: a pretend Unix system with ASCII animations. Pure C++17 with no I/O,
 # clock or process access (enforced by test/check_fakeos_includes.cmake), so the
@@ -352,7 +352,7 @@ if(MATTERM_BUILD_BENCHMARKS)
             # Reattach/replay: where the time goes (docs/CPU.md "Replay").
             add_executable(matterm-replay-bench bench/replaybench.cpp)
             target_include_directories(matterm-replay-bench PRIVATE src/frontend)
-            target_link_libraries(matterm-replay-bench PRIVATE matterm-daemon-core matterm::unixchannel matterm::transport
+            target_link_libraries(matterm-replay-bench PRIVATE matterm::ttymatterm matterm-daemon-core matterm::unixchannel matterm::transport
                                                               matterm::vt matterm::terminal)
         endif()
     endif()

@@ -117,6 +117,12 @@ public:
     };
     // Row IDs survive full-screen scrolling until evicted. Resize, reset,
     // screen switches and regional row movement invalidate the selection epoch.
+    // The saved rows of the screen in use, oldest first (index 0 ..
+    // historySize() - 1), for writing them out (the passthrough snapshot,
+    // src/tty/matterm/snapshot.h). Checked access; none on the alternate
+    // screen.
+    const FChar &historyCell(std::size_t column, std::size_t index) const;
+    bool historyRowWrapped(std::size_t index) const noexcept;
     std::size_t firstRetainedRow() const noexcept;
     std::size_t selectionEpoch() const noexcept;
     // Read retained text without changing the viewport or borrowing a frame.

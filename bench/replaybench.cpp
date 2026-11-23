@@ -16,6 +16,7 @@
 #include "daemonlink.h"
 #include "framesignature.h"
 #include "terminalview.h"
+#include "tty/matterm/snapshot.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -232,6 +233,16 @@ int main(int argc, char **argv) {
     if (frame) {
         std::cout << "time hashing the frame each round: " << signature
                   << " s (sum " << hashSum << ")\n";
+    }
+    {
+        // The passthrough snapshot of what was just replayed
+        // (src/tty/matterm/snapshot.h).
+        const auto t0 = Clock::now();
+        const auto bytesOut = tty::snapshot(view.model(), view.modes());
+        std::cout << "snapshot of the model (" << view.model().historySize()
+                  << " saved rows + screen): " << bytesOut.size()
+                  << " bytes in " << seconds(Clock::now() - t0) * 1000
+                  << " ms\n";
     }
     std::cout << "waiting for the daemon / sleeping: " << wall - busy << " s\n";
     view.detach(); // Before the link goes (the view listens to it).

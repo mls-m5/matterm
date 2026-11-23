@@ -1043,6 +1043,18 @@ TerminalModel::LiveReflow TerminalModel::liveReflow() const noexcept {
     return impl_->liveMode;
 }
 
+const FChar &TerminalModel::historyCell(std::size_t column,
+                                        std::size_t index) const {
+    if (index >= historySize() || column >= columns()) {
+        throw std::out_of_range("Terminal saved row");
+    }
+    return impl_->active().memory.at(column, index);
+}
+bool TerminalModel::historyRowWrapped(std::size_t index) const noexcept {
+    const auto &screen = impl_->active();
+    return index < historySize() && index < screen.softWrap.size() &&
+           screen.softWrap[index];
+}
 std::size_t TerminalModel::firstRetainedRow() const noexcept {
     return impl_->active().firstRow;
 }

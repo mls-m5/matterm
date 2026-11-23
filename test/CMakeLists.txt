@@ -331,6 +331,11 @@ if(BUILD_TESTING)
     target_link_libraries(ttymatterm_test PRIVATE matterm::ttymatterm matterm::vt)
     add_test(NAME tty_matterm COMMAND ttymatterm_test)
 
+    add_executable(ttysnapshot_test ttysnapshot_test.cpp)
+    target_link_libraries(ttysnapshot_test PRIVATE mls_unit_test_main)
+    target_link_libraries(ttysnapshot_test PRIVATE matterm::ttymatterm matterm::vt)
+    add_test(NAME tty_snapshot COMMAND ttysnapshot_test)
+
     file(GLOB CHAT_TESTS CONFIGURE_DEPENDS chat_*_test.cpp)
     add_executable(chat_test ${CHAT_TESTS})
     target_link_libraries(chat_test PRIVATE mls_unit_test_main)
