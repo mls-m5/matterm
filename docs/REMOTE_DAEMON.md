@@ -204,9 +204,10 @@ ssh -t you@your-computer matterm --attach-tty --new     # a new terminal at once
 ssh -t you@your-computer matterm --attach-tty --new --name work -- htop
 ```
 
-(`matmux` is the same without the window libraries: `matmux` alone starts a new terminal with your
-shell (and first says "N terminals run: matmux --attach" when some already do), `matmux --attach` is
-the list, `matmux --new [--name N] [-- COMMAND]` as above; `-t` is needed so that a terminal is
+(`matmux` is the same without the window libraries: `matmux` alone shows the list with **New
+terminal** chosen (Enter starts a terminal with your shell; when no terminal runs at all it starts one at
+once, no pointless list), `matmux --attach` is the same list with the first terminal chosen,
+`matmux --new [--name N] [-- COMMAND]` starts one directly as above; `-t` is needed so that a terminal is
 allocated.) Together with the daemon this is a small tmux: start a terminal, leave it running, come
 back to it later.
 
@@ -239,6 +240,10 @@ Known limits: the hidden screen does not know the tab stops, the character sets 
 force for the next character) of the program, so right after the attach these are the host's until the
 program sets them again; a program in the alternate screen: what was behind it on the primary screen is not
 restored (the host shows what it showed before the attach).
+
+Each row starts with the name of the terminal's top folder (`~/projects/matterm` shows `matterm`; `/` for the
+root or an unknown folder), or the name it was given with `--name` / Rename terminal..., which wins; then
+what runs (the command, or `shell`) and the full folder.
 
 The list has **New terminal** as its first row (key `n`; your shell, in the folder you are in), then
 the terminals of the daemon (name, what runs, `(in use)` if another client has it). Choose with

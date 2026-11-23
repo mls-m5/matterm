@@ -22,6 +22,8 @@ struct DaemonOptions {
     // matmux shows a terminal by passing its output through (the host's own scrollback); --rendered (and
     // matterm --attach-tty) draws it cell by cell instead.
     bool rendered = true;
+    // matmux without arguments: the list with New terminal chosen, or a new terminal at once when none runs.
+    bool attachDefault = false;
     bool attachNew = false;
     std::string attachName;
     std::vector<std::string> attachCommand;

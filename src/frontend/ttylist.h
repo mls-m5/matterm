@@ -17,12 +17,34 @@ namespace frontend::ttymode {
 
 struct ListEntry {
     std::string id;
-    std::string title; // The terminal's name, else a short form of its id.
-    std::string what; // What runs there: the command, else "shell in <folder>".
+    std::string title;  // The terminal's name, else a short form of its id.
+    std::string what;   // What runs there: the command, else "shell".
+    std::string folder; // The folder it is in (full), empty when unknown.
     bool inUse = false; // Another client has it: opening it takes it over.
     bool thisTerminal =
         false; // The terminal this program itself runs in: not to be attached.
 };
+
+// The name of the top folder of a path: "/home/a/projects/matterm" ->
+// "matterm"; "/" for the root and for an empty path. A trailing slash does not
+// count.
+inline std::string folderName(const std::string &path) {
+    std::string trimmed = path;
+    while (trimmed.size() > 1 && trimmed.back() == '/') {
+        trimmed.pop_back();
+    }
+    const auto slash = trimmed.rfind('/');
+    const std::string last =
+        slash == std::string::npos ? trimmed : trimmed.substr(slash + 1);
+    if (last.empty()) {
+        return "/";
+    }
+    std::string out;
+    for (const char c : last) {
+        out += (static_cast<unsigned char>(c) < 32 || c == 127) ? ' ' : c;
+    }
+    return out;
+}
 
 // A row of the list from the daemon's answers. `info` may be missing (the
 // daemon did not answer).
@@ -36,7 +58,12 @@ inline ListEntry makeListEntry(const mtd::SessionEntry &entry,
     const std::string &name = !entry.name.empty() ? entry.name
                               : info              ? info->name
                                                   : std::string();
-    out.title = !name.empty() ? name : "terminal " + entry.id.substr(0, 8);
+    // The leftmost column: an explicit name wins, else the name of the top
+    // folder (what the terminal is about), else - when the daemon did not say -
+    // a short form of the id.
+    out.title = !name.empty() ? name
+                : info        ? folderName(info->cwd)
+                              : "terminal " + entry.id.substr(0, 8);
     if (info) {
         if (info->busy && !info->command.empty()) {
             for (const std::string &part : info->command) {
@@ -46,16 +73,16 @@ inline ListEntry makeListEntry(const mtd::SessionEntry &entry,
                 out.what += part;
             }
         }
-        else if (!info->cwd.empty()) {
-            out.what = "shell in " + info->cwd;
-        }
         else {
             out.what = "shell";
         }
-        for (char &c : out.what) {
-            if (static_cast<unsigned char>(c) < 32 || c == 127) {
-                c = ' '; // A command line may hold anything; the screen must
-                         // not see it.
+        out.folder = info->cwd;
+        for (std::string *text : {&out.what, &out.folder}) {
+            for (char &c : *text) {
+                if (static_cast<unsigned char>(c) < 32 || c == 127) {
+                    c = ' '; // A command line or a folder may hold anything;
+                             // the screen must not see it.
+                }
             }
         }
     }
@@ -91,12 +118,17 @@ public:
     void setEntries(std::vector<ListEntry> entries) {
         const std::string chosen = selected() ? selected()->id : std::string();
         entries_ = std::move(entries);
-        index_ = entries_.empty() ? 0 : 1;
+        index_ = entries_.empty() || preferNew_ ? 0 : 1;
         for (std::size_t i = 0; i < entries_.size(); ++i) {
             if (!chosen.empty() && entries_[i].id == chosen) {
                 index_ = i + 1;
             }
         }
+    }
+    // "New terminal" is the row chosen at first (matmux without arguments)
+    // instead of the first terminal.
+    void setPreferNew(bool on) {
+        preferNew_ = on;
     }
     const std::vector<ListEntry> &entries() const {
         return entries_;
@@ -187,6 +219,7 @@ public:
 private:
     std::vector<ListEntry> entries_;
     std::size_t index_ = 0;
+    bool preferNew_ = false;
     std::string message_;
 };
 
@@ -315,7 +348,10 @@ inline void renderList(const ListModel &model, ::tty::Canvas &canvas) {
         else if (entry.inUse) {
             x = put(canvas, x, y, " (in use)", chosen ? fg : kWarn, bg);
         }
-        put(canvas, x, y, "  " + entry.what, chosen ? fg : kDim, bg);
+        x = put(canvas, x, y, "  " + entry.what, chosen ? fg : kScreenFg, bg);
+        if (!entry.folder.empty()) {
+            put(canvas, x, y, "  " + entry.folder, chosen ? fg : kDim, bg);
+        }
     }
     const ListEntry *chosenEntry = model.selected();
     if (model.message().empty() && chosenEntry && chosenEntry->inUse &&

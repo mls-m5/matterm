@@ -54,15 +54,19 @@ try:
 
     pid, fd = session()
     ok1, raw = read_until(fd, b"Ctrl+B")
-    check(ok1, "matmux without arguments starts a new terminal and attaches (status line)")
-    check(b"terminals run" not in raw and b"terminal runs" not in raw, "no 'terminals run' line when none ran")
+    check(ok1, "matmux without arguments starts a new terminal at once when none runs (the keys line)")
+    check(b"running terminals" not in raw, "no list when none runs")
     os.write(fd, b"\x02d")
     _, st = os.waitpid(pid, 0)
     check(os.WIFEXITED(st) and os.WEXITSTATUS(st) == 0, "Ctrl+B d leaves with exit code 0")
     check("1 terminals" in run(attach, "--daemon-list").stdout, "and the terminal keeps running")
     pid, fd = session()
-    ok2, raw = read_until(fd, b"terminalruns:matmux--attach")
-    check(ok2, "the next matmux says '1 terminal runs: matmux --attach' first")
+    ok2, raw = read_until(fd, b"runningterminals")
+    check(ok2 and b"Newterminal" in re.sub(rb"\x1b\[[0-9;?<]*[A-Za-z]", b"", raw).replace(b" ", b""),
+          "the next matmux shows the list, with New terminal in it")
+    os.write(fd, b"\r")  # New terminal is chosen: Enter starts one.
+    ok2b, raw = read_until(fd, b"Ctrl+B")
+    check(ok2b, "and Enter starts a new terminal")
     os.write(fd, b"\x02d")
     os.waitpid(pid, 0)
     check("2 terminals" in run(attach, "--daemon-list").stdout, "a second terminal was made")

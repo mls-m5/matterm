@@ -37,7 +37,7 @@ int runAttachTty(const DaemonOptions &daemonIn) {
     // A daemon of an incompatible version is refused, or a new one offered next
     // to it.
     if (const auto error =
-            selectDaemon(daemon, tunnel != nullptr, daemon.attachNew);
+            selectDaemon(daemon, tunnel != nullptr, daemon.attachNew || daemon.attachDefault);
         !error.empty()) {
         std::cerr << "matterm: " << error << "\n";
         return 1;
@@ -53,6 +53,14 @@ int runAttachTty(const DaemonOptions &daemonIn) {
         }
     }
     DaemonSource source(daemonSocket(daemon.socketPath), own, cwd);
+    if (daemon.attachDefault && !daemon.attachNew) {
+        // matmux without arguments: the list with New terminal chosen; when nothing runs, a new terminal at
+        // once (a list of nothing is no use).
+        std::string error;
+        if (source.list(error).empty() && error.empty()) {
+            daemon.attachNew = true;
+        }
+    }
     if (!daemon.rendered) {
         return runPassthroughMode(daemon, source, own);
     }
@@ -63,6 +71,7 @@ int runAttachTty(const DaemonOptions &daemonIn) {
     options.ownSession = own;
     options.comeBack = daemon.attachProgram;
     options.startNew = daemon.attachNew;
+    options.selectNew = daemon.attachDefault;
     options.exitWhenEnded = daemon.attachNew;
     options.newTerminal.name = daemon.attachName;
     options.newTerminal.command = daemon.attachCommand;

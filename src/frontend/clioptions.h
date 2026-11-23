@@ -324,7 +324,7 @@ inline const std::vector<Program> &programs() {
               "",
               Value::None,
               "",
-              "List the terminals in the daemon and take one over",
+              "The list of the terminals in the daemon, first terminal chosen (without arguments: New terminal chosen)",
               false},
              {"--rendered",
               "",

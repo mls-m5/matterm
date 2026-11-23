@@ -56,8 +56,8 @@ public:
     virtual bool wantsWrite() const {
         return false;
     }
-    // The daemon's replay of what the program wrote before this attach has all arrived (the
-    // passthrough mode shows the screen once it has).
+    // The daemon's replay of what the program wrote before this attach has all
+    // arrived (the passthrough mode shows the screen once it has).
     virtual bool replayDone() const {
         return true;
     }
@@ -102,8 +102,12 @@ public:
                                  // showing the list.
         NewTerminal newTerminal; // What --new starts.
         bool exitWhenEnded = false; // --new: the client ends with the program.
-        bool listOnly = false;          // matmux: the list only chooses; the terminal is shown by the caller.
-        std::string initialMessage;     // A line under the list at the start (how the last terminal ended).
+        bool selectNew = false; // matmux without arguments: Enter in the list
+                                // starts a new terminal.
+        bool listOnly = false; // matmux: the list only chooses; the terminal is
+                               // shown by the caller.
+        std::string initialMessage; // A line under the list at the start (how
+                                    // the last terminal ended).
         std::string comeBack = "matterm --attach-tty"; // What the farewell says
                                                        // to run to come back.
         std::string ownSession; // The terminal this program runs in
@@ -129,6 +133,7 @@ public:
         now_ = now;
         statusOn_ =
             options_.statusLine && size().second >= options_.statusMinRows;
+        list_.setPreferNew(options_.selectNew);
         refresh();
         if (!options_.initialMessage.empty()) {
             list_.setMessage(options_.initialMessage);

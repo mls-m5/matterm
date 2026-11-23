@@ -67,11 +67,74 @@ TEST_CASE("A row says the name, what runs and whether another client has it") {
     EXPECT_EQ(a.what, std::string("vim notes.txt"));
     EXPECT(!a.inUse);
     const ListEntry b = makeListEntry(entry("0123456789abcdef", true), &shell);
-    EXPECT_EQ(b.title, std::string("terminal 01234567"));
-    EXPECT_EQ(b.what, std::string("shell in /home/me/src"));
+    EXPECT_EQ(b.title, std::string("src")); // No name: the top folder.
+    EXPECT_EQ(b.what, std::string("shell"));
+    EXPECT_EQ(b.folder, std::string("/home/me/src"));
     EXPECT(b.inUse);
-    const ListEntry c = makeListEntry(entry("x"), nullptr);
+    // The daemon did not answer: only the id is known.
+    const ListEntry c = makeListEntry(entry("0123456789abcdef"), nullptr);
+    EXPECT_EQ(c.title, std::string("terminal 01234567"));
     EXPECT_EQ(c.what, std::string());
+}
+
+TEST_CASE(
+    "The first column is the explicit name, else the name of the top folder") {
+    const auto in = [](const std::string &cwd) { return info(cwd); };
+    EXPECT_EQ(folderName("/home/a/projects/matterm"), std::string("matterm"));
+    EXPECT_EQ(folderName("/home/a/projects/matterm/"), std::string("matterm"));
+    EXPECT_EQ(folderName("/home"), std::string("home"));
+    EXPECT_EQ(folderName("/"), std::string("/"));
+    EXPECT_EQ(folderName("//"), std::string("/"));
+    EXPECT_EQ(folderName(""), std::string("/"));
+    EXPECT_EQ(folderName("relative/dir"), std::string("dir"));
+    EXPECT_EQ(folderName("/tmp/a\x1b[31mb"),
+              std::string("a [31mb")); // No control characters.
+    auto root = in("/");
+    EXPECT_EQ(makeListEntry(entry("abc"), &root).title, std::string("/"));
+    auto none = in("");
+    EXPECT_EQ(makeListEntry(entry("abc"), &none).title, std::string("/"));
+    auto deep = in("/home/a/projects/matterm");
+    EXPECT_EQ(makeListEntry(entry("abc"), &deep).title, std::string("matterm"));
+    // A name given by --name or Rename terminal... wins, from the list entry or
+    // from the info.
+    EXPECT_EQ(makeListEntry(entry("abc", false, "work"), &deep).title,
+              std::string("work"));
+    mtd::SessionInfo named = in("/home/a/projects/matterm");
+    named.name = "laptop";
+    EXPECT_EQ(makeListEntry(entry("abc"), &named).title, std::string("laptop"));
+}
+
+TEST_CASE("A row shows the folder name, the program and the full folder, in "
+          "that order") {
+    ListModel model;
+    auto vim = info("/home/a/projects/matterm", true, {"vim", "x.cpp"});
+    auto sh = info("/srv/www");
+    model.setEntries({makeListEntry(entry("aaaaaaaa11"), &vim),
+                      makeListEntry(entry("bbbbbbbb22"), &sh)});
+    const ::tty::Canvas image = drawn(model, 80, 10);
+    const std::string r1 = rowText(image, 3), r2 = rowText(image, 4);
+    EXPECT(r1.find("1 matterm  vim x.cpp  /home/a/projects/matterm") !=
+           std::string::npos);
+    EXPECT(r2.find("2 www  shell  /srv/www") != std::string::npos);
+}
+
+TEST_CASE(
+    "With preferNew the list starts on New terminal, also after a refresh") {
+    ListModel model;
+    model.setPreferNew(true);
+    model.setEntries({makeListEntry(entry("a"), nullptr),
+                      makeListEntry(entry("b"), nullptr)});
+    EXPECT(model.newSelected());
+    EXPECT(model.key(ListKey::Open).kind == ListAction::Kind::New);
+    model.setEntries({makeListEntry(entry("a"), nullptr),
+                      makeListEntry(entry("b"), nullptr),
+                      makeListEntry(entry("c"), nullptr)});
+    EXPECT(model.newSelected()); // Still: nothing else was chosen.
+    model.key(ListKey::Down);
+    model.setEntries({makeListEntry(entry("a"), nullptr),
+                      makeListEntry(entry("b"), nullptr)});
+    EXPECT_EQ(model.selected()->id,
+              std::string("a")); // A chosen terminal is kept.
 }
 
 TEST_CASE("The name of the session info is used when the list has none") {

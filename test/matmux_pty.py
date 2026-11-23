@@ -17,9 +17,11 @@ def check(ok, what):
 
 
 class Tty:
-    def __init__(self, socket, args=(), rows=24, cols=80):
+    def __init__(self, socket, args=(), rows=24, cols=80, cwd=None):
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
+            if cwd:
+                os.chdir(cwd)
             os.execv(matmux, [matmux, "--daemon-socket", socket, *args])
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         self.raw = b""
@@ -41,12 +43,15 @@ class Tty:
         return True
 
     def text(self):
-        return re.sub(rb"\x1b\[[0-9;?<]*[A-Za-z]", b"", self.raw).decode("utf8", "replace")
+        # Without escape sequences and blanks: the drawing skips blanks with a cursor move.
+        plain = re.sub(rb"\x1b\[[0-9;?<]*[A-Za-z]", b"", self.raw).decode("utf8", "replace")
+        return plain.replace(" ", "")
 
     def send(self, data):
         os.write(self.fd, data)
 
     def wait_for(self, needle, seconds=10):
+        needle = needle.replace(" ", "")
         end = time.time() + seconds
         while time.time() < end:
             if needle in self.text():
@@ -74,6 +79,12 @@ class Tty:
             os.waitpid(self.pid, 0)
         except OSError:
             pass
+
+
+def count_sessions():
+    helper.stdin.write("list\n")
+    helper.stdin.flush()
+    return len(json.loads(helper.stdout.readline())["sessions"])
 
 
 def open_marked(client, marker, seconds=2.0):
@@ -110,7 +121,7 @@ try:
     check(b"\x1b[?1049h" not in a.raw, "the host terminal is not put in the alternate screen (its scrollback stays)")
     a.send(b"\x02d")
     check(a.wait_exit() and a.code() == 0, "Ctrl+B d leaves with exit 0")
-    check("keeps running" in a.text(), "and says that the terminal keeps running")
+    check("keepsrunning" in a.text(), "and says that the terminal keeps running")
     check(RESTORE_CURSOR in a.raw, "and puts the host terminal back (cursor shown)")
 
     # Attach again from the list: the screen is there from the replay; typing passes through.
@@ -167,7 +178,7 @@ try:
     f.pump(0.3)
     f.send(b"exit 4\r")
     check(f.wait_exit() and f.code() == 4, "--new ends with the program's exit code")
-    check("exit code 4" in f.text(), "and says how it ended")
+    check("exitcode4" in f.text(), "and says how it ended")
 
     # Taken over: the first client says so and leaves with d.
     g = Tty(socket, ("--new", "--name", "shared", "--", "sh", "-c", "echo g-up; sleep 60"))
@@ -183,6 +194,46 @@ try:
     check(g.wait_exit(), "and ends with d")
     h.send(b"\x02d")
     h.wait_exit()
+
+    # The list: the first column is the name of the top folder, an explicit name wins; the default of matmux is
+    # the list with New terminal chosen.
+    os.makedirs(tmp + "/projects/matterm-demo")
+    m1 = Tty(socket, ("--new", "--", "sh", "-c", "echo m1-up; sleep 60"), cwd=tmp + "/projects/matterm-demo")
+    ttys.append(m1)
+    m1.wait_for("m1-up")
+    m1.send(b"\x02d")
+    m1.wait_exit()
+    m2 = Tty(socket, ("--new", "--name", "Namedone", "--", "sh", "-c", "echo m2-up; sleep 60"), cwd=tmp + "/projects/matterm-demo")
+    ttys.append(m2)
+    m2.wait_for("m2-up")
+    m2.send(b"\x02d")
+    m2.wait_exit()
+    lst = Tty(socket, ("--attach",))
+    ttys.append(lst)
+    check(lst.wait_for("matterm-demo") and lst.wait_for("Namedone"), "the list names a terminal by its top folder, an explicit name wins")
+    check(lst.wait_for("shell") and lst.wait_for(tmp + "/projects/matterm-demo"), "then what runs and the full folder")
+    lst.send(b"q")
+    lst.wait_exit()
+    d0 = Tty(socket)  # No arguments, terminals run: the list, New terminal chosen.
+    ttys.append(d0)
+    check(d0.wait_for("running terminals") and d0.wait_for("New terminal"), "matmux without arguments shows the list when terminals run")
+    d0.raw = b""
+    d0.send(b"\r")
+    before = count_sessions()
+    d0.pump(0.3)
+    check(d0.wait_for("Ctrl+B") and count_sessions() == before + 1, "and Enter starts a new terminal")
+    d0.send(b"\x02d")
+    d0.wait_exit()
+    d1 = Tty(socket, ("--attach",))
+    ttys.append(d1)
+    d1.wait_for("running terminals")
+    d1.raw = b""
+    before = count_sessions()
+    d1.send(b"\r")
+    d1.pump(1.5)
+    check(count_sessions() == before, "matmux --attach has the first terminal chosen: Enter opens it, not a new one")
+    d1.send(b"\x02d")
+    d1.wait_exit()
 
     # SIGTERM restores the terminal.
     k = Tty(socket, ("--new",))

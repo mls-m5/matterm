@@ -639,6 +639,20 @@ TEST_CASE("Ctrl+B d leaves the client and the terminal keeps running; Ctrl+B l "
     EXPECT(other.host.shows("keeps running"));
 }
 
+TEST_CASE("With selectNew Enter in the list starts a new terminal; the other rows are one key away") {
+    AttachTty::Options options;
+    options.selectNew = true;
+    Rig rig({entry("a", "alpha"), entry("b", "beta")}, options);
+    rig.type("\r");
+    EXPECT(rig.mode->inPane());
+    EXPECT_EQ(rig.source.created.size(), std::size_t(1));
+    EXPECT_EQ(rig.source.opened, 1);
+    Rig second({entry("a", "alpha")}, options);
+    second.type("\x1b[B\r"); // Down: the terminal.
+    EXPECT_EQ(second.source.openedId, std::string("a"));
+    EXPECT(second.source.created.empty());
+}
+
 TEST_CASE("A list that only chooses hands the choice back and opens nothing") {
     AttachTty::Options options;
     options.listOnly = true;

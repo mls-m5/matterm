@@ -292,6 +292,7 @@ int runPassthroughMode(const DaemonOptions &daemon,
             options.ownSession = own;
             options.comeBack = daemon.attachProgram;
             options.listOnly = true;
+            options.selectNew = daemon.attachDefault; // matmux without arguments: Enter = a new terminal.
             options.initialMessage = message;
             AttachTty list(host, source, options);
             list.start(steadyMs());

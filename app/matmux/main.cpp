@@ -21,14 +21,15 @@ void usage(std::ostream &out) {
            "       matmux [--daemon-socket PATH] --new [--name NAME] [-- "
            "COMMAND...]\n"
            "       matmux [--daemon-socket PATH] --attach\n"
-           "  Without arguments: a new terminal with your shell, started in "
-           "the daemon (started when\n"
-           "  missing), attached at once. Leave it with Ctrl+B d: it keeps "
+           "  Without arguments: the list of the terminals in the daemon with \"New "
+           "terminal\" chosen\n"
+           "  (Enter starts one with your shell); when none runs, a new terminal "
+           "at once (the daemon is\n"
+           "  started when missing). Leave a terminal with Ctrl+B d: it keeps "
            "running.\n"
-           "  --attach              list the terminals that run in the daemon "
-           "and take one over\n"
-           "                        in this terminal (full screen; Ctrl+B l is "
-           "the list again)\n"
+           "  --attach              the same list with the first terminal chosen "
+           "(Ctrl+B l is the\n"
+           "                        list again)\n"
            "  --daemon-socket PATH  the daemon on this socket (default: the "
            "compatible daemon in\n"
            "                        $XDG_RUNTIME_DIR/matterm)\n"
@@ -58,7 +59,7 @@ int main(int argc, char **argv) {
     options.enabled = true;
     options.attachProgram = "matmux --attach";
     options.rendered = false; // Passthrough: the host terminal keeps its scrollback. --rendered: cell by cell.
-    bool list = false, stop = false, attach = false, implicitNew = false;
+    bool list = false, stop = false, attach = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--attach") {
@@ -115,12 +116,15 @@ int main(int argc, char **argv) {
             return 2;
         }
     }
-    // A name or a command is for a new terminal; without any mode, a new
-    // terminal is what matmux does.
+    // A name or a command is for a new terminal. Without any mode: the list with New terminal chosen, or a
+    // new terminal at once when none runs.
     if (!attach && !list && !stop && !options.attachNew) {
-        options.attachNew = true;
-        implicitNew =
-            options.attachName.empty() && options.attachCommand.empty();
+        if (options.attachName.empty() && options.attachCommand.empty()) {
+            options.attachDefault = true;
+        }
+        else {
+            options.attachNew = true;
+        }
     }
     if (attach && (!options.attachName.empty() ||
                    !options.attachCommand.empty() || options.attachNew)) {
@@ -146,22 +150,6 @@ int main(int argc, char **argv) {
         }
         if (stop) {
             return runDaemonStop(options);
-        }
-        if (implicitNew && options.host.empty()) {
-            // One line when terminals already run here, so that they are not
-            // forgotten.
-            std::string error;
-            const auto socket = options.socketPath.empty()
-                                    ? mtd::newestDaemonSocket()
-                                    : options.socketPath;
-            if (const auto info = frontend::probeDaemon(socket, error, 1000);
-                info && info->status && info->status->sessions > 0 &&
-                mtd::compatibility(mtd::ownVersion(), info->version) !=
-                    mtd::Compatibility::Incompatible) {
-                const auto n = info->status->sessions;
-                std::cerr << n << (n == 1 ? " terminal runs" : " terminals run")
-                          << ": matmux --attach\n";
-            }
         }
         return runAttachTty(options);
     }
