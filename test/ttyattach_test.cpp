@@ -597,6 +597,24 @@ TEST_CASE("Ctrl+B d leaves the client and the terminal keeps running; Ctrl+B l "
     EXPECT(other.host.shows("keeps running"));
 }
 
+TEST_CASE("The farewell names the program to run to come back") {
+    Rig rig;
+    rig.enterPane();
+    rig.type("\x02"
+             "d");
+    EXPECT(rig.mode->farewell().find("matterm --attach-tty") !=
+           std::string::npos);
+    AttachTty::Options options;
+    options.comeBack = "matmux --attach";
+    Rig matmux({entry("a", "alpha")}, options);
+    matmux.enterPane();
+    matmux.type("\x02"
+                "d");
+    EXPECT(matmux.mode->farewell().find("matmux --attach comes back") !=
+           std::string::npos);
+    EXPECT(matmux.mode->farewell().find("matterm") == std::string::npos);
+}
+
 TEST_CASE("Ctrl+B c leaves this terminal running and starts a new one") {
     Rig rig;
     rig.enterPane();

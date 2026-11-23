@@ -97,8 +97,10 @@ public:
                                  // showing the list.
         NewTerminal newTerminal; // What --new starts.
         bool exitWhenEnded = false; // --new: the client ends with the program.
-        std::string ownSession;     // The terminal this program runs in
-                                    // (MATTERM_SESSION): never attached.
+        std::string comeBack = "matterm --attach-tty"; // What the farewell says
+                                                       // to run to come back.
+        std::string ownSession; // The terminal this program runs in
+                                // (MATTERM_SESSION): never attached.
     };
 
     AttachTty(HostScreen &host, SessionSource &source)
@@ -409,8 +411,8 @@ private:
         }
         switch (event.text[0]) {
         case 'd':
-            farewell_ = paneTitle_ +
-                        " keeps running; matterm --attach-tty comes back to it";
+            farewell_ = paneTitle_ + " keeps running; " + options_.comeBack +
+                        " comes back to it";
             pane_.reset();
             finished_ = true;
             break;

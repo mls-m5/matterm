@@ -46,7 +46,7 @@ public:
     TtyHost()
         : session_(sessionOptions()) {
         if (!session_.start()) {
-            throw std::runtime_error("--attach-tty needs a terminal: run it in "
+            throw std::runtime_error("This needs a terminal: run it in "
                                      "a terminal (ssh -t from a phone)");
         }
         session_.screen().canvas().setWideChars(true);
@@ -295,6 +295,7 @@ int runAttachTty(const DaemonOptions &daemonIn) {
     TtyHost host;
     AttachTty::Options options;
     options.ownSession = own;
+    options.comeBack = daemon.attachProgram;
     options.startNew = daemon.attachNew;
     options.exitWhenEnded = daemon.attachNew;
     options.newTerminal.name = daemon.attachName;

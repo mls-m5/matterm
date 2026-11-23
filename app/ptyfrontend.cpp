@@ -1,5 +1,6 @@
 #include "ptyfrontend.h"
 #include "daemonconnect.h"
+#include "restorecwd.h"
 
 #include "borderless.h"
 
@@ -876,17 +877,18 @@ int runPtyFrontend(const char *font,
         return probePane(procSource, pane.link ? pane.link->childPid() : 0, pane.link ? pane.link->foregroundProcessGroup() : 0);
     };
     daemonCwd = [&]() -> std::string {
-        if (remoteDaemon) {
-            return {}; // The other computer's shell starts in its own home.
-        }
+        // A saved folder of a remote daemon goes to it as it is: it looks on its own computer.
         if (!nextCwd.empty()) {
             return nextCwd;
         }
         if (const NativePane *focused = workspace.focusedPane(); focused && focused->daemon) {
-            const auto cwd = paneState(const_cast<NativePane &>(*focused)).cwd;
+            const auto cwd = paneState(const_cast<NativePane &>(*focused)).cwd; // As the daemon sees it.
             if (!cwd.empty()) {
                 return cwd;
             }
+        }
+        if (remoteDaemon) {
+            return {}; // This computer's folder means nothing there: its shell starts in its own home.
         }
         std::error_code ec;
         const auto here = std::filesystem::current_path(ec);
@@ -1024,7 +1026,7 @@ int runPtyFrontend(const char *font,
         std::vector<std::string> gone; // Folders that no longer exist, by creation order.
         const auto report = restoreSession(workspace, *snapshot, [&](const SavedPane &saved) {
             std::error_code ec;
-            nextCwd = !saved.cwd.empty() && std::filesystem::is_directory(saved.cwd, ec) ? saved.cwd : std::string();
+            nextCwd = cwdToRequest(saved.cwd, remoteDaemon, !saved.cwd.empty() && std::filesystem::is_directory(saved.cwd, ec));
         });
         nextCwd.clear();
         for (const auto &restored : report.panes) {
@@ -1034,7 +1036,10 @@ int runPtyFrontend(const char *font,
             }
             const SavedPane &saved = *restored.saved;
             std::error_code ec;
-            if (!saved.cwd.empty() && !std::filesystem::is_directory(saved.cwd, ec)) {
+            // A local pane: the folder is checked here. A pane of a remote daemon: ask where it really runs.
+            const bool folderGone = remoteDaemon ? restoredElsewhere(saved.cwd, pane->daemon ? paneState(*pane).cwd : std::string())
+                                                 : !saved.cwd.empty() && !std::filesystem::is_directory(saved.cwd, ec);
+            if (folderGone) {
                 pane->v.note("restored without its folder (gone): " + CloseRequest::shown(saved.cwd));
             }
             if (!saved.text.empty()) {
@@ -1466,7 +1471,7 @@ int runPtyFrontend(const char *font,
                             nextAttachId = saved.terminal; // Once: a terminal named twice is shown once.
                         }
                         std::error_code ec;
-                        nextCwd = !saved.cwd.empty() && std::filesystem::is_directory(saved.cwd, ec) ? saved.cwd : std::string();
+                        nextCwd = cwdToRequest(saved.cwd, remoteDaemon, !saved.cwd.empty() && std::filesystem::is_directory(saved.cwd, ec));
                     });
                     nextAttachId.clear();
                     nextCwd.clear();
@@ -1653,7 +1658,12 @@ int runPtyFrontend(const char *font,
             break;
         case 1:
             expectThat(connected(workspace.focusedPane()), "the first terminal is attached to the daemon");
-            if (variant == "check") {
+            if (variant == "cwd") {
+                // A saved session whose folders are known to the daemon's computer: one exists, one does not.
+                handleAction("session.open:cwdtest");
+                later(2500);
+            }
+            else if (variant == "check") {
                 expectThat(layoutFiles.list().size() == 1, "the layout of the earlier window is still there");
                 expectThat(paletteEntryNamed(paletteExtra(), "Attach tab..."), "the palette offers Attach tab...");
                 scriptDone = true;
@@ -1670,6 +1680,21 @@ int runPtyFrontend(const char *font,
             }
             break;
         case 2:
+            if (variant == "cwd") {
+                const char *okText = std::getenv("MATTERM_SMOKE_CWD_OK");
+                const char *missingText = std::getenv("MATTERM_SMOKE_CWD_MISSING");
+                const std::string ok = okText ? okText : "", missing = missingText ? missingText : "";
+                std::vector<std::string> folders;
+                workspace.forEachPane([&](PaneId, NativePane &p, bool) { folders.push_back(paneState(p).cwd); });
+                expectThat(folders.size() == 3, "the session adds its two panes");
+                expectThat(std::count(folders.begin(), folders.end(), ok) == 1,
+                           "a saved folder is restored (the daemon's computer has it)");
+                expectThat(std::count(folders.begin(), folders.end(), missing) == 0,
+                           "a folder that is gone is not entered");
+                scriptDone = true;
+                running = false;
+                break;
+            }
             expectThat(workspace.tabCount() == 2 && connected(workspace.focusedPane()), "the second terminal is attached");
             expectThat(layoutFiles.list().empty(), "no layout is saved yet");
             expectThat(!paletteEntryNamed(paletteExtra(), "Attach tab..."), "Attach tab... is not offered without a layout");

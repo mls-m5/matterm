@@ -49,3 +49,16 @@ The pty test also checks `-- COMMAND` with its exit code, `MATTERM_SESSION` set 
 the window's own-terminal refusal on a screen (only the list text is tested), `matmux` names (not
 renamed yet), the config-file setting for the status line (no config file yet).
 Diff-based drawing means the pty test looks for short fragments of the lines on screen.
+
+## Folders with a remote daemon (2026-11-23)
+
+Open session..., Attach tab... and new terminals with `--daemon-host` now pass the saved (or the
+focused pane's) folder on to the daemon instead of dropping it: the daemon checks it on its own
+computer and starts in its home folder when it is missing, and the pane says "restored without its
+folder" when `GetSessionInfo` shows it runs elsewhere (no protocol change). The rule is
+`src/frontend/restorecwd.h` (`cwdToRequest`, `restoredElsewhere`, unit-tested); `layout_smoke.py`
+has a `cwd` variant (a session file with one existing and one missing folder, opened in a window with
+a local and with a remote daemon through the fake ssh). The fake ssh runs on the same computer, so the
+test proves the folder is requested and the missing one is not entered, not that two computers differ.
+The farewell of the client names the program that comes back (`matmux --attach` from matmux,
+`matterm --attach-tty` from matterm): `AttachTty::Options::comeBack`, `DaemonOptions::attachProgram`.

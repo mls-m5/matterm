@@ -184,7 +184,9 @@ round; it never blocks.
   a slow link that stutters. They should move to the link's own connection.
 * Version mismatch is only what `ControlHello` already reports; `matterm-daemon` must be on the
   remote `PATH` or be copied with `--daemon-install`.
-* Session restore and "new terminal in this folder" use local folders and are off for a remote daemon.
+* Session restore, Attach tab... and "new terminal in this folder" pass the saved or current folder (as
+  the daemon saw it, by `GetSessionInfo`) on to the daemon, which looks at it on its own computer and
+  starts in its home folder when it is missing; the pane then says "restored without its folder".
 * The copy is for Linux on the same CPU architecture as this computer (see above for the fallback).
 * Windows has no `ssh -L` for Unix sockets worth relying on, and no daemon.
 * Real `ssh` was not available where this was built: the tests run the whole chain against a fake

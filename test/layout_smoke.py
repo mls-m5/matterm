@@ -26,13 +26,30 @@ try:
         args += ["--daemon-socket", tmp + "/run/d.sock"]
     ok = True
     # One window does both; then the only tab is detached (the window ends) and a later window checks.
-    for variant in ("", "detach-only", "check"):
+    # The folders of a saved session are the daemon's, also when it is on another computer.
+    ok_dir = tmp + "/okdir"
+    os.makedirs(ok_dir)
+    missing_dir = tmp + "/missing-on-the-other-computer"
+    for variant in ("", "detach-only", "check", "cwd"):
         run_env = dict(env)
         run_env["MATTERM_LAYOUT_SMOKE"] = variant
         if variant == "":
             shutil.rmtree(tmp + "/config", ignore_errors=True)
         if variant == "detach-only":
             shutil.rmtree(tmp + "/config", ignore_errors=True)
+        if variant == "cwd":
+            shutil.rmtree(tmp + "/config", ignore_errors=True)
+            sessions = tmp + "/config/matterm/sessions"
+            os.makedirs(sessions, mode=0o700)
+            os.chmod(tmp + "/config/matterm", 0o700)
+            os.chmod(tmp + "/config", 0o700)
+            node = ('{"split":"h","ratio":500,"a":{"pane":{"cwd":"%s"}},"b":{"pane":{"cwd":"%s"}}}'
+                    % (ok_dir, missing_dir))
+            with open(sessions + "/cwdtest.json", "w") as f:
+                f.write('{"version":1,"name":"cwdtest","saved":1,"active":0,"tabs":[{"title":"","focus":0,"layout":%s}]}' % node)
+            os.chmod(sessions + "/cwdtest.json", 0o600)
+            run_env["MATTERM_SMOKE_CWD_OK"] = ok_dir
+            run_env["MATTERM_SMOKE_CWD_MISSING"] = missing_dir
         result = subprocess.run(args, env=run_env, capture_output=True, text=True, timeout=90)
         sys.stdout.write(result.stdout)
         sys.stderr.write(result.stderr)

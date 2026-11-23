@@ -17,6 +17,8 @@ struct DaemonOptions {
     std::string tabActivity = "icon"; // --tab-activity icon|pulse|off (--no-tab-pulse = off)
     bool borderless = true;           // Our own frame (the default; --system-frame turns it off, docs/TABS_PLAN.md section 16)
     // matterm --attach-tty / matmux: start a terminal at once (--new [--name N] [-- COMMAND...]).
+    // What the client tells the user to run to come back to a terminal it left running.
+    std::string attachProgram = "matterm --attach-tty";
     bool attachNew = false;
     std::string attachName;
     std::vector<std::string> attachCommand;

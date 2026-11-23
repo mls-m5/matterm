@@ -54,6 +54,7 @@ void usage(std::ostream &out) {
 int main(int argc, char **argv) {
     DaemonOptions options;
     options.enabled = true;
+    options.attachProgram = "matmux --attach";
     bool list = false, stop = false, attach = false, implicitNew = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];

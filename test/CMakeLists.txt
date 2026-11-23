@@ -134,6 +134,10 @@ if(BUILD_TESTING)
     target_link_libraries(ttyattach_test PRIVATE matterm::transport matterm::vt matterm::terminal matterm::ttymatterm)
     add_test(NAME tty_attach COMMAND ttyattach_test)
 
+    add_executable(restorecwd_test restorecwd_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(restorecwd_test PRIVATE ../src/frontend)
+    add_test(NAME restore_cwd COMMAND restorecwd_test)
+
     add_executable(layoutsnapshot_test layoutsnapshot_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(layoutsnapshot_test PRIVATE ../src/frontend)
     add_test(NAME layout_snapshot COMMAND layoutsnapshot_test)
