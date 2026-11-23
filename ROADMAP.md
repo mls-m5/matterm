@@ -219,6 +219,15 @@ These describe much more functionality than matterm currently implements.
 - [ ] Animated text reveal: demo pacing first, then an opt-in renderer effect for the regular terminal. See docs/tasks/text-reveal-animation.md.
 - [x] Mattrix OS as a separate terminal program (`mattrix`, see docs/FAKEOS.md; original note:): a standalone binary (e.g. `mattrix`) running the fakeos core in a regular terminal, building on `matterm-demo --tty`. Name it "Mattrix OS" in its own text so it is not confused with matterm (the emulator); web and native-window demos can say "powered by matterm". Renderer-only effects (smooth cursor, fades) need simpler tty fallbacks (256-colour steps). Distribution (install target, static binary) undecided.
 - [ ] Session ideas after the tmux comparison (checkpoints, scrollback spill to disk, shell-integration marks): docs/MULTI_TERMINAL.md section 12. Not scheduled.
+- [ ] Checkpoint on detach (owner, 2026-11-23: saved for later; he tries the replay changes first, which
+  replay a full 4 MiB ring in ~0.2 s locally, docs/CPU.md "Replay"). Alternatives from agent2: (A) the
+  daemon keeps a live VT model per session and serializes it on demand (exact, but always-on parse
+  cost, 1-12 MB per session, an emulator in the daemon); (B) a checkpoint only at detach: the ring
+  tail goes through a transient model, the serialized screen (+ up to ~1000 scrollback rows) is
+  stored in memory with its ring offset, reattach applies it and replays from there (20-200 KB per
+  session, nothing on disk, no steady cost; scrollback before the checkpoint is lost unless
+  included); (C) do nothing. Agent2 recommends (B) only if slow links (ssh, 4 MiB at 1 MB/s = 4 s)
+  matter, otherwise (C). Decide after real use over `--daemon-host`.
 - [ ] Later, owner thinks about it (2026-11-23): the browser client as an installable web app (PWA:
   an icon on the phone's home screen, full screen, no address bar; little code, still needs a
   reachable server) and/or a thin Android app. For now the phone uses Termux with `matmux` over ssh.
