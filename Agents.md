@@ -77,6 +77,9 @@ and runs integration tests before committing.
   or extend it so the same thing is not implemented twice. If there is a good reason to write a
   separate one, say so in the code comment and in the feature description (what was missing and why
   the existing code could not be used). The integrator checks for duplicates when merging.
+- **Squash commit identity.** From now on, use `Mattias Larsson Sköld <mattias.l.sk@gmail.com>`
+  as both author and committer of integration squash commits, as explicitly requested by the owner.
+  Apply the identity per command; do not rewrite existing commits or change global Git configuration.
 - **History is linear.** The integrator squash-merges each finished task into `main` (one commit per
   task, `git merge --squash`) and then resets the agent's branch to `main`; agents merge `main`
   into their branch before starting new work. Do not run `git worktree` commands from an agent
