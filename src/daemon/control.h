@@ -26,7 +26,8 @@ constexpr std::uint16_t kControlVersion = 3;
 // itself (the version in ControlWelcome::build).
 constexpr std::uint16_t kControlFormat = 1;
 constexpr std::uint16_t kControlBreaking = kControlVersion;
-constexpr std::uint16_t kControlAdditive = 2; // 2: GetActivity/Activity.
+constexpr std::uint16_t kControlAdditive =
+    3; // 2: GetActivity/Activity; 3: CreateTerminal.
 constexpr std::size_t kMaxName = 64;
 constexpr std::size_t kMaxListed = 256;
 constexpr std::size_t kMaxPath = 4096;
@@ -56,6 +57,19 @@ struct CreateSession {
     std::string cwd;
     std::uint16_t columns = 80;
     std::uint16_t rows = 24;
+};
+// CreateSession for a client that has no window (matterm-attach): also the
+// command to run (empty: the user's shell) and a name. The environment is still
+// never the client's choice; the daemon adds MATTERM_SESSION=<id>. Only the
+// owner of the socket can ask (the same user can run any command anyway); a web
+// connection cannot. Additive 1.3.3; an older daemon answers BadMessage.
+struct CreateTerminal {
+    std::string cwd;
+    std::uint16_t columns = 80;
+    std::uint16_t rows = 24;
+    std::vector<std::string>
+        command;      // At most 32 words; the first is the program.
+    std::string name; // See SetName; empty: none.
 };
 // What a session runs, for saving and for the close question (read from /proc by the daemon).
 struct GetSessionInfo { std::string id; };
@@ -126,7 +140,8 @@ using ControlRequest = std::variant<ControlHello,
                                     CreateSession,
                                     GetSessionInfo,
                                     SetName,
-                                    GetActivity>;
+                                    GetActivity,
+                                    CreateTerminal>;
 using ControlReply = std::variant<ControlWelcome,
                                   SessionList,
                                   Status,

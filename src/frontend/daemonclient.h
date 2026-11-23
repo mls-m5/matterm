@@ -133,6 +133,40 @@ inline std::optional<DaemonInfo> probeDaemon(const std::string &socketPath,
     return info;
 }
 
+// A new terminal in the daemon for a client that has no window (matterm-attach
+// --new): `request` has the size, folder, command (empty: the user's shell) and
+// name. Returns the session id to attach to with Hello{id}; nullopt with
+// `error` set (an older daemon than 1.3.3 says it does not know the request:
+// then the plain CreateSession is tried, without command and name, only when
+// there was neither).
+inline std::optional<std::string> createTerminal(
+    const std::string &socketPath,
+    const mtd::CreateTerminal &request,
+    std::string &error) {
+    auto reply = askDaemon(socketPath, request, error);
+    if (!reply && request.command.empty() && request.name.empty() &&
+        error.find("closed") != std::string::npos) {
+        error.clear();
+        reply = askDaemon(
+            socketPath,
+            mtd::CreateSession{request.cwd, request.columns, request.rows},
+            error);
+    }
+    if (!reply) {
+        return std::nullopt;
+    }
+    if (const auto *created = std::get_if<mtd::SessionCreated>(&*reply)) {
+        return created->id;
+    }
+    if (const auto *refused = std::get_if<mtd::ControlError>(&*reply)) {
+        error = refused->reason;
+    }
+    else {
+        error = "unexpected answer from the daemon";
+    }
+    return std::nullopt;
+}
+
 // True when something accepts connections on the socket.
 inline bool daemonRunning(const std::string &socketPath) {
     try {

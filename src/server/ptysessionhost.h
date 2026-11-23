@@ -11,6 +11,8 @@ struct ProcessConfig {
     std::vector<std::string> environmentAllowList{
         "HOME", "USER", "LOGNAME", "PATH", "LANG", "LC_ALL", "LC_CTYPE"};
     std::string workingDirectory; // Empty: inherited.
+    std::vector<std::string> extraEnvironment; // "NAME=value" added to the
+                                               // child (e.g. MATTERM_SESSION).
     std::chrono::milliseconds terminationGrace{500};
     std::chrono::milliseconds terminationDrainTimeout{1000};
 };

@@ -69,7 +69,8 @@ std::string executable(const std::string &command) {
 std::vector<std::string> environment(
     const std::string &term,
     PtyProcess::ColorCapability color,
-    const std::optional<std::vector<std::string>> &allowList) {
+    const std::optional<std::vector<std::string>> &allowList,
+    const std::vector<std::string> &extra) {
     std::vector<std::string> result;
     for (char **entry = environ; entry && *entry; ++entry) {
         const std::string value = *entry;
@@ -85,6 +86,18 @@ std::vector<std::string> environment(
                 allowList->end()) {
             result.push_back(value);
         }
+    }
+    for (const auto &entry : extra) {
+        const auto name = entry.substr(0, entry.find('='));
+        result.erase(std::remove_if(result.begin(),
+                                    result.end(),
+                                    [&](const std::string &e) {
+                                        return e.compare(0,
+                                                         name.size() + 1,
+                                                         name + "=") == 0;
+                                    }),
+                     result.end());
+        result.push_back(entry);
     }
     result.push_back("TERM=" + term);
     if (color == PtyProcess::ColorCapability::TrueColor) {
@@ -151,7 +164,8 @@ struct PtyProcess::Impl {
                const std::string &term,
                ColorCapability color,
                const std::optional<std::vector<std::string>> &allowList,
-               const std::string &workingDirectory) {
+               const std::string &workingDirectory,
+               const std::vector<std::string> &extraEnvironment) {
         dimensions(columns, rows);
         if (arguments.empty() || arguments[0].empty() || term.empty() ||
             term.find('\0') != std::string::npos) {
@@ -167,7 +181,13 @@ struct PtyProcess::Impl {
             throw std::invalid_argument("NUL in working directory");
         }
         const auto path = executable(arguments[0]);
-        auto env = environment(term, color, allowList);
+        for (const auto &entry : extraEnvironment) {
+            if (entry.find('=') == std::string::npos ||
+                entry.find('\0') != std::string::npos) {
+                throw std::invalid_argument("bad extra environment entry");
+            }
+        }
+        auto env = environment(term, color, allowList, extraEnvironment);
         std::vector<char *> argv, envp;
         for (const auto &argument : arguments) {
             argv.push_back(const_cast<char *>(argument.c_str()));
@@ -283,10 +303,17 @@ PtyProcess::PtyProcess(
     const std::string &term,
     ColorCapability color,
     std::optional<std::vector<std::string>> environmentAllowList,
-    const std::string &workingDirectory)
+    const std::string &workingDirectory,
+    const std::vector<std::string> &extraEnvironment)
     : impl_(std::make_unique<Impl>()) {
-    impl_->start(
-        arguments, columns, rows, term, color, environmentAllowList, workingDirectory);
+    impl_->start(arguments,
+                 columns,
+                 rows,
+                 term,
+                 color,
+                 environmentAllowList,
+                 workingDirectory,
+                 extraEnvironment);
 }
 PtyProcess::~PtyProcess() = default;
 PtyProcess::ReadResult PtyProcess::read(char *buffer, std::size_t capacity) {

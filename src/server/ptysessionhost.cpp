@@ -25,7 +25,8 @@ bool PtySessionHost::startProcess(std::uint16_t columns, std::uint16_t rows) {
                                          "xterm-256color",
                                          PtyProcess::ColorCapability::TrueColor,
                                          config_.environmentAllowList,
-                                         config_.workingDirectory);
+                                         config_.workingDirectory,
+                                         config_.extraEnvironment);
         return true;
     }
     catch (const std::exception &) {

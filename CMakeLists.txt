@@ -96,6 +96,13 @@ if(GIT_FOUND)
         OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE git_status)
     if(git_status EQUAL 0 AND NOT git_hash STREQUAL "")
         set(MATTERM_BUILD_HASH ${git_hash})
+        # Uncommitted changes to tracked files: the hash says so (the build is not that commit).
+        execute_process(COMMAND ${GIT_EXECUTABLE} status --porcelain --untracked-files=no
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} OUTPUT_VARIABLE git_changes
+            OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        if(NOT git_changes STREQUAL "")
+            set(MATTERM_BUILD_HASH "${git_hash}-dirty")
+        endif()
     endif()
 endif()
 add_compile_definitions(MATTERM_BUILD_HASH="${MATTERM_BUILD_HASH}")

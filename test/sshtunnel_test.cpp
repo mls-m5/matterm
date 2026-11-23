@@ -28,7 +28,26 @@ protocol::Time clockNow() {
     return std::chrono::duration_cast<protocol::Time>(std::chrono::steady_clock::now().time_since_epoch());
 }
 
-// MATTERM_TEST_DAEMON: run the tests against another build of the daemon (the static one).
+// MATTERM_TEST_DAEMON: run the tests against another build of the daemon (the
+// static one). The name a program is installed under: its version and the first
+// 8 of its hash; a build with uncommitted changes (or none from git) is named
+// by its content instead.
+std::string expectedInstallName(const std::string &program,
+                                const std::string &file) {
+    auto version = mtd::ownVersion();
+    if (version.hash.size() < 8 || version.hash == "unknown" ||
+        version.hash.find("dirty") != std::string::npos) {
+        std::ifstream in(file, std::ios::binary);
+        Sha256 sha;
+        char buffer[65536];
+        while (in.read(buffer, sizeof buffer) || in.gcount() > 0) {
+            sha.update(buffer, std::size_t(in.gcount()));
+        }
+        version.hash = sha.hex();
+    }
+    return installedName(program, version);
+}
+
 std::string daemonBinary() {
     const char *other = std::getenv("MATTERM_TEST_DAEMON");
     return other && *other ? other : MATTERM_DAEMON_BIN;
@@ -373,10 +392,10 @@ TEST_CASE("--daemon-install: our daemon is copied (after asking), named after it
     const auto names = installed(fake);
     EXPECT_EQ(names.size(), std::size_t(1));
     EXPECT(names[0].rfind("matterm-daemon-", 0) == 0);
-    const auto own = mtd::ownVersion();
     EXPECT_EQ(
         names[0],
-        installedName("matterm-daemon", own)); // matterm-daemon-1.3.1-<hash8>
+        expectedInstallName("matterm-daemon",
+                            daemonBinary())); // matterm-daemon-1.3.1-<hash8>
     EXPECT(parseInstalledName(names[0]).has_value());
     // The copy is mode 0700, the same bytes, and it is the one that runs.
     const auto file = fake.dir.path + "/home/.local/share/matterm/bin/" + names[0];
@@ -434,8 +453,11 @@ TEST_CASE("matterm-attach is copied with the daemon, and old versions of both "
     const auto has = [&](const std::string &n) {
         return std::find(names.begin(), names.end(), n) != names.end();
     };
-    EXPECT(has(installedName("matterm-daemon", own)));
-    EXPECT(has(installedName("matterm-attach", own)));
+    EXPECT(has(expectedInstallName("matterm-daemon", daemonBinary())));
+    EXPECT(has(expectedInstallName(
+        "matterm-attach",
+        daemonBinary().substr(0, daemonBinary().rfind('/') + 1) +
+            "matterm-attach")));
     EXPECT(has("matterm-daemon-1.2.0-aaaaaaa1")); // The newest older one stays.
     EXPECT(!has("matterm-daemon-1.1.0-aaaaaaa2"));
     EXPECT(!has("matterm-daemon-1.0.0-aaaaaaa3"));

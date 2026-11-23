@@ -691,9 +691,11 @@ private:
                            versionError)) {
                 if (auto version = mtd::findVersionInText(versionText)) {
                     if (version->hash.size() < 8 ||
-                        version->hash == "unknown") {
-                        version->hash = hash; // Not built from git: the content
-                                              // stands in for the commit.
+                        version->hash == "unknown" ||
+                        version->hash.find("dirty") != std::string::npos) {
+                        // Not built from a commit (no git, or changes since):
+                        // the content stands in for it.
+                        version->hash = hash;
                     }
                     name = installedName(program, *version);
                 }

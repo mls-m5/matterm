@@ -34,7 +34,10 @@ public:
                ColorCapability color = ColorCapability::Unspecified,
                std::optional<std::vector<std::string>> environmentAllowList =
                    std::nullopt,
-               const std::string &workingDirectory = {});
+               const std::string &workingDirectory = {},
+               // "NAME=value" entries added to the child's environment (after
+               // the allow list).
+               const std::vector<std::string> &extraEnvironment = {});
     ~PtyProcess();
     PtyProcess(const PtyProcess &) = delete;
     PtyProcess &operator=(const PtyProcess &) = delete;

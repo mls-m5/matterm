@@ -300,8 +300,10 @@ std::optional<SessionRegistry::Attachment> SessionRegistry::attach(
                  std::any_of(impl_->tombstones.begin(),
                              impl_->tombstones.end(),
                              [&](const auto &t) { return t.id == id; }));
+        auto process = impl_->process;
+        process.extraEnvironment.push_back("MATTERM_SESSION=" + id);
         entry = std::make_shared<Entry>(
-            id, capable, impl_->config.replayBufferBytes, impl_->process);
+            id, capable, impl_->config.replayBufferBytes, std::move(process));
     }
     if (entry->generation == std::numeric_limits<std::uint64_t>::max()) {
         reject(transport, ErrorCode::Internal, "attachment limit");
@@ -447,10 +449,13 @@ bool SessionRegistry::setName(const std::string &id, const std::string &name) {
     found->second->name = name;
     return true;
 }
-std::optional<std::string> SessionRegistry::create(const std::string &workingDirectory,
-                                                   std::uint16_t columns,
-                                                   std::uint16_t rows,
-                                                   Time now) {
+std::optional<std::string> SessionRegistry::create(
+    const std::string &workingDirectory,
+    std::uint16_t columns,
+    std::uint16_t rows,
+    Time now,
+    const std::vector<std::string> &command,
+    const std::string &name) {
     if (!impl_->config.persistentSessions || impl_->config.replayBufferBytes == 0 ||
         impl_->entries.size() >= impl_->config.maxSessions || columns == 0 || rows == 0 ||
         columns > maxDimension || rows > maxDimension)
@@ -464,10 +469,14 @@ std::optional<std::string> SessionRegistry::create(const std::string &workingDir
                          [&](const auto &t) { return t.id == id; }));
     auto process = impl_->process;
     process.workingDirectory = workingDirectory;
+    if (!command.empty())
+        process.arguments = command;
+    process.extraEnvironment.push_back("MATTERM_SESSION=" + id);
     auto entry = std::make_shared<Entry>(id, true, impl_->config.replayBufferBytes, std::move(process));
     if (!entry->startProcess(columns, rows))
         return std::nullopt;
     entry->detachedAt = now;
+    entry->name = name;
     impl_->entries.emplace(id, entry);
     if (detachedSize() > impl_->config.maxDetachedSessions) {
         entry->stop(now);

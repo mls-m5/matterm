@@ -285,6 +285,31 @@ private:
         }
         reply(SessionCreated{*id});
     }
+    void handle(const CreateTerminal &m) {
+        if (mode_ != Mode::Control) {
+            controlError(ControlErrorCode::BadMessage,
+                         "not available to this connection");
+            closeAfterFlush();
+            return;
+        }
+        if (d_.shutdownPending) {
+            controlError(ControlErrorCode::Busy, "shutting down");
+            return;
+        }
+        std::string cwd;
+        struct stat st {};
+        if (frontend::plainPath(m.cwd) && ::stat(m.cwd.c_str(), &st) == 0 &&
+            S_ISDIR(st.st_mode))
+            cwd = m.cwd;
+        const auto id = d_.registry->create(
+            cwd, m.columns, m.rows, timeNow(), m.command, m.name);
+        if (!id) {
+            controlError(ControlErrorCode::StartFailed,
+                         "cannot start the program");
+            return;
+        }
+        reply(SessionCreated{*id});
+    }
     void handle(const GetSessionInfo &m) {
         const auto ids = d_.registry->processIds(m.id);
         if (!ids) {

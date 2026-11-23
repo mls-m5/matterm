@@ -16,6 +16,7 @@ enum Type : std::uint8_t {
     tExposedHello = 0x47,
     tSetName = 0x48,
     tGetActivity = 0x49,
+    tCreateTerminal = 0x4a,
     tControlWelcome = 0xc0,
     tSessionList = 0xc1,
     tStatus = 0xc2,
@@ -87,6 +88,23 @@ bool write(std::string &o, const SetShared &m) {
 bool write(std::string &o, const SetName &m) {
     put8(o, tSetName);
     if (!putString(o, m.id, kMaxId) || !validTerminalName(m.name)) return false;
+    return putString(o, m.name, kMaxName);
+}
+bool write(std::string &o, const CreateTerminal &m) {
+    put8(o, tCreateTerminal);
+    if (!putString(o, m.cwd, kMaxPath) || m.columns == 0 || m.rows == 0 ||
+        m.command.size() > kMaxArguments ||
+        (!m.command.empty() && m.command.front().empty()) ||
+        !validTerminalName(m.name)) {
+        return false;
+    }
+    put16(o, m.columns);
+    put16(o, m.rows);
+    put8(o, std::uint8_t(m.command.size()));
+    for (const auto &a : m.command) {
+        if (a.find('\0') != std::string::npos || !putString(o, a, kMaxArgument))
+            return false;
+    }
     return putString(o, m.name, kMaxName);
 }
 bool write(std::string &o, const GetStatus &) { put8(o, tGetStatus); return true; }
@@ -219,6 +237,26 @@ std::optional<ControlRequest> decodeRequest(std::string_view bytes) {
             m.columns > protocol::maxDimension || m.rows > protocol::maxDimension || !r.done()) {
             return std::nullopt;
         }
+        return m;
+    }
+    case tCreateTerminal: {
+        CreateTerminal m;
+        std::uint8_t n;
+        if (!r.get(m.cwd, kMaxPath) || !r.get(m.columns) || !r.get(m.rows) ||
+            m.columns == 0 || m.rows == 0 ||
+            m.columns > protocol::maxDimension ||
+            m.rows > protocol::maxDimension || !r.get(n) || n > kMaxArguments) {
+            return std::nullopt;
+        }
+        for (std::uint8_t i = 0; i < n; ++i) {
+            std::string a;
+            if (!r.get(a, kMaxArgument) || a.find('\0') != std::string::npos ||
+                (i == 0 && a.empty()))
+                return std::nullopt;
+            m.command.push_back(std::move(a));
+        }
+        if (!r.get(m.name, kMaxName) || !validTerminalName(m.name) || !r.done())
+            return std::nullopt;
         return m;
     }
     case tSetName: {

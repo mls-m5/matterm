@@ -64,10 +64,13 @@ public:
     // Starts a persistent session nobody is attached to yet (the client then attaches
     // with Hello{sessionId}). `workingDirectory` empty: the daemon's own. Nullopt when the
     // registry is full, cannot persist sessions, or the process did not start.
-    std::optional<std::string> create(const std::string &workingDirectory,
-                                      std::uint16_t columns,
-                                      std::uint16_t rows,
-                                      protocol::Time now);
+    std::optional<std::string> create(
+        const std::string &workingDirectory,
+        std::uint16_t columns,
+        std::uint16_t rows,
+        protocol::Time now,
+        const std::vector<std::string> &command = {},
+        const std::string &name = {});
     // Process ids of a live session, for asking /proc what it runs.
     struct ProcessIds {
         int shell = 0;

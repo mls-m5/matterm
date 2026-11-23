@@ -587,3 +587,17 @@ compatible daemon; of several the newest, after a question; with none compatible
 `--daemon-list` shows all of them; `--daemon-stop` stops one (asking first and naming its terminals):
 `Shutdown` for any daemon that answers the handshake, else SIGTERM to the pid the kernel reports for
 the socket (`SO_PEERCRED`), only for a process of the same user.
+
+**Control version 1.3.2 and 1.3.3 (additive).**
+`GetActivity` (0x49) → `Activity` (0xc9): `u8 attachedNow, u32 secondsSinceClient` (a terminal client
+attached at the moment, or how long ago the last one left; control connections do not count).
+`CreateTerminal` (0x4a): `string cwd, u16 columns, u16 rows, u8 n, n x string argument, string name` →
+`SessionCreated`. Like `CreateSession`, plus the program to run (empty: the user's shell; at most 32
+words, the first is the program, no NUL) and a name (as `SetName`). The environment is still never the
+client's choice. The control socket belongs to one user, so a command from it gives that user nothing
+new; an exposed (web) connection cannot send it. A command that does not start is `ControlError`
+`StartFailed`. An older daemon answers `BadMessage`.
+
+**`MATTERM_SESSION`.** Every terminal the daemon starts has `MATTERM_SESSION=<session id>` in its
+environment (the id of `SessionEntry`). A program that attaches to sessions can tell that it runs inside
+one and refuse to attach to itself (the output would feed its own input).
