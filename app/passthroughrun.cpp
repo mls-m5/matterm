@@ -165,7 +165,8 @@ private:
 // in the lines.
 Outcome showTerminal(DaemonPane &pane,
                      const std::string &title,
-                     const std::string &attachLine) {
+                     const std::string &attachLine,
+                     bool fresh) {
     RawHost host;
     int columns = 0, rows = 0;
     RawHost::size(columns, rows);
@@ -174,6 +175,7 @@ Outcome showTerminal(DaemonPane &pane,
     options.attachLine = attachLine;
     options.snapshot = snapshotOf;
     options.restore = restoreFor;
+    options.fresh = fresh;
     frontend::passthrough::Session session(pane, options, steadyMs());
     bool interrupted = false;
     bool hostGone = false;
@@ -285,6 +287,7 @@ int runPassthroughMode(const DaemonOptions &daemon,
     request.command = daemon.attachCommand;
     std::string id, title, message;
     bool hinted = false;
+    bool fresh = false; // This client just created the terminal.
     for (;;) {
         if (next == Next::List) {
             TtyHost host;
@@ -292,7 +295,9 @@ int runPassthroughMode(const DaemonOptions &daemon,
             options.ownSession = own;
             options.comeBack = daemon.attachProgram;
             options.listOnly = true;
-            options.selectNew = daemon.attachDefault; // matmux without arguments: Enter = a new terminal.
+            options.selectNew =
+                daemon.attachDefault; // matmux without arguments:
+                                      // Enter = a new terminal.
             options.initialMessage = message;
             AttachTty list(host, source, options);
             list.start(steadyMs());
@@ -365,12 +370,19 @@ int runPassthroughMode(const DaemonOptions &daemon,
             }
             next = Next::Attach;
             request = {};
+            fresh = true;
         }
         // next == Attach: show terminal `id`.
         int columns = 0, rows = 0;
         RawHost::size(columns, rows);
-        const std::uint64_t end = source.outputEnd(id);
-        DaemonPane pane(source.socket(), id, columns, rows, end, false); // The host terminal answers, not the hidden model.
+        const std::uint64_t end = fresh ? 0 : source.outputEnd(id);
+        DaemonPane pane(
+            source.socket(),
+            id,
+            columns,
+            rows,
+            end,
+            false); // The host terminal answers, not the hidden model.
         if (!pane.connected()) {
             if (firstNew) {
                 say("Cannot reach the daemon");
@@ -385,7 +397,8 @@ int runPassthroughMode(const DaemonOptions &daemon,
                    : std::string("matmux: Ctrl+B d leaves (the terminal keeps "
                                  "running), l the list, c a new terminal");
         hinted = true;
-        const Outcome outcome = showTerminal(pane, title, line);
+        const Outcome outcome = showTerminal(pane, title, line, fresh);
+        fresh = false; // Taking back a running terminal is an ordinary attach.
         switch (outcome.kind) {
         case Outcome::Kind::Leave:
             say(title + " keeps running; " + daemon.attachProgram +

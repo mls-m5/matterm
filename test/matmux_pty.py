@@ -107,11 +107,15 @@ def open_marked(client, marker, seconds=2.0):
 
 
 def find_row(client, text, key=b"x", seconds=0.8):
-    """In the list: press a digit and `key` until what the list says contains `text` (no search in the list);
-    leaves the question open when found."""
-    for digit in b"123456789":
+    """Walk every terminal row, including rows beyond the 1-9 shortcuts.
+    Leave the matching confirmation open. Session IDs sort unpredictably, so
+    checking only the first nine rows makes end-terminal assertions flaky.
+    """
+    client.send(b"g")  # First row is New terminal.
+    client.pump(0.1)
+    for _ in range(count_sessions()):
         client.raw = b""
-        client.send(bytes([digit]))
+        client.send(b"j")
         client.pump(0.1)
         client.send(key)
         if client.wait_for(text, seconds):
@@ -314,9 +318,10 @@ try:
     ANSWERS = [(b"\x1b[c", b"\x1b[?62;c"), (b"\x1b[6n", b"\x1b[5;7R"), (b"\x1b[>q", b"\x1bP>|hostterm 1\x1b\\"),
                (b"\x1b]11;?", b"\x1b]11;rgb:aaaa/bbbb/cccc\x1b\\")]
 
-    def asked(extra, host_answers, name):
+    def asked(extra, host_answers, name, delay=True):
         out = tmp + "/probe-" + name
-        t = Tty(socket, extra + ("--new", "--", "sh", "-c", "sleep 1; exec python3 %s %s 2.5" % (probe, out)))
+        command = (("sleep 1; " if delay else "") + "exec python3 %s %s 2.5") % (probe, out)
+        t = Tty(socket, extra + ("--new", "--", "sh", "-c", command))
         ttys.append(t)
         end = time.time() + 12
         answered = set()
@@ -334,6 +339,8 @@ try:
     expected = repr(b"".join(a for _, a in ANSWERS))
     check(got == expected, "passthrough with a host that answers: the program gets exactly the host's answers, once")
     print("      got: " + str(got))
+    got = asked((), True, "immediate-host", delay=False)
+    check(got == expected, "a freshly created terminal forwards startup questions without waiting for replay")
     got = asked((), False, "silent")
     check(got == repr(b""), "passthrough with a silent host: matterm answers nothing itself")
     got = asked(("--rendered",), False, "rendered")

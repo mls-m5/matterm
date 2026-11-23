@@ -58,6 +58,8 @@ public:
             << 20; // Bytes waiting for the host before the daemon is not read.
         std::int64_t replayTimeoutMs =
             5000; // Show the screen anyway after this long.
+        // A new terminal's startup queries must reach the host unchanged.
+        bool fresh = false;
     };
 
     Session(AttachedPane &pane, Options options, std::int64_t now)
@@ -69,6 +71,12 @@ public:
                 out_.append(bytes);
             }
         });
+        if (options_.fresh) {
+            live_ = true;
+            if (!options_.attachLine.empty()) {
+                out_ += options_.attachLine + "\r\n";
+            }
+        }
     }
     ~Session() {
         pane_.view().setOutputTap({});
@@ -84,6 +92,7 @@ public:
         if (!stalled()) {
             pane_.tick();
         }
+        flushInput(); // Retry input queued before the connection was running.
         if (!live_) {
             if (pane_.view().state() != TerminalView::State::Live) {
                 live_ = true; // It ended or went away before there was anything
@@ -191,8 +200,9 @@ private:
     void flushInput() {
         if (live_ && !forward_.empty() &&
             pane_.view().state() == TerminalView::State::Live) {
-            pane_.view().sendInput(forward_);
-            forward_.clear();
+            if (pane_.view().sendInput(forward_)) {
+                forward_.clear();
+            }
         }
     }
 

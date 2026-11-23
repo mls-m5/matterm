@@ -18,7 +18,10 @@ struct FakeLink : TerminalLink {
     void setEvents(Events e) override {
         events = std::move(e);
     }
+    bool accept = true;
     bool sendInput(std::string_view bytes) override {
+        if (!accept)
+            return false;
         sent.append(bytes);
         return true;
     }
@@ -71,8 +74,10 @@ struct Rig {
     std::unique_ptr<Session> session;
     std::int64_t now = 100;
     explicit Rig(std::size_t highWater = 1u << 20,
-                 std::string attachLine = {}) {
+                 std::string attachLine = {},
+                 bool fresh = false) {
         Session::Options options;
+        options.fresh = fresh;
         options.title = "work";
         options.attachLine = std::move(attachLine);
         options.highWater = highWater;
@@ -292,6 +297,30 @@ TEST_CASE("The restore knows whether the program is in the alternate screen") {
     alt.tick();
     EXPECT_EQ(alt.session->restore(), std::string("[RESTORE-ALT]"));
     EXPECT(alt.restoredInAlt);
+}
+
+TEST_CASE("Fresh startup queries are forwarded from the first byte") {
+    Rig rig(1u << 20, "keys", true);
+    EXPECT(rig.session->live());
+    EXPECT_EQ(rig.session->hostOut(), std::string("keys\r\n"));
+    rig.session->consumed(rig.session->hostOut().size());
+    rig.pane.output("\x1b[c");
+    EXPECT_EQ(rig.session->hostOut(), std::string("\x1b[c"));
+    rig.tick();
+    EXPECT(rig.session->hostOut().find("SNAP") == std::string::npos);
+}
+
+TEST_CASE("Fresh input waits for the connection instead of being lost") {
+    Rig rig(1u << 20, {}, true);
+    rig.pane.link.accept = false;
+    rig.session->input("ls");
+    rig.tick();
+    EXPECT(rig.pane.link.sent.empty());
+    rig.pane.link.accept = true;
+    rig.tick();
+    EXPECT_EQ(rig.pane.link.sent, std::string("ls"));
+    rig.tick();
+    EXPECT_EQ(rig.pane.link.sent, std::string("ls"));
 }
 
 TEST_SUIT_END
