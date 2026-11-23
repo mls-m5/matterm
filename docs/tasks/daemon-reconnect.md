@@ -21,3 +21,27 @@ Owned paths: `src/frontend/sshtunnel.h`, `src/frontend/daemonlink.h`, `test/ssht
 
 Acceptance: ctest green, new tests fail before and pass after, tree warning-free,
 clang-format run. State plainly that real sshd was not available.
+
+## Follow-up: first connection times out after remote installation
+
+Owner report (2026-11-23; record for later investigation, not reproduced here):
+`matterm --daemon-host user@lan-host` often fails on the first attempt, while
+running the same command again succeeds. The failing attempt prompts to install
+this daemon version, reports successful copying of both versioned binaries
+(`matterm-daemon` and `matmux`), removes older binaries, then exits with:
+
+```text
+--daemon-host: ssh user@lan-host: no answer in time
+```
+
+The reported daemon version was `1.3.4-276925e3`; the copied matmux version was
+`1.3.4-b419744e`. Installation success is reported before the timeout; this does
+not establish whether daemon startup, readiness, socket forwarding or the initial
+handshake is delayed. Do not assume a cause or merely raise the timeout.
+
+Investigate install -> daemon start -> remote socket readiness -> SSH forward ->
+initial protocol response, including whether installation consumes the startup
+deadline and whether the differing binary build identifiers are expected. Add a
+first-install regression test with delayed readiness and verify that a successful
+installation can connect without a second manual launch. Real LAN/SSH validation
+remains required. Keep this separate from the current perflog and settings work.
