@@ -210,6 +210,36 @@ the list, `matmux --new [--name N] [-- COMMAND]` as above; `-t` is needed so tha
 allocated.) Together with the daemon this is a small tmux: start a terminal, leave it running, come
 back to it later.
 
+### matmux passes the output through (2026-11-23)
+
+`matmux` shows a terminal by **passing the program's output through** to your terminal, unchanged: your
+terminal keeps its own scrollback, selection, mouse and touch scrolling (in Termux: swipe to scroll, long
+press to select), and a program that is not in the alternate screen does not put your terminal there
+either. When you attach, the daemon's replay is read into a hidden screen first and the host terminal is
+brought to the same state in one go (the older lines first, so they land in the scrollback, then the screen
+with the same rows); after that every byte goes through as it comes, in order, nothing dropped (when your
+terminal is slower than the program, matmux stops reading from the daemon until it has caught up). Keys,
+the mouse and paste go to the program as your terminal sends them. A resize goes to the daemon and the
+program redraws itself.
+
+Ctrl+B still is the prefix: `d` leaves (the terminal keeps running), `l` the list, `c` a new terminal,
+Ctrl+B twice sends one Ctrl+B. There is no status line and no hint line while a terminal is shown (the
+program owns the whole screen); one line with the keys is printed when matmux attaches, before the
+screen. The list (`matmux --attach`) is a full-screen view that leaves the alternate screen before a
+terminal is shown, so the scrollback stays. When the terminal is taken over by another client, the
+connection is lost or the program ends, your terminal is put back (alternate screen left if the program
+had it, mouse/paste/focus off, cursor shown) and a plain line says what happened; after a take-over or a
+lost connection type Enter to take it back, `l` for the list or `d` to leave. The same happens on
+SIGTERM/SIGHUP and, as far as possible, on a crash.
+
+`matmux --rendered` (and `matterm --attach-tty`) keep the other way: matmux draws the terminal cell by
+cell in the alternate screen, with the status line and `Ctrl+B s`/`?`; no host scrollback.
+
+Known limits: the hidden screen does not know the tab stops, the character sets or the pen (the colours in
+force for the next character) of the program, so right after the attach these are the host's until the
+program sets them again; a program in the alternate screen: what was behind it on the primary screen is not
+restored (the host shows what it showed before the attach).
+
 The list has **New terminal** as its first row (key `n`; your shell, in the folder you are in), then
 the terminals of the daemon (name, what runs, `(in use)` if another client has it). Choose with
 Up/Down (or `j`/`k`, `g`/`G`, or a digit) and Enter; choosing is the confirmation: another client

@@ -154,6 +154,12 @@ if(BUILD_TESTING)
     target_link_libraries(ttyattach_test PRIVATE matterm::transport matterm::vt matterm::terminal matterm::ttymatterm)
     add_test(NAME tty_attach COMMAND ttyattach_test)
 
+    add_executable(passthrough_test passthrough_test.cpp ../src/daemon/control.cpp)
+    target_link_libraries(passthrough_test PRIVATE mls_unit_test_main)
+    target_include_directories(passthrough_test PRIVATE ../src/frontend ../src/daemon)
+    target_link_libraries(passthrough_test PRIVATE matterm::transport matterm::vt matterm::terminal matterm::ttymatterm)
+    add_test(NAME passthrough COMMAND passthrough_test)
+
     add_executable(restorecwd_test restorecwd_test.cpp)
     target_link_libraries(restorecwd_test PRIVATE mls_unit_test_main)
     target_include_directories(restorecwd_test PRIVATE ../src/frontend)
@@ -490,6 +496,14 @@ if(BUILD_TESTING)
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/attachtty_pty.py"
                         $<TARGET_FILE:attachtty_probe> $<TARGET_FILE:matterm-daemon-e2e>)
             set_tests_properties(attach_tty_pty_nosdl PROPERTIES TIMEOUT 120)
+        endif()
+
+        # matmux in passthrough mode (the host terminal keeps its scrollback), real daemon, real ptys.
+        if(Python3_Interpreter_FOUND AND TARGET matmux AND TARGET matterm-daemon-e2e)
+            add_test(NAME matmux_pty
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/matmux_pty.py"
+                        $<TARGET_FILE:matmux> $<TARGET_FILE:matterm-daemon-e2e>)
+            set_tests_properties(matmux_pty PROPERTIES TIMEOUT 180)
         endif()
 
         # Detach tab, then Attach tab... is offered: local daemon, and --daemon-host through the fake ssh.

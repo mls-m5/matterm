@@ -639,6 +639,28 @@ TEST_CASE("Ctrl+B d leaves the client and the terminal keeps running; Ctrl+B l "
     EXPECT(other.host.shows("keeps running"));
 }
 
+TEST_CASE("A list that only chooses hands the choice back and opens nothing") {
+    AttachTty::Options options;
+    options.listOnly = true;
+    options.initialMessage = "The program in x ended (exit code 3)";
+    Rig rig({entry("a", "alpha"), entry("b", "beta")}, options);
+    EXPECT(rig.host.shows("exit code 3"));
+    rig.type("\x1b[B");
+    rig.type("\r");
+    EXPECT(rig.mode->finished() && !rig.mode->inPane());
+    EXPECT(rig.mode->choice().kind == AttachTty::Choice::Kind::Open);
+    EXPECT_EQ(rig.mode->choice().id, std::string("b"));
+    EXPECT_EQ(rig.mode->choice().title, std::string("beta"));
+    EXPECT_EQ(rig.source.opened, 0);
+    Rig fresh({entry("a", "alpha")}, options);
+    fresh.type("n");
+    EXPECT(fresh.mode->choice().kind == AttachTty::Choice::Kind::New);
+    EXPECT(fresh.source.created.empty()); // The caller starts it.
+    Rig quit({entry("a", "alpha")}, options);
+    quit.type("q");
+    EXPECT(quit.mode->finished() && quit.mode->choice().kind == AttachTty::Choice::Kind::None);
+}
+
 TEST_CASE("The farewell names the program to run to come back") {
     Rig rig;
     rig.enterPane();

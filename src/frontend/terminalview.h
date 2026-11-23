@@ -78,6 +78,9 @@ public:
         events.output = [this](std::string_view bytes) {
             outputBytes_ += bytes.size();
             parser_->feed(bytes);
+            if (outputTap_) {
+                outputTap_(bytes);
+            }
             changed();
         };
         events.exited = [this](int code, int signal) {
@@ -85,6 +88,11 @@ public:
         };
         events.closed = [this](std::string_view reason) { onClosed(reason); };
         link.setEvents(std::move(events));
+    }
+    // Gets every chunk of the program's output after the model has parsed it (matmux passes it on to
+    // the host terminal unchanged). Kept when the view is attached to another link.
+    void setOutputTap(std::function<void(std::string_view)> tap) {
+        outputTap_ = std::move(tap);
     }
     void detach() {
         if (link_) {
@@ -287,5 +295,6 @@ private:
     int exitSignal_ = 0;
     std::string title_;
     std::function<void()> changed_;
+    std::function<void(std::string_view)> outputTap_;
 };
 } // namespace frontend

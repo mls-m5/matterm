@@ -56,6 +56,11 @@ public:
     virtual bool wantsWrite() const {
         return false;
     }
+    // The daemon's replay of what the program wrote before this attach has all arrived (the
+    // passthrough mode shows the screen once it has).
+    virtual bool replayDone() const {
+        return true;
+    }
     virtual std::optional<std::int64_t> nextTickMs() const = 0;
 };
 
@@ -97,10 +102,19 @@ public:
                                  // showing the list.
         NewTerminal newTerminal; // What --new starts.
         bool exitWhenEnded = false; // --new: the client ends with the program.
+        bool listOnly = false;          // matmux: the list only chooses; the terminal is shown by the caller.
+        std::string initialMessage;     // A line under the list at the start (how the last terminal ended).
         std::string comeBack = "matterm --attach-tty"; // What the farewell says
                                                        // to run to come back.
         std::string ownSession; // The terminal this program runs in
                                 // (MATTERM_SESSION): never attached.
+    };
+
+    // What the list chose when it was started with listOnly.
+    struct Choice {
+        enum class Kind { None, Open, New } kind = Kind::None;
+        std::string id;    // Open.
+        std::string title; // Open: the name of the terminal.
     };
 
     AttachTty(HostScreen &host, SessionSource &source)
@@ -116,6 +130,9 @@ public:
         statusOn_ =
             options_.statusLine && size().second >= options_.statusMinRows;
         refresh();
+        if (!options_.initialMessage.empty()) {
+            list_.setMessage(options_.initialMessage);
+        }
         if (options_.startNew) {
             createAndOpen(options_.newTerminal, "new terminal");
         }
@@ -176,6 +193,9 @@ public:
     }
     // A line for after the terminal is restored (what was left running, how the
     // program ended).
+    const Choice &choice() const {
+        return choice_;
+    }
     const std::string &farewell() const {
         return farewell_;
     }
@@ -307,10 +327,23 @@ private:
             refresh();
             break;
         case ListAction::Kind::Open:
+            if (options_.listOnly) {
+                choice_ = {Choice::Kind::Open,
+                           action.id,
+                           list_.selected() ? list_.selected()->title
+                                            : std::string()};
+                finished_ = true;
+                break;
+            }
             open(action.id,
                  list_.selected() ? list_.selected()->title : std::string());
             break;
         case ListAction::Kind::New:
+            if (options_.listOnly) {
+                choice_ = {Choice::Kind::New, {}, {}};
+                finished_ = true;
+                break;
+            }
             createAndOpen({}, "new terminal");
             break;
         case ListAction::Kind::None:
@@ -661,6 +694,7 @@ private:
     std::unique_ptr<AttachedPane> pane_;
     std::string paneTitle_;
     std::string farewell_;
+    Choice choice_;
     int exitCode_ = 0;
     std::int64_t now_ = 0;
     std::int64_t hintUntil_ = 0;

@@ -19,6 +19,9 @@ struct DaemonOptions {
     // matterm --attach-tty / matmux: start a terminal at once (--new [--name N] [-- COMMAND...]).
     // What the client tells the user to run to come back to a terminal it left running.
     std::string attachProgram = "matterm --attach-tty";
+    // matmux shows a terminal by passing its output through (the host's own scrollback); --rendered (and
+    // matterm --attach-tty) draws it cell by cell instead.
+    bool rendered = true;
     bool attachNew = false;
     std::string attachName;
     std::vector<std::string> attachCommand;

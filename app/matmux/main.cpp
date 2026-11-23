@@ -38,6 +38,8 @@ void usage(std::ostream &out) {
            "matterm-daemon there\n"
            "  --yes                 copy without asking\n"
            "  --ssh-arg ARG         an extra argument for ssh (repeatable)\n"
+           "  --rendered            draw the terminal cell by cell in the alternate screen (status line,\n"
+           "                        no host scrollback) instead of passing its output through\n"
            "  --new                 start a terminal (your shell, or COMMAND) "
            "in the daemon, started when\n"
            "                        missing, and attach to it at once; the "
@@ -55,11 +57,16 @@ int main(int argc, char **argv) {
     DaemonOptions options;
     options.enabled = true;
     options.attachProgram = "matmux --attach";
+    options.rendered = false; // Passthrough: the host terminal keeps its scrollback. --rendered: cell by cell.
     bool list = false, stop = false, attach = false, implicitNew = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--attach") {
             attach = true;
+            continue;
+        }
+        if (arg == "--rendered") {
+            options.rendered = true;
             continue;
         }
         if (arg == "--help" || arg == "-h") {
