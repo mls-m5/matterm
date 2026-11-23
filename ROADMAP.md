@@ -219,11 +219,14 @@ These describe much more functionality than matterm currently implements.
 - [ ] Animated text reveal: demo pacing first, then an opt-in renderer effect for the regular terminal. See docs/tasks/text-reveal-animation.md.
 - [x] Mattrix OS as a separate terminal program (`mattrix`, see docs/FAKEOS.md; original note:): a standalone binary (e.g. `mattrix`) running the fakeos core in a regular terminal, building on `matterm-demo --tty`. Name it "Mattrix OS" in its own text so it is not confused with matterm (the emulator); web and native-window demos can say "powered by matterm". Renderer-only effects (smooth cursor, fades) need simpler tty fallbacks (256-colour steps). Distribution (install target, static binary) undecided.
 - [ ] Session ideas after the tmux comparison (checkpoints, scrollback spill to disk, shell-integration marks): docs/MULTI_TERMINAL.md section 12. Not scheduled.
-- [ ] Replay burst rendering (owner's note, 2026-11-23; not designed): after a reattach the daemon's
-  replay arrives in one large batch and the pane visibly scrolls through it while it is processed.
-  Idea: when a lot of data arrives at once, pause drawing, finish parsing in the background (or
-  just apply it to the model) and draw once when it is done. Measure first (`MATTERM_LOOP_STATS=1`,
-  docs/CPU.md); relates to `--attach-tty`, where each drawn frame also costs terminal output.
+- [ ] Replay: measure, batch and checkpoint (owner's notes, 2026-11-23; docs/tasks/replay-performance.md).
+  After a reattach the daemon's replay arrives in one large batch and the pane visibly scrolls
+  through it while it is processed. Ideas: (1) measure start-up and reattach time (restoring a
+  session with many panes, a long replay; `MATTERM_LOOP_STATS=1`, docs/CPU.md); (2) pause drawing
+  while a large batch is applied and draw once when it is done; batch the work when many panes
+  are restored at once; (3) a checkpoint when a terminal is detached (docs/MULTI_TERMINAL.md section 12,
+  idea 1) so a reattach does not replay the whole ring. Relates to `matmux`, where each drawn
+  frame also costs terminal output. Measure first; the owner decides the checkpoint design.
 - [ ] Faster stdout for the C++ code that prints (owner's note, 2026-11-23; not measured): where the
   program writes through `std::cout`, try `std::ios::sync_with_stdio(false)` (no syncing with C
   stdio) and see whether output gets faster. Only worth it where `std::cout` is used on a hot path;

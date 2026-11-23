@@ -73,6 +73,7 @@ clang-tidy (`docs/STATIC_ANALYSIS.md`).
 - `docs/tasks/attach-new-session.md`: `matmux` starts a terminal itself (small tmux), self-attach loop fix,
   `-dirty` build hash; agent2 (daemon side) and agent3 (list/UI).
 - `docs/tasks/restore-programs.md`: "Start N programs again?" after Open session; agent3.
+- `docs/tasks/replay-performance.md`: measure replay and restore, batch drawing, checkpoint on detach (design first); agent2.
 - `docs/CHAT.md`: the Mattrix OS chat (ChatRoom core, `chatd`, `mattrix-chat`).
   Worktree `.tmp/agent3`, branch `agent3-fakeos`.
 - `docs/tasks/web-sessions.md`: browser tabs/terminal views. **Paused** while the
