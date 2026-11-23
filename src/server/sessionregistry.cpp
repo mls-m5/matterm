@@ -123,7 +123,12 @@ struct Entry : SessionHost {
             current->tick(now);
             if (replayAt < ring.end() &&
                 current->state() == ServerSession::State::Running) {
-                if (current->outputBudget()) {
+                // Up to the window in one go (each message is at most
+                // maxOutputData): the client acknowledges as it parses, which
+                // opens the window for the next pump. One message per pump made
+                // a replay 16 KiB per 10 ms, however fast the client was.
+                while (replayAt < ring.end() && current->outputBudget() &&
+                       current->state() == ServerSession::State::Running) {
                     const auto bytes = ring.read(
                         replayAt,
                         std::min(current->outputBudget(), maxOutputData));

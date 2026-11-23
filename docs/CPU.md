@@ -70,3 +70,55 @@ An animation that changes the cells of the strip makes `steady` change and keeps
 4 ms rounds, drawing whenever the frame differs: up to 120 frames a second. Change the content at a low
 rate (10-15 times a second is plenty for a gradient), only while there is activity, and the cost is that
 many frames. Do not animate by changing something every round.
+
+## Replay: reattaching to a terminal with a full ring (2026-11-23, agent2)
+
+The owner saw a pane scroll through its history for a while after a reattach. Measured with two tools, both in
+the repository (Release build, `-DMATTERM_BUILD_BENCHMARKS=ON`, the machine of the other numbers here):
+
+* `matterm-replay-bench [--mib N] [--round-ms M] [--frame]` (`bench/replaybench.cpp`): an in-process daemon, a
+  terminal that printed N MiB of coloured log lines (the ring is full), and a client (`DaemonLink` +
+  `TerminalView`, the same classes the window and matmux use) that attaches from the start of the ring. It
+  reports wall time, bytes per round of the client's loop, and the time spent in the client's tick (transport,
+  framing, acknowledgements, parser, model) against the time spent waiting. `--round-ms` imitates the window's
+  loop cadence, `--frame` adds the cost of hashing the frame every round. `--restore K` instead times K panes
+  being made and attached one after the other, as a session restore does.
+* `bench/replay-measure.py BUILD_DIR [--mib N]`: the real window, headless (dummy video driver, software
+  renderer), whose first pane attaches to such a terminal (the hidden `MATTERM_ATTACH_TERMINAL=<id>`
+  environment variable); it reports the time until the window's CPU use settles, the CPU time used, and
+  `MATTERM_LOOP_STATS` (rounds and frames drawn).
+
+### Where the time went (before; ring 3.2 MiB)
+
+| | |
+|---|---|
+| client: transport + parse + model for all of it | 0.05-0.07 s |
+| hashing the frame in every round (window loop) | 0.01-0.5 s depending on the round rate |
+| the replay as a whole, in the bench | 2.05 s (1.55 MiB/s), the same at any client round rate |
+| the replay in the window | settles after about 10 s, 1.4 s CPU, 518 rounds, 236 frames drawn |
+| 32 panes made and attached (restore) | all showing output after 0.20 s: 2 ms per pane to ask the daemon, the rest is the shells starting, in parallel |
+| attaching when the output is already in the ring | 10 ms to the first output |
+
+The client is not the bottleneck: the parser takes a few hundredths of a second for the whole ring. The
+**daemon sent the replay at 16 KiB per 10 ms** (one message per entry per pump tick, `SessionEntry::pump`),
+which is 1.6 MiB/s however fast the client is, and **every one of those chunks made the window draw a frame**
+(a software-rendered frame is tens of milliseconds): about 200 frames for 3 MiB. Restoring many panes is
+bound by starting the shells, not by replay.
+
+### After (the daemon sends the window's worth at once; a flood is drawn at most ten times a second)
+
+The registry now sends a replay up to the output window (256 KiB) per pump instead of one message, and the window and
+matmux draw at most every 100 ms while more than 32 KiB arrive per round (input, a resize or an expose draw at once;
+`ptyfrontend.cpp` "flooded", `ttyattach.h` `kFloodDrawMs`). Same ring (3.2 MiB), same machine:
+
+| | before | after |
+|---|---|---|
+| replay in the bench (`--round-ms 8`) | 2.07 s, 245 rounds | 0.17 s, 12 rounds |
+| client's own time (transport + parse + model) | 0.05 s | 0.05 s |
+| window, CPU in the first 3 s (idle window: 0.07-0.18 s) | 1.17 s | 0.17 s |
+| window, frames drawn in 3 s (idle window: 7-14) | 217 | 13 |
+
+The parser was never the cost; the rest was waiting for the daemon and drawing every chunk. Over a slow link (ssh) the bytes
+themselves take the time: that is what a checkpoint would save (docs/tasks/replay-performance.md step 3).
+Reproduce: `cmake -DMATTERM_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_TYPE=Release`, then `matterm-replay-bench --mib 4 --round-ms 8`
+and `bench/replay-measure.py BUILD_DIR --mib 4` (`--mib 0` gives the idle baseline).

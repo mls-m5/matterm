@@ -516,8 +516,12 @@ int runPtyFrontend(const char *font,
     int hintColumns = 80, hintRows = 24; // size of a new pane until the layout says
     // Folder the next pane's shell should start in (a restored session), else empty.
     std::string nextCwd;
-    // A daemon terminal the next pane should show instead of making a new one (Attach terminal).
-    std::string nextAttachId;
+    // A daemon terminal the next pane should show instead of making a new one
+    // (Attach terminal). For measuring a reattach (bench/replay-measure.py,
+    // docs/CPU.md): the first pane shows this terminal.
+    std::string nextAttachId = std::getenv("MATTERM_ATTACH_TERMINAL")
+                                   ? std::getenv("MATTERM_ATTACH_TERMINAL")
+                                   : "";
     // Where a new daemon terminal starts: the saved folder, else the folder of the pane in focus
     // (as the daemon sees it), else this program's folder.
     // Replaced below once the probe exists; the first pane is made before that.
@@ -1977,6 +1981,9 @@ int runPtyFrontend(const char *font,
     Uint64 lastActivity = SDL_GetTicks64();
     Uint64 activeUntil = SDL_GetTicks64() + kActiveMs;
     std::uint64_t lastSteadySignature = 0, lastDrawnSignature = 0;
+    std::uint64_t ingestSeen =
+        0; // Output bytes of all panes at the last round (see "flooded").
+    Uint64 lastDrawMs = 0;
     bool forceRedraw = true; // The first frame; again after anything that may have disturbed the window.
     std::string shownTitle;
     std::uint64_t framesDrawn = 0, iterations = 0;
@@ -1994,7 +2001,9 @@ int runPtyFrontend(const char *font,
         updateWindow();
         script();
         SDL_Event event;
+        bool eventThisRound = false;
         while (SDL_PollEvent(&event)) {
+            eventThisRound = true;
             activeUntil = SDL_GetTicks64() + kActiveMs;
             lastActivity = SDL_GetTicks64();
             if (event.type == SDL_WINDOWEVENT) {
@@ -2691,7 +2700,21 @@ int runPtyFrontend(const char *font,
             activeUntil = now + kActiveMs;
             lastActivity = now;
         }
-        if (forceRedraw || signatures.full != lastDrawnSignature) {
+        // A flood of output (a replay after a reattach, `cat` of a big file)
+        // changes the frame in every round; the model has taken it all, so
+        // drawing at most ten times a second shows the same end result
+        // (docs/CPU.md "Replay"). Input, a resize or an expose draws at once.
+        std::uint64_t ingestNow = 0;
+        workspace.forEachPane([&](PaneId, NativePane &pane, bool) {
+            ingestNow += pane.view().outputBytes();
+        });
+        const bool flooded =
+            ingestNow > ingestSeen && ingestNow - ingestSeen > 32768;
+        ingestSeen = ingestNow;
+        const bool hold = flooded && !eventThisRound && !forceRedraw &&
+                          now - lastDrawMs < 100;
+        if (!hold && (forceRedraw || signatures.full != lastDrawnSignature)) {
+            lastDrawMs = now;
             forceRedraw = false;
             lastDrawnSignature = signatures.full;
             if (title != shownTitle) {

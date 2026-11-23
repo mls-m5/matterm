@@ -548,6 +548,48 @@ TEST_CASE("Nothing is drawn twice when nothing changed") {
     EXPECT_EQ(rig.host.shown.size(), shown);
 }
 
+TEST_CASE("A flood of output (a replay) is drawn at most ten times a second, "
+          "and once at the end") {
+    Rig rig;
+    rig.enterPane();
+    const auto shown = rig.host.shown.size();
+    const std::string chunk(40000, 'x');
+    for (int i = 0; i < 8; ++i) { // 80 ms of floods: one picture at most.
+        rig.now += 10;
+        rig.source.last->link.output(chunk + "\r\nflood" + std::to_string(i) +
+                                     "\r\n");
+        rig.mode->tick(rig.now);
+    }
+    EXPECT(rig.host.shown.size() <= shown + 1);
+    // The mode asks to be woken for the held picture instead of waiting for the
+    // next output.
+    const auto wait = rig.mode->timeoutMs(rig.now);
+    EXPECT(wait >= 0 && wait <= 100);
+    rig.now += 120;
+    rig.mode->tick(rig.now);
+    EXPECT(rig.host.shows(
+        "flood7")); // The last state is drawn when the flood is over.
+}
+
+TEST_CASE(
+    "Small output is drawn at once, and so is anything typed during a flood") {
+    Rig rig;
+    rig.enterPane();
+    rig.now += 10;
+    rig.source.last->link.output("one\r\n");
+    rig.mode->tick(rig.now);
+    EXPECT(rig.host.shows("one"));
+    rig.now += 10;
+    rig.source.last->link.output(std::string(40000, 'x') + "\r\ntwo\r\n");
+    rig.mode->tick(rig.now);
+    rig.now += 10;
+    rig.source.last->link.output(std::string(40000, 'x') + "\r\nthree\r\n");
+    rig.mode->tick(rig.now);
+    const auto shown = rig.host.shown.size();
+    rig.type("a"); // A key: drawn now, not at the next hundred milliseconds.
+    EXPECT(rig.host.shown.size() > shown);
+}
+
 TEST_CASE("The mode waits for a lone Escape only briefly") {
     Rig rig;
     EXPECT_EQ(rig.mode->timeoutMs(rig.now), -1);

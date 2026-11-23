@@ -219,4 +219,37 @@ TEST_CASE("Exit while detached wipes output and leaves only a bounded status "
     EXPECT_EQ(std::get<protocol::Exit>(resumed.messages.back()).code, 7);
     EXPECT(resumed.output().empty());
 }
+TEST_CASE(
+    "A replay is sent up to the window at once, not one message per pump") {
+    auto config = persistent();
+    config.replayBufferBytes = 1 << 20;
+    config.replayTotalBytes = 2 << 20;
+    // About 600 KB of output, then it waits.
+    server::SessionRegistry registry(
+        config,
+        process("head -c 600000 /dev/zero | tr '\\0' x; echo done; sleep 30"),
+        {});
+    Sink first, second;
+    auto a = registry.attach(hello(), first.transport(), now());
+    EXPECT(a.has_value());
+    EXPECT(until(registry, [&] {
+        registry.onMessage(
+            *a, wire(protocol::Ack{first.end()}), now()); // As a client does.
+        return first.output().find("done") != std::string::npos;
+    }));
+    registry.onMessage(*a, wire(protocol::Ack{first.end()}), now());
+    registry.detach(*a, now());
+    auto b = registry.attach(hello(a->id, 0), second.transport(), now());
+    EXPECT(b.has_value());
+    // Two pump ticks: the Welcome, then the replay. The window is 256 KiB: most
+    // of it goes out in the first tick that has room, where it used to be 16
+    // KiB per tick.
+    registry.tick(now());
+    registry.tick(now());
+    EXPECT(second.output().size() > 200000u);
+    EXPECT(second.output().size() <= 262144u + 16384u);
+    registry.closeAll(now());
+    EXPECT(until(registry, [&] { return registry.size() == 0; }));
+}
+
 TEST_SUIT_END

@@ -348,6 +348,13 @@ if(MATTERM_BUILD_BENCHMARKS)
         add_executable(matterm-model-bench bench/modelbench.cpp)
         target_link_libraries(matterm-model-bench PRIVATE matterm::terminal)
         target_compile_definitions(matterm-model-bench PRIVATE MATTERM_HAS_REFLOW)
+        if(TARGET matterm-daemon-core)
+            # Reattach/replay: where the time goes (docs/CPU.md "Replay").
+            add_executable(matterm-replay-bench bench/replaybench.cpp)
+            target_include_directories(matterm-replay-bench PRIVATE src/frontend)
+            target_link_libraries(matterm-replay-bench PRIVATE matterm-daemon-core matterm::unixchannel matterm::transport
+                                                              matterm::vt matterm::terminal)
+        endif()
     endif()
 endif()
 add_subdirectory(lib)

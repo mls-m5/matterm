@@ -148,6 +148,12 @@ public:
         now_ = now;
         if (pane_) {
             pane_->tick();
+            // A flood of output (a replay after attaching) is drawn at most ten
+            // times a second: the model has it all, a picture per chunk only
+            // costs time (docs/CPU.md "Replay").
+            const auto ingested = pane_->view().outputBytes();
+            flooded_ = ingested > ingestSeen_ && ingested - ingestSeen_ > 32768;
+            ingestSeen_ = ingested;
             if (hintUntil_ && now_ >= hintUntil_) {
                 hintUntil_ = 0;
                 dirty_ = true;
@@ -156,6 +162,12 @@ public:
                 programEnded();
             }
         }
+        if (dirty_ && flooded_ && lastDrawAt_ != 0 &&
+            now_ - lastDrawAt_ < kFloodDrawMs) {
+            held_ = true; // timeoutMs() wakes us when it may be drawn.
+            return;
+        }
+        held_ = false;
         draw();
     }
 
@@ -196,6 +208,9 @@ public:
         };
         if (decoder_.pending()) {
             soonest(now + options_.escapeMs);
+        }
+        if (held_) {
+            soonest(lastDrawAt_ + kFloodDrawMs);
         }
         if (pane_) {
             if (const auto due = pane_->nextTickMs()) {
@@ -603,6 +618,8 @@ private:
             return;
         }
         dirty_ = false;
+        held_ = false;
+        lastDrawAt_ = now_ == 0 ? 1 : now_;
         const auto [columns, rows] = size();
         ::tty::Screen &screen = host_.screen();
         ::tty::Canvas &canvas = screen.canvas();
@@ -649,6 +666,11 @@ private:
     std::int64_t hintUntil_ = 0;
     bool hinted_ = false;
     bool finished_ = false;
+    static constexpr std::int64_t kFloodDrawMs = 100;
+    std::uint64_t ingestSeen_ = 0;
+    std::int64_t lastDrawAt_ = 0;
+    bool flooded_ = false;
+    bool held_ = false;
     bool dirty_ = true;
     bool modesSet_ = false;
     bool statusOn_ = false;
