@@ -15,6 +15,12 @@ int main(int argc, char **argv) {
         if (arg == "--attach-tty") {
             continue; // So that the same test drives matterm and this.
         }
+        if (arg == "--") {
+            while (++i < argc) {
+                options.attachCommand.emplace_back(argv[i]);
+            }
+            break;
+        }
         if (arg == "--new") {
             options.attachNew = true;
         }

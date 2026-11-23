@@ -146,7 +146,9 @@ try:
     check(c.wait_exit(), "Ctrl+C in the list ends the program")
 
 
-    # The terminal this program runs in cannot be attached (the daemon sets MATTERM_SESSION; here we do).
+    # The terminal this program runs in cannot be attached: the daemon puts MATTERM_SESSION in the
+    # environment of its terminals, here it is set by hand for a client that is not in one, and a real
+    # terminal is checked below.
     f = Tty(socket, env={"MATTERM_SESSION": first_id})
     ttys.append(f)
     check(f.wait_for("(this terminal)"), "the own terminal is marked in the list")
@@ -177,6 +179,26 @@ try:
     k.send(b"exit 3\r")
     check(k.wait_exit() and os.WIFEXITED(k.status) and os.WEXITSTATUS(k.status) == 3, "when the program ends the client ends with its exit code")
     check(k.wait_for("exit code 3") or "exitcode3" in k.text(), "and says how it ended")
+
+    # Command: --new -- COMMAND runs it; the daemon sets MATTERM_SESSION there, so the client inside
+    # sees its own terminal marked.
+    c1 = Tty(socket, extra=("--new", "--name", "cmd", "--", "sh", "-c", 'echo in=$MATTERM_SESSION; sleep 1; exit 4'))
+    ttys.append(c1)
+    c1.pump(0.5)
+    check(c1.wait_for("in=") and re.search(r"in=[0-9a-f]{32}", c1.text()) is not None, "the daemon tells the terminal its id in MATTERM_SESSION")
+    check(c1.wait_exit() and os.WIFEXITED(c1.status) and os.WEXITSTATUS(c1.status) == 4, "--new -- COMMAND runs the command and ends with its exit code")
+
+    # The host terminal reports the mouse only while the program asked for it.
+    mo = Tty(socket, extra=("--new",))
+    ttys.append(mo)
+    mo.wait_for("Ctrl+B")
+    mo.send(b"printf '\\033[?1000h\\033[?1006h'\r")
+    check("1000h" in mo.raw.decode("utf8", "replace") or mo.wait_for("1000h"), "the mouse is turned on in the host terminal when the program asks for it")
+    mo.send(b"printf '\\033[?1000l'\r")
+    mo.pump(1.5)
+    check("1000l" in mo.raw.decode("utf8", "replace"), "and off again")
+    mo.send(b"\x02d")
+    mo.wait_exit()
 
     # From the list: n makes a terminal; the program ending brings back the list.
     m = Tty(socket)

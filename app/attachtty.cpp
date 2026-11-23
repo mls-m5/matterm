@@ -58,10 +58,7 @@ public:
     TtyHost &operator=(const TtyHost &) = delete;
 
     void restore() {
-        if (session_.running()) {
-            ::tty::writeAll(1, mouseOff());
-            session_.stop();
-        }
+        session_.stop();
     }
     ::tty::Screen &screen() override {
         return session_.screen();
@@ -73,18 +70,16 @@ public:
         }
     }
     void setInputModes(const HostInputModes &modes) override {
-        std::string out = mouseOff();
+        ::tty::ScreenOptions options;
+        options.bracketedPaste = true;
         if (modes.mouse) {
-            out += "\x1b[?1000h";
-            if (modes.mouseMotion) {
-                out += "\x1b[?1002h";
-            }
-            if (modes.mouseAnyMotion) {
-                out += "\x1b[?1003h";
-            }
-            out += "\x1b[?1006h";
+            options.mouse =
+                modes.mouseAnyMotion ? ::tty::ScreenOptions::Mouse::Any
+                : modes.mouseMotion  ? ::tty::ScreenOptions::Mouse::Drag
+                                     : ::tty::ScreenOptions::Mouse::Click;
         }
-        if (!::tty::writeAll(1, out)) {
+        // The layer undoes all of it on every way out, a crash included.
+        if (!::tty::writeAll(1, session_.screen().setOptions(options))) {
             alive_ = false;
         }
     }
@@ -100,9 +95,6 @@ private:
         ::tty::SessionOptions options;
         options.screen.bracketedPaste = true;
         return options;
-    }
-    static std::string mouseOff() {
-        return "\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l";
     }
     ::tty::Session session_;
     bool alive_ = true;
@@ -238,34 +230,22 @@ public:
                        int columns,
                        int rows,
                        std::string &error) override {
+        mtd::CreateTerminal request;
+        request.cwd = cwd_;
+        request.columns = std::uint16_t(std::clamp(columns, 1, 500));
+        request.rows = std::uint16_t(std::clamp(rows, 1, 500));
+        request.command = what.command;
+        if (mtd::validTerminalName(what.name)) {
+            request.name = what.name;
+        }
         std::string why;
-        if (!what.command.empty()) {
-            error = "Starting a program needs the newer daemon request (not in "
-                    "this build yet)";
-            return {};
-        }
-        const auto reply = askDaemon(
-            socket_,
-            mtd::CreateSession{cwd_,
-                               std::uint16_t(std::clamp(columns, 1, 500)),
-                               std::uint16_t(std::clamp(rows, 1, 500))},
-            why);
-        const auto *created =
-            reply ? std::get_if<mtd::SessionCreated>(&*reply) : nullptr;
-        if (!created) {
-            const auto *refused =
-                reply ? std::get_if<mtd::ControlError>(&*reply) : nullptr;
+        const auto id = createTerminal(socket_, request, why);
+        if (!id) {
             error = "The daemon could not start a terminal: " +
-                    (refused ? refused->reason : daemonProblem(why));
+                    (why.empty() ? daemonProblem(why) : why);
             return {};
         }
-        if (!what.name.empty() && mtd::validTerminalName(what.name)) {
-            std::string ignored;
-            askDaemon(socket_,
-                      mtd::SetName{created->id, what.name},
-                      ignored); // A name is a nicety.
-        }
-        return created->id;
+        return *id;
     }
 
 private:
