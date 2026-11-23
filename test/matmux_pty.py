@@ -308,6 +308,38 @@ try:
     own.send(b"q")
     own.wait_exit()
 
+    # The terminal's questions (what neovim asks at start): in passthrough the host terminal answers, not the
+    # hidden model; with --rendered the model is the terminal and answers.
+    probe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "matmux_probe.py")
+    ANSWERS = [(b"\x1b[c", b"\x1b[?62;c"), (b"\x1b[6n", b"\x1b[5;7R"), (b"\x1b[>q", b"\x1bP>|hostterm 1\x1b\\"),
+               (b"\x1b]11;?", b"\x1b]11;rgb:aaaa/bbbb/cccc\x1b\\")]
+
+    def asked(extra, host_answers, name):
+        out = tmp + "/probe-" + name
+        t = Tty(socket, extra + ("--new", "--", "sh", "-c", "sleep 1; exec python3 %s %s 2.5" % (probe, out)))
+        ttys.append(t)
+        end = time.time() + 12
+        answered = set()
+        while time.time() < end and not os.path.exists(out):
+            t.pump(0.05)
+            if host_answers:
+                for question, answer in ANSWERS:
+                    if question in t.raw and question not in answered:
+                        answered.add(question)
+                        t.send(answer)
+        t.wait_exit(10)
+        return open(out).read() if os.path.exists(out) else None
+
+    got = asked((), True, "host")
+    expected = repr(b"".join(a for _, a in ANSWERS))
+    check(got == expected, "passthrough with a host that answers: the program gets exactly the host's answers, once")
+    print("      got: " + str(got))
+    got = asked((), False, "silent")
+    check(got == repr(b""), "passthrough with a silent host: matterm answers nothing itself")
+    got = asked(("--rendered",), False, "rendered")
+    check(got is not None and "[?1;0c" in got, "with --rendered the model is the terminal and answers (device attributes)")
+    print("      rendered got: " + str(got))
+
     # SIGTERM restores the terminal.
     k = Tty(socket, ("--new",))
     ttys.append(k)

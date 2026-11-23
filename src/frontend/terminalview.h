@@ -27,6 +27,10 @@ struct TerminalViewConfig {
     bool snapScrollToRows = false;
     // The line written into the terminal when another window takes the session over.
     std::string replacedNotice = "session taken over by another window";
+    // The model answers the program's questions to the terminal (device attributes, cursor position,
+    // colours...). False for matmux's passthrough: the model there is hidden and the host terminal, which
+    // sees the same bytes, is the one that answers; two answers would confuse the program.
+    bool answerQueries = true;
 };
 
 // One terminal in a window: its own model, parser, palette, title, selection
@@ -225,7 +229,7 @@ private:
         model_->setSnapScrollToRows(config_.snapScrollToRows);
         VtEvents events;
         events.reply = [this](std::string_view bytes) {
-            if (link_ && state_ == State::Live) {
+            if (config_.answerQueries && link_ && state_ == State::Live) {
                 link_->sendInput(bytes);
             }
         };

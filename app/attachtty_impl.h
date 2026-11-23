@@ -111,11 +111,12 @@ public:
                std::string id,
                int columns,
                int rows,
-               std::uint64_t replayEnd = 0)
+               std::uint64_t replayEnd = 0,
+               bool answerQueries = true)
         : socket_(std::move(socket))
         , id_(std::move(id))
         , replayEnd_(replayEnd)
-        , view_(config(columns, rows)) {
+        , view_(config(columns, rows, answerQueries)) {
         link_ = attachToDaemon(view_, socket_, id_, 0, daemonClock);
     }
     ~DaemonPane() override {
@@ -168,9 +169,10 @@ public:
     }
 
 private:
-    static TerminalViewConfig config(int columns, int rows) {
+    static TerminalViewConfig config(int columns, int rows, bool answerQueries) {
         TerminalViewConfig c{std::size_t(columns), std::size_t(rows), 1000, {}};
         c.replacedNotice = "taken over by another client";
+        c.answerQueries = answerQueries;
         return c;
     }
     std::string socket_;

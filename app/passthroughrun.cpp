@@ -370,7 +370,7 @@ int runPassthroughMode(const DaemonOptions &daemon,
         int columns = 0, rows = 0;
         RawHost::size(columns, rows);
         const std::uint64_t end = source.outputEnd(id);
-        DaemonPane pane(source.socket(), id, columns, rows, end);
+        DaemonPane pane(source.socket(), id, columns, rows, end, false); // The host terminal answers, not the hidden model.
         if (!pane.connected()) {
             if (firstNew) {
                 say("Cannot reach the daemon");
