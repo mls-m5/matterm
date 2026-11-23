@@ -14,17 +14,18 @@ namespace frontend::cli {
 enum class Value { None, File, Dir, Host, Number, Choices, Text };
 
 struct Option {
-    const char *name;         // "--font-size"
-    const char *shortName;    // "-h" or ""
-    Value value;              // what follows it, if anything
-    const char *choices;      // Value::Choices: the words, space separated
-    const char *help;         // one line, no quotes
-    bool hidden;              // not completed (self-tests)
+    const char *name;      // "--font-size"
+    const char *shortName; // "-h" or ""
+    Value value;           // what follows it, if anything
+    const char *choices;   // Value::Choices: the words, space separated
+    const char *help;      // one line, no quotes
+    bool hidden;           // not completed (self-tests)
 };
 
 struct Program {
     const char *name;
-    const char *positionalGlob; // Files completed for a bare word ("*.ttf"), or "".
+    const char
+        *positionalGlob; // Files completed for a bare word ("*.ttf"), or "".
     std::vector<Option> options;
 };
 
@@ -62,6 +63,12 @@ inline const std::vector<Program> &programs() {
               Value::None,
               "",
               "Run the programs in this process",
+              false},
+             {"--perf-log",
+              "",
+              Value::File,
+              "",
+              "Write client performance diagnostics to a file",
               false},
              {"--daemon-socket",
               "",
@@ -333,6 +340,12 @@ inline const std::vector<Program> &programs() {
               "The list of the terminals in the daemon, first terminal chosen "
               "(without arguments: New terminal chosen)",
               false},
+             {"--perf-log",
+              "",
+              Value::File,
+              "",
+              "Write a performance log (one line per second) to a file",
+              false},
              {"--rendered",
               "",
               Value::None,
@@ -396,30 +409,38 @@ inline const std::vector<Program> &programs() {
 
 namespace detail {
 
-inline std::string clean(const std::string &s) { // Help text inside quotes of three shells.
+inline std::string clean(
+    const std::string &s) { // Help text inside quotes of three shells.
     std::string out;
     for (const char c : s) {
-        out += (c == '\'' || c == '"' || c == '[' || c == ']' || c == ':' || c == '\\' || c == '`' || c == '$') ? ' ' : c;
+        out += (c == '\'' || c == '"' || c == '[' || c == ']' || c == ':' ||
+                c == '\\' || c == '`' || c == '$')
+                   ? ' '
+                   : c;
     }
     return out;
 }
 inline std::string wordList(const Program &p, bool withShort = true) {
     std::string out;
     for (const auto &o : p.options) {
-        if (o.hidden) continue;
+        if (o.hidden)
+            continue;
         out += std::string(out.empty() ? "" : " ") + o.name;
-        if (withShort && o.shortName[0] != '\0') out += std::string(" ") + o.shortName;
+        if (withShort && o.shortName[0] != '\0')
+            out += std::string(" ") + o.shortName;
     }
     return out;
 }
 inline std::string join(const std::vector<std::string> &v, const char *sep) {
     std::string out;
-    for (const auto &s : v) out += (out.empty() ? "" : sep) + s;
+    for (const auto &s : v)
+        out += (out.empty() ? "" : sep) + s;
     return out;
 }
 // ~/.ssh/config Host names without patterns (shell, same in all three).
 inline const char *hostsCommand() {
-    return "awk '/^[ \\t]*[Hh][Oo][Ss][Tt][ \\t]/ { for (i = 2; i <= NF; i++) if ($i !~ /[*?!]/) print $i }' "
+    return "awk '/^[ \\t]*[Hh][Oo][Ss][Tt][ \\t]/ { for (i = 2; i <= NF; i++) "
+           "if ($i !~ /[*?!]/) print $i }' "
            "\"$HOME/.ssh/config\" 2>/dev/null";
 }
 } // namespace detail
@@ -432,30 +453,52 @@ inline std::string bashCompletion() {
     o += std::string("_matterm_hosts() { ") + hostsCommand() + "; }\n";
     for (const auto &p : programs()) {
         std::string fn = "_" + std::string(p.name);
-        for (char &c : fn) if (c == '-') c = '_';
-        o += fn + "() {\n  local cur=\"${COMP_WORDS[COMP_CWORD]}\" prev=\"${COMP_WORDS[COMP_CWORD-1]}\"\n  COMPREPLY=()\n"
-             "  # --opt=value: bash splits at the =\n"
-             "  if [[ \"$prev\" == = ]]; then prev=\"${COMP_WORDS[COMP_CWORD-2]}\"; elif [[ \"$cur\" == = ]]; then cur=\"\"; fi\n"
-             "  case \"$prev\" in\n";
+        for (char &c : fn)
+            if (c == '-')
+                c = '_';
+        o += fn + "() {\n  local cur=\"${COMP_WORDS[COMP_CWORD]}\" "
+                  "prev=\"${COMP_WORDS[COMP_CWORD-1]}\"\n  COMPREPLY=()\n"
+                  "  # --opt=value: bash splits at the =\n"
+                  "  if [[ \"$prev\" == = ]]; then "
+                  "prev=\"${COMP_WORDS[COMP_CWORD-2]}\"; elif [[ \"$cur\" == = "
+                  "]]; then cur=\"\"; fi\n"
+                  "  case \"$prev\" in\n";
         for (const auto &opt : p.options) {
-            if (opt.hidden || opt.value == Value::None) continue;
+            if (opt.hidden || opt.value == Value::None)
+                continue;
             o += std::string("    ") + opt.name + ")\n      ";
             switch (opt.value) {
-            case Value::File: o += "mapfile -t COMPREPLY < <(compgen -f -- \"$cur\")"; break;
-            case Value::Dir: o += "mapfile -t COMPREPLY < <(compgen -d -- \"$cur\")"; break;
-            case Value::Host: o += "mapfile -t COMPREPLY < <(compgen -W \"$(_matterm_hosts)\" -- \"$cur\")"; break;
-            case Value::Choices: o += std::string("mapfile -t COMPREPLY < <(compgen -W \"") + opt.choices + "\" -- \"$cur\")"; break;
-            default: o += ":"; break; // Number, Text: nothing to offer.
+            case Value::File:
+                o += "mapfile -t COMPREPLY < <(compgen -f -- \"$cur\")";
+                break;
+            case Value::Dir:
+                o += "mapfile -t COMPREPLY < <(compgen -d -- \"$cur\")";
+                break;
+            case Value::Host:
+                o += "mapfile -t COMPREPLY < <(compgen -W "
+                     "\"$(_matterm_hosts)\" -- \"$cur\")";
+                break;
+            case Value::Choices:
+                o += std::string("mapfile -t COMPREPLY < <(compgen -W \"") +
+                     opt.choices + "\" -- \"$cur\")";
+                break;
+            default:
+                o += ":";
+                break; // Number, Text: nothing to offer.
             }
             o += "\n      return 0 ;;\n";
         }
-        o += "  esac\n  if [[ \"$cur\" == -* ]]; then\n    mapfile -t COMPREPLY < <(compgen -W \"" + wordList(p) + "\" -- \"$cur\")\n";
+        o += "  esac\n  if [[ \"$cur\" == -* ]]; then\n    mapfile -t "
+             "COMPREPLY < <(compgen -W \"" +
+             wordList(p) + "\" -- \"$cur\")\n";
         if (p.positionalGlob[0] != '\0') {
-            o += std::string("  else\n    mapfile -t COMPREPLY < <(compgen -f -X '!") + p.positionalGlob +
-                 "' -- \"$cur\"; compgen -d -- \"$cur\")\n";
+            o += std::string(
+                     "  else\n    mapfile -t COMPREPLY < <(compgen -f -X '!") +
+                 p.positionalGlob + "' -- \"$cur\"; compgen -d -- \"$cur\")\n";
         }
         o += "  fi\n  return 0\n}\n";
-        o += std::string("complete -o filenames -F ") + fn + " " + p.name + "\n";
+        o +=
+            std::string("complete -o filenames -F ") + fn + " " + p.name + "\n";
     }
     return o;
 }
@@ -464,27 +507,47 @@ inline std::string zshCompletion() {
     using namespace detail;
     std::string o = "#compdef matterm matterm-server matterm-daemon matmux\n# "
                     "zsh completion (generated by matterm --completion zsh)\n";
-    o += std::string("_matterm_hosts() { local -a hosts; hosts=(${(f)\"$(") + hostsCommand() + ")\"}); _describe 'host' hosts }\n";
+    o += std::string("_matterm_hosts() { local -a hosts; hosts=(${(f)\"$(") +
+         hostsCommand() + ")\"}); _describe 'host' hosts }\n";
     o += "_matterm() {\n  case \"$service\" in\n";
     for (const auto &p : programs()) {
         o += std::string("  ") + p.name + ")\n    _arguments -s \\\n";
         for (const auto &opt : p.options) {
-            if (opt.hidden) continue;
-            std::string spec = std::string("'") + opt.name + "[" + clean(opt.help) + "]";
+            if (opt.hidden)
+                continue;
+            std::string spec =
+                std::string("'") + opt.name + "[" + clean(opt.help) + "]";
             switch (opt.value) {
-            case Value::None: break;
-            case Value::File: spec += ":file:_files"; break;
-            case Value::Dir: spec += ":folder:_files -/"; break;
-            case Value::Host: spec += ":host:_matterm_hosts"; break;
-            case Value::Choices: spec += std::string(":value:(") + opt.choices + ")"; break;
-            case Value::Number: spec += ":number:"; break;
-            case Value::Text: spec += ":value:"; break;
+            case Value::None:
+                break;
+            case Value::File:
+                spec += ":file:_files";
+                break;
+            case Value::Dir:
+                spec += ":folder:_files -/";
+                break;
+            case Value::Host:
+                spec += ":host:_matterm_hosts";
+                break;
+            case Value::Choices:
+                spec += std::string(":value:(") + opt.choices + ")";
+                break;
+            case Value::Number:
+                spec += ":number:";
+                break;
+            case Value::Text:
+                spec += ":value:";
+                break;
             }
             o += "      " + spec + "' \\\n";
-            if (opt.shortName[0] != '\0') o += std::string("      '") + opt.shortName + "[" + clean(opt.help) + "]' \\\n";
+            if (opt.shortName[0] != '\0')
+                o += std::string("      '") + opt.shortName + "[" +
+                     clean(opt.help) + "]' \\\n";
         }
-        o += p.positionalGlob[0] != '\0' ? std::string("      '1:font:_files -g \"") + p.positionalGlob + "\"' \\\n      '*:command:_normal'\n"
-                                         : std::string("      '*:argument:_normal'\n");
+        o += p.positionalGlob[0] != '\0'
+                 ? std::string("      '1:font:_files -g \"") +
+                       p.positionalGlob + "\"' \\\n      '*:command:_normal'\n"
+                 : std::string("      '*:argument:_normal'\n");
         o += "    ;;\n";
     }
     o += "  esac\n}\n_matterm \"$@\"\n";
@@ -496,25 +559,42 @@ inline std::string fishCompletion() {
     std::string o =
         "# fish completion for matterm, matterm-server, matterm-daemon and "
         "matmux (generated by matterm --completion fish)\n";
-    o += std::string("function __matterm_hosts\n    ") + hostsCommand() + "\nend\n";
+    o += std::string("function __matterm_hosts\n    ") + hostsCommand() +
+         "\nend\n";
     for (const auto &p : programs()) {
         for (const auto &opt : p.options) {
-            if (opt.hidden) continue;
-            std::string line = std::string("complete -c ") + p.name + " -l " + (opt.name + 2);
-            if (opt.shortName[0] != '\0') line += std::string(" -s ") + (opt.shortName + 1);
+            if (opt.hidden)
+                continue;
+            std::string line =
+                std::string("complete -c ") + p.name + " -l " + (opt.name + 2);
+            if (opt.shortName[0] != '\0')
+                line += std::string(" -s ") + (opt.shortName + 1);
             switch (opt.value) {
-            case Value::None: break;
-            case Value::File: line += " -r -F"; break;
-            case Value::Dir: line += " -r -a '(__fish_complete_directories)'"; break;
-            case Value::Host: line += " -x -a '(__matterm_hosts)'"; break;
-            case Value::Choices: line += std::string(" -x -a '") + opt.choices + "'"; break;
+            case Value::None:
+                break;
+            case Value::File:
+                line += " -r -F";
+                break;
+            case Value::Dir:
+                line += " -r -a '(__fish_complete_directories)'";
+                break;
+            case Value::Host:
+                line += " -x -a '(__matterm_hosts)'";
+                break;
+            case Value::Choices:
+                line += std::string(" -x -a '") + opt.choices + "'";
+                break;
             case Value::Number:
-            case Value::Text: line += " -x"; break;
+            case Value::Text:
+                line += " -x";
+                break;
             }
             o += line + " -d '" + clean(opt.help) + "'\n";
         }
         if (p.positionalGlob[0] != '\0') {
-            o += std::string("complete -c ") + p.name + " -n '__fish_is_first_token' -a '(__fish_complete_suffix .ttf)' -d 'font'\n";
+            o += std::string("complete -c ") + p.name +
+                 " -n '__fish_is_first_token' -a '(__fish_complete_suffix "
+                 ".ttf)' -d 'font'\n";
         }
     }
     return o;
@@ -522,9 +602,12 @@ inline std::string fishCompletion() {
 
 // "bash", "zsh" or "fish"; empty for anything else.
 inline std::string completionScript(const std::string &shell) {
-    if (shell == "bash") return bashCompletion();
-    if (shell == "zsh") return zshCompletion();
-    if (shell == "fish") return fishCompletion();
+    if (shell == "bash")
+        return bashCompletion();
+    if (shell == "zsh")
+        return zshCompletion();
+    if (shell == "fish")
+        return fishCompletion();
     return {};
 }
 

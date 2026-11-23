@@ -14,6 +14,7 @@
 #include "daemonlink.h"
 #include "framesignature.h"
 #include "inputencoder.h"
+#include "perfclient.h"
 #include "procinfo.h"
 #include "ptylink.h"
 #include "ptysession.h"
@@ -280,6 +281,46 @@ struct NativePane {
     std::unique_ptr<TapLink> tap;
     TerminalView v;
     bool endInDaemon = true; // Closing the pane ends its terminal; false: leave it running.
+    std::unique_ptr<perf::EchoMeter> perfEcho;
+    perf::Second *perfSecond = nullptr;
+    double perfProbeAt = 0;
+
+    void measure(perf::Second &second) {
+        perfSecond = &second;
+        if (!perfEcho) {
+            perfEcho = std::make_unique<perf::EchoMeter>();
+            v.setParseTimer(
+                [this](double ms) { perfSecond->counters.parseMs += ms; });
+            v.setInputTap([this] { perfEcho->keySent(perfClockMs()); });
+            v.setOutputTap([this](std::string_view) {
+                perfEcho->outputArrived(perfClockMs());
+                perfSecond->echo.merge(perfEcho->samples());
+                perfEcho->samples().clear();
+            });
+        }
+        if (daemon) {
+            daemon->session().setTrafficObserver(
+                [this](bool received, std::size_t size) {
+                    // UnixSocketChannel prefixes each encoded protocol message
+                    // with four bytes.
+                    if (received) {
+                        perfSecond->counters.in(size + 4);
+                    }
+                    else {
+                        perfSecond->counters.out(size + 4);
+                    }
+                });
+            if (const auto rtt = daemon->session().takeRoundTripMs()) {
+                second.rtt.add(*rtt);
+            }
+            const double now = perfClockMs();
+            if (now - perfProbeAt >= 1000) {
+                daemon->session().probeRoundTrip();
+                perfProbeAt = now;
+            }
+            ++second.clients;
+        }
+    }
     bool hinted = false;
     bool shared = false;           // Marked shared in the daemon (offered to browsers).
     bool takeoverReported = false; // The owner was told that another window took this terminal.
@@ -338,6 +379,8 @@ struct NativePane {
     // Shows another daemon terminal in this pane. The old one is ended when `endOld`, else it
     // keeps running in the daemon, detached.
     void swapTerminal(const std::string &sessionId, bool endOld) {
+        if (perfEcho)
+            *perfEcho = {};
         v.detach();
         if (daemon && endOld && !v.ended()) {
             daemon->close();
@@ -481,6 +524,10 @@ int runPtyFrontend(const char *font,
                    bool tabsSmoke,
                    const DaemonOptions &daemonOptionsIn) {
     DaemonOptions daemonOptions = daemonOptionsIn;
+    ClientPerf perfLog(daemonOptions.perfLog, "matterm-native");
+    if (!perfLog.error().empty()) {
+        std::cerr << "matterm: performance log: " << perfLog.error() << '\n';
+    }
     gSnapScroll = daemonOptions.snapScroll;
     if (smokeTest) {
         return runSmokeTest(font, fontSize, arguments, term);
@@ -2198,6 +2245,13 @@ int runPtyFrontend(const char *font,
     std::uint64_t framesDrawn = 0, iterations = 0;
     const Uint64 loopStarted = SDL_GetTicks64();
     while (running) {
+        if (perfLog.enabled()) {
+            perfLog.tick();
+            perfLog.second.clients = 0;
+            workspace.forEachPane([&](PaneId, NativePane &pane, bool) {
+                pane.measure(perfLog.second);
+            });
+        }
         ++iterations;
         skipText = false;
         reportSettings(settingsWatch.poll(), false);
@@ -2607,7 +2661,11 @@ int runPtyFrontend(const char *font,
             break;
         }
         const std::int64_t nowMs = std::int64_t(SDL_GetTicks64());
+        const double layoutTickAt = perfLog.enabled() ? perfClockMs() : 0;
         afterLayout(wv.tick(nowMs));
+        if (perfLog.enabled()) {
+            perfLog.second.counters.layoutMs += perfClockMs() - layoutTickAt;
+        }
         // Focus in/out reports when the focus moved to another pane.
         const auto moved = wv.takeFocusChange();
         const bool windowFocused =
@@ -2737,6 +2795,7 @@ int runPtyFrontend(const char *font,
         // drawn at all (an idle terminal costs no CPU; see docs/CPU.md).
         // Blinking stops (visible) after ten seconds without input or change, like GNOME's
         // gtk-cursor-blink-timeout: a resting window then draws nothing at all.
+        const double layoutAt = perfLog.enabled() ? perfClockMs() : 0;
         const bool blinkOn = now >= lastActivity + kBlinkTimeoutMs || (now / 500) % 2 == 0;
         if (ownFrame) {
             wv.setWindowMaximized((SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MAXIMIZED) != 0);
@@ -2933,7 +2992,11 @@ int runPtyFrontend(const char *font,
         ingestSeen = ingestNow;
         const bool hold = flooded && !eventThisRound && !forceRedraw &&
                           now - lastDrawMs < 100;
+        if (perfLog.enabled()) {
+            perfLog.second.counters.layoutMs += perfClockMs() - layoutAt;
+        }
         if (!hold && (forceRedraw || signatures.full != lastDrawnSignature)) {
+            const double drawAt = perfLog.enabled() ? perfClockMs() : 0;
             lastDrawMs = now;
             forceRedraw = false;
             lastDrawnSignature = signatures.full;
@@ -2978,6 +3041,9 @@ int runPtyFrontend(const char *font,
                 }
             }
             backend.present();
+            if (perfLog.enabled()) {
+                perfLog.second.counters.drawMs += perfClockMs() - drawAt;
+            }
             ++framesDrawn;
             // At most about 120 frames a second even where presenting does not wait for the display.
             if (const auto spent = SDL_GetTicks64() - now; spent < 8) {

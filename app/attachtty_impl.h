@@ -152,6 +152,19 @@ public:
                (link_->session().state() == ClientSession::State::Running &&
                 link_->receivedOffset() >= replayEnd_);
     }
+    void setTrafficObserver(
+        std::function<void(bool, std::size_t)> observer) override {
+        if (link_)
+            link_->session().setTrafficObserver(std::move(observer));
+    }
+    void probeRoundTrip() override {
+        if (link_) {
+            link_->session().probeRoundTrip();
+        }
+    }
+    std::optional<double> takeRoundTripMs() override {
+        return link_ ? link_->session().takeRoundTripMs() : std::nullopt;
+    }
     int pollFd() const override {
         return link_ ? link_->pollFd() : -1;
     }
@@ -169,7 +182,9 @@ public:
     }
 
 private:
-    static TerminalViewConfig config(int columns, int rows, bool answerQueries) {
+    static TerminalViewConfig config(int columns,
+                                     int rows,
+                                     bool answerQueries) {
         TerminalViewConfig c{std::size_t(columns), std::size_t(rows), 1000, {}};
         c.replacedNotice = "taken over by another client";
         c.answerQueries = answerQueries;
@@ -261,7 +276,8 @@ public:
         return socket_;
     }
 
-    // Ends the terminal in the daemon (frontend::endSession: EndSession, control 1.3.4); an older daemon says so.
+    // Ends the terminal in the daemon (frontend::endSession: EndSession,
+    // control 1.3.4); an older daemon says so.
     bool end(const std::string &id, std::string &error) override {
         std::string why;
         if (endSession(socket_, id, why)) {

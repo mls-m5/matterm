@@ -10,6 +10,7 @@
 //
 // Time is a number of milliseconds on any steady clock; the caller passes it
 // in.
+#include "perfclient.h"
 #include "terminalview.h"
 #include "tty/matterm/cells.h"
 #include "tty/screen.h"
@@ -61,6 +62,13 @@ public:
     virtual bool replayDone() const {
         return true;
     }
+    // The performance log: measure the round trip to the daemon now; the result
+    // when it has come.
+    virtual void setTrafficObserver(std::function<void(bool, std::size_t)>) {}
+    virtual void probeRoundTrip() {}
+    virtual std::optional<double> takeRoundTripMs() {
+        return std::nullopt;
+    }
     virtual std::optional<std::int64_t> nextTickMs() const = 0;
 };
 
@@ -95,6 +103,7 @@ public:
 class AttachTty {
 public:
     struct Options {
+        perf::Second *metrics = nullptr; // Opt-in; caller owns the interval.
         std::int64_t hintMs =
             8000; // How long the first-time hint stays (no status line).
         std::int64_t escapeMs =
@@ -172,6 +181,15 @@ public:
     void tick(std::int64_t now) {
         now_ = now;
         if (pane_) {
+            if (options_.metrics) {
+                observePane();
+                if (const auto rtt = pane_->takeRoundTripMs())
+                    options_.metrics->rtt.add(*rtt);
+                if (now_ - probeAt_ >= 1000) {
+                    pane_->probeRoundTrip();
+                    probeAt_ = now_;
+                }
+            }
             pane_->tick();
             // A flood of output (a replay after attaching) is drawn at most ten
             // times a second: the model has it all, a picture per chunk only
@@ -271,12 +289,16 @@ private:
         }
     }
 
-    // `gone`: a terminal that was just ended; the daemon may still list it for a moment.
+    // `gone`: a terminal that was just ended; the daemon may still list it for
+    // a moment.
     void refresh(const std::string &gone = {}) {
         std::string error;
         auto entries = source_.list(error);
         if (!gone.empty()) {
-            entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const ListEntry &e) { return e.id == gone; }),
+            entries.erase(std::remove_if(
+                              entries.begin(),
+                              entries.end(),
+                              [&](const ListEntry &e) { return e.id == gone; }),
                           entries.end());
         }
         list_.setEntries(std::move(entries));
@@ -342,7 +364,8 @@ private:
         case ListAction::Kind::End: {
             std::string error;
             if (source_.end(action.id, error)) {
-                refresh(action.id); // The selection stays near where the terminal was.
+                refresh(action.id); // The selection stays near where the
+                                    // terminal was.
                 list_.setMessage("Ended " + action.title);
             }
             else {
@@ -393,9 +416,12 @@ private:
         }
         list_.setMessage({});
         pane_ = std::move(pane);
+        echo_.reset();
         paneTitle_ = title.empty() ? "terminal " + id.substr(0, 8) : title;
         prefixPending_ = helpShown_ = false;
         pane_->view().setChanged([this] { dirty_ = true; });
+        if (options_.metrics)
+            observePane();
         // The connection says hello only when it is first served; waiting for
         // the next key (or for output that cannot come before the hello) would
         // hang a client that was started with --new.
@@ -672,10 +698,31 @@ private:
         (void)columns;
     }
 
+    void observePane() {
+        if (!echo_)
+            echo_ = std::make_unique<perf::EchoMeter>();
+        auto &view = pane_->view();
+        view.setParseTimer(
+            [this](double ms) { options_.metrics->counters.parseMs += ms; });
+        view.setInputTap([this] { echo_->keySent(perfClockMs()); });
+        view.setOutputTap([this](std::string_view) {
+            echo_->outputArrived(perfClockMs());
+            options_.metrics->echo.merge(echo_->samples());
+            echo_->samples().clear();
+        });
+        pane_->setTrafficObserver([this](bool received, std::size_t size) {
+            if (received)
+                options_.metrics->counters.in(size + 4);
+            else
+                options_.metrics->counters.out(size + 4);
+        });
+    }
+
     void draw() {
         if (!dirty_) {
             return;
         }
+        const double layoutAt = options_.metrics ? perfClockMs() : 0;
         dirty_ = false;
         held_ = false;
         lastDrawAt_ = now_ == 0 ? 1 : now_;
@@ -709,7 +756,12 @@ private:
             screen.setCursor({});
         }
         applyModes();
+        const double drawAt = options_.metrics ? perfClockMs() : 0;
+        if (options_.metrics)
+            options_.metrics->counters.layoutMs += drawAt - layoutAt;
         host_.present();
+        if (options_.metrics)
+            options_.metrics->counters.drawMs += perfClockMs() - drawAt;
     }
 
     HostScreen &host_;
@@ -718,6 +770,8 @@ private:
     ListModel list_;
     HostInputDecoder decoder_;
     std::unique_ptr<AttachedPane> pane_;
+    std::unique_ptr<perf::EchoMeter> echo_;
+    std::int64_t probeAt_ = 0;
     std::string paneTitle_;
     std::string farewell_;
     Choice choice_;

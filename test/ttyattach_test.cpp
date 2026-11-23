@@ -674,7 +674,8 @@ TEST_CASE("x then y ends the chosen terminal, the list is read again and the "
     EXPECT(rig.host.shows("End \"gamma\""));
 }
 
-TEST_CASE("A terminal the daemon still lists for a moment after it was ended is not shown") {
+TEST_CASE("A terminal the daemon still lists for a moment after it was ended "
+          "is not shown") {
     Rig rig({entry("a", "alpha"), entry("b", "beta")});
     rig.source.lingers = true; // The daemon's list still has it.
     rig.type("x");
@@ -839,6 +840,22 @@ TEST_CASE("Ctrl+B ? shows the help over the bottom rows until the next key") {
     EXPECT(!rig.host.shows("any key closes this"));
     EXPECT_EQ(rig.source.last->link.sent,
               std::string()); // The key that closed it is not sent.
+}
+
+TEST_CASE(
+    "Rendered diagnostics measure echo and drawing when explicitly enabled") {
+    perf::Second metrics;
+    AttachTty::Options options;
+    options.metrics = &metrics;
+    Rig rig({entry("a", "alpha")}, options);
+    rig.mode->input("1\r", rig.now);
+    rig.mode->input("a", rig.now);
+    rig.source.last->link.output("a");
+    rig.mode->tick(rig.now + 1);
+    EXPECT_EQ(metrics.echo.summary().count, std::size_t(1));
+    EXPECT(metrics.counters.parseMs >= 0);
+    EXPECT(metrics.counters.layoutMs >= 0);
+    EXPECT(metrics.counters.drawMs >= 0);
 }
 
 TEST_SUIT_END

@@ -213,7 +213,8 @@ TEST_CASE("Exact resume keeps frontend state; malformed or unnegotiated replay "
             EXPECT(f.session.state() == ClientSession::State::Failed);
     }
 }
-TEST_CASE("A local:<id> session (bridged by the web server) is answered with the plain id") {
+TEST_CASE("A local:<id> session (bridged by the web server) is answered with "
+          "the plain id") {
     const std::string id = "00112233445566778899aabbccddeeff";
     ClientSession::Config config;
     config.replay = true;
@@ -227,7 +228,8 @@ TEST_CASE("A local:<id> session (bridged by the web server) is answered with the
     // Any other id is still refused.
     Fixture g(config);
     g.channel.opened();
-    g.channel.deliver(Welcome{1, "ffeeddccbbaa99887766554433221100", 0, 3, featureReplay});
+    g.channel.deliver(
+        Welcome{1, "ffeeddccbbaa99887766554433221100", 0, 3, featureReplay});
     EXPECT(g.session.state() == ClientSession::State::Failed);
 }
 TEST_CASE(
@@ -484,6 +486,71 @@ TEST_CASE("Idle connections send Ping and a missing Pong is fatal") {
     EXPECT(f.session.state() == ClientSession::State::Failed);
     EXPECT_EQ(f.closes.size(), std::size_t(1));
     (void)nonce;
+}
+
+TEST_CASE("A round trip is measured with a Ping of its own and does not "
+          "disturb the keep-alive") {
+    Fixture f;
+    f.connect();
+    const auto before = f.sentCount();
+    f.session.probeRoundTrip();
+    EXPECT_EQ(f.sentCount(), before + 1);
+    const auto nonce = std::get<Ping>(f.channel.messages().back()).nonce;
+    EXPECT(nonce != 0u);        // Not the keep-alive's numbers.
+    f.session.probeRoundTrip(); // One is out: no second.
+    EXPECT_EQ(f.sentCount(), before + 1);
+    EXPECT(!f.session.takeRoundTripMs());
+    f.channel.deliver(Pong{nonce});
+    const auto rtt = f.session.takeRoundTripMs();
+    EXPECT(rtt && *rtt >= 0 && *rtt < 5000);
+    EXPECT(!f.session.takeRoundTripMs()); // Once.
+    f.session.probeRoundTrip();           // And a new one can go.
+    EXPECT_EQ(f.sentCount(), before + 2);
+    // The keep-alive still pings after its idle time, with its own nonce.
+    f.advance(20000);
+    EXPECT(std::get<Ping>(f.channel.messages().back()).nonce != nonce);
+}
+
+TEST_CASE("Traffic diagnostics count encoded messages, not output chunks") {
+    Fixture f;
+    std::size_t inputBytes = 0, outputBytes = 0, incoming = 0, outgoing = 0;
+    f.session.setTrafficObserver([&](bool received, std::size_t bytes) {
+        (received ? inputBytes : outputBytes) += bytes;
+        ++(received ? incoming : outgoing);
+    });
+    f.connect();
+    EXPECT_EQ(incoming, std::size_t(1)); // Welcome.
+    EXPECT_EQ(outgoing, std::size_t(1)); // Hello.
+    f.channel.deliver(Output{0, "ab"});
+    f.channel.deliver(Output{2, "c"});
+    EXPECT_EQ(incoming, std::size_t(3));
+    EXPECT(inputBytes > std::size_t(3)); // Protocol headers included.
+    EXPECT(outputBytes > std::size_t(0));
+    f.session.setTrafficObserver({});
+    f.channel.deliver(Output{3, "d"});
+    EXPECT_EQ(incoming, std::size_t(3));
+}
+
+TEST_CASE(
+    "Performance probes use the injected clock and recover from a lost pong") {
+    Fixture f;
+    f.connect();
+    f.session.probeRoundTrip();
+    const auto first = std::get<Ping>(f.channel.messages().back()).nonce;
+    f.advance(123);
+    f.channel.deliver(Pong{first});
+    EXPECT_EQ(*f.session.takeRoundTripMs(), 123.0);
+    f.session.probeRoundTrip();
+    const auto lost = std::get<Ping>(f.channel.messages().back()).nonce;
+    f.advance(30001);
+    f.session.probeRoundTrip();
+    const auto retry = std::get<Ping>(f.channel.messages().back()).nonce;
+    EXPECT(retry != lost);
+    f.channel.deliver(Pong{lost});
+    EXPECT(!f.session.takeRoundTripMs());
+    f.advance(17);
+    f.channel.deliver(Pong{retry});
+    EXPECT_EQ(*f.session.takeRoundTripMs(), 17.0);
 }
 
 TEST_CASE("A Pong or any server traffic keeps the connection alive") {

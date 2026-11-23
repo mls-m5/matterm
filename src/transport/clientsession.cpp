@@ -33,6 +33,9 @@ bool ClientSession::sendMessage(const ClientMessage &message) {
         return false;
     }
     lastSent_ = config_.clock();
+    if (trafficObserver_) {
+        trafficObserver_(false, bytes.size());
+    }
     return true;
 }
 
@@ -47,7 +50,8 @@ void ClientSession::onOpened() {
     hello.rows = std::uint16_t(config_.rows);
     hello.sessionId = config_.sessionId;
     hello.resumeOffset = config_.resumeOffset;
-    hello.features = (config_.replay ? featureReplay : 0) | config_.extraFeatures;
+    hello.features =
+        (config_.replay ? featureReplay : 0) | config_.extraFeatures;
     if (!sendMessage(hello)) {
         fail("could not send Hello", 1011);
         return;
@@ -84,6 +88,9 @@ void ClientSession::onMessage(std::string_view bytes) {
         return;
     }
     lastReceived_ = config_.clock();
+    if (trafficObserver_) {
+        trafficObserver_(true, bytes.size());
+    }
     if (state_ == State::AwaitWelcome &&
         !std::holds_alternative<Welcome>(*decoded.message) &&
         !std::holds_alternative<Error>(*decoded.message)) {
@@ -102,9 +109,10 @@ void ClientSession::handle(const Welcome &message) {
         fail("server chose an unsupported protocol version", 1002);
         return;
     }
-    const auto offered = (config_.replay ? featureReplay : 0) | config_.extraFeatures;
-    // "local:<id>" asks the web server to bridge to a shared session of the local daemon; the
-    // daemon then names the session by its plain id.
+    const auto offered =
+        (config_.replay ? featureReplay : 0) | config_.extraFeatures;
+    // "local:<id>" asks the web server to bridge to a shared session of the
+    // local daemon; the daemon then names the session by its plain id.
     const std::string expectedId = config_.sessionId.rfind("local:", 0) == 0
                                        ? config_.sessionId.substr(6)
                                        : config_.sessionId;
@@ -120,10 +128,10 @@ void ClientSession::handle(const Welcome &message) {
         (message.features & ~offered) || (message.flags & ~3u) ||
         (reset && !resumed) ||
         (resumed && !(message.features & featureReplay)) ||
-        (resumed ? (config_.sessionId.empty() ||
-                    message.sessionId != expectedId)
-                 : (!config_.sessionId.empty() || message.startOffset != 0 ||
-                    message.flags != 0)) ||
+        (resumed
+             ? (config_.sessionId.empty() || message.sessionId != expectedId)
+             : (!config_.sessionId.empty() || message.startOffset != 0 ||
+                message.flags != 0)) ||
         (resumed && !reset &&
          (!config_.resumeOffset ||
           message.startOffset != config_.resumeOffset))) {
@@ -191,8 +199,30 @@ void ClientSession::handle(const Exit &message) {
 }
 
 void ClientSession::handle(const Pong &message) {
-    if (pingSentAt_ && message.nonce == pingNonce_) {
+    if (pingSentAt_ && message.nonce == keepaliveNonce_) {
         pingSentAt_.reset();
+    }
+    if (probeSentAt_ && message.nonce == probeNonce_) {
+        roundTripMs_ = double((config_.clock() - *probeSentAt_).count());
+        probeSentAt_.reset();
+    }
+}
+
+void ClientSession::probeRoundTrip() {
+    if (state_ != State::Running) {
+        return;
+    }
+    const auto now = config_.clock();
+    if (probeSentAt_ && now - *probeSentAt_ <= config_.pongTimeout) {
+        return;
+    }
+    // Share the keepalive nonce sequence: concurrent probes cannot collide.
+    probeNonce_ = ++pingNonce_;
+    if (sendMessage(Ping{probeNonce_})) {
+        probeSentAt_ = now;
+    }
+    else {
+        probeSentAt_.reset();
     }
 }
 
@@ -286,6 +316,7 @@ void ClientSession::tick() {
     }
     else if (now - lastSent_ >= config_.pingInterval) {
         pingSentAt_ = now;
-        sendMessage(Ping{++pingNonce_});
+        keepaliveNonce_ = ++pingNonce_;
+        sendMessage(Ping{keepaliveNonce_});
     }
 }

@@ -3,6 +3,25 @@
 The owner's native matterm sat at about 90 % of a core for hours (a build from 12:22, with Claude Code
 running in the window).
 
+## Measuring native neovim lag over the LAN
+
+Run `matterm --daemon-host HOST --perf-log /tmp/matterm-client.log`, then start
+`nvim` **inside that window**. Type, scroll and resize, then close the window to
+write the final partial interval, summary and diagnostic hint. Alternatively set
+`MATTERM_PERF_LOG=/tmp/matterm-client.log`. Start the remote daemon with its own
+performance log to compare both ends; use separate files for different processes
+when collecting measurements. `matmux --perf-log FILE` measures passthrough, a
+separate path: its query-answer fix must not be assumed to fix native GUI lag.
+
+Compare `echo`, `rtt`, `parse_ms`, `layout_ms`, `draw_ms`, encoded protocol bytes
+and CPU. Drawing includes presenting (which may wait for vertical sync), not the
+loop's deliberate sleep. Echo is first output after user input, not proof that
+output belongs to that input. RTT includes client polling and daemon scheduling,
+so it alone cannot identify the network. P95 is a bounded-histogram approximation;
+interval durations are explicit. The exit verdict may be `unknown`. No terminal
+contents or typed bytes are logged. Disable the log for normal use; timing clocks
+and sample collection are then off. Real LAN/neovim validation is still required.
+
 ## Cause
 
 The native loop (`runPtyFrontend` in `app/ptyfrontend.cpp`) built and drew **every pane, every cell, in

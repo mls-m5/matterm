@@ -1,6 +1,7 @@
-// matmux: matterm --attach-tty without the window libraries (docs/tasks/daemon-versioning.md).
-// One file that can be copied to another computer and run over ssh (`ssh -t host matmux`):
-// lists the terminals of the daemon, takes one over, and also lists and stops daemons.
+// matmux: matterm --attach-tty without the window libraries
+// (docs/tasks/daemon-versioning.md). One file that can be copied to another
+// computer and run over ssh (`ssh -t host matmux`): lists the terminals of the
+// daemon, takes one over, and also lists and stops daemons.
 #include "attachtty.h"
 #include "daemoncli.h"
 #include "daemonclient.h"
@@ -21,13 +22,16 @@ void usage(std::ostream &out) {
            "       matmux [--daemon-socket PATH] --new [--name NAME] [-- "
            "COMMAND...]\n"
            "       matmux [--daemon-socket PATH] --attach\n"
-           "  Without arguments: the list of the terminals in the daemon with \"New "
+           "  Without arguments: the list of the terminals in the daemon with "
+           "\"New "
            "terminal\" chosen\n"
-           "  (Enter starts one with your shell); when none runs, a new terminal "
+           "  (Enter starts one with your shell); when none runs, a new "
+           "terminal "
            "at once (the daemon is\n"
            "  started when missing). Leave a terminal with Ctrl+B d: it keeps "
            "running.\n"
-           "  --attach              the same list with the first terminal chosen "
+           "  --attach              the same list with the first terminal "
+           "chosen "
            "(Ctrl+B l is the\n"
            "                        list again)\n"
            "  --daemon-socket PATH  the daemon on this socket (default: the "
@@ -39,8 +43,14 @@ void usage(std::ostream &out) {
            "matterm-daemon there\n"
            "  --yes                 copy without asking\n"
            "  --ssh-arg ARG         an extra argument for ssh (repeatable)\n"
-           "  --rendered            draw the terminal cell by cell in the alternate screen (status line,\n"
-           "                        no host scrollback) instead of passing its output through\n"
+           "  --perf-log FILE       write a performance log (echo latency, "
+           "round trip, bytes, parse time, CPU)\n"
+           "                        one line per second to FILE (also: "
+           "MATTERM_PERF_LOG=FILE)\n"
+           "  --rendered            draw the terminal cell by cell in the "
+           "alternate screen (status line,\n"
+           "                        no host scrollback) instead of passing its "
+           "output through\n"
            "  --new                 start a terminal (your shell, or COMMAND) "
            "in the daemon, started when\n"
            "                        missing, and attach to it at once; the "
@@ -58,12 +68,17 @@ int main(int argc, char **argv) {
     DaemonOptions options;
     options.enabled = true;
     options.attachProgram = "matmux --attach";
-    options.rendered = false; // Passthrough: the host terminal keeps its scrollback. --rendered: cell by cell.
+    options.rendered = false; // Passthrough: the host terminal keeps its
+                              // scrollback. --rendered: cell by cell.
     bool list = false, stop = false, attach = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--attach") {
             attach = true;
+            continue;
+        }
+        if (arg == "--perf-log" && i + 1 < argc) {
+            options.perfLog = argv[++i];
             continue;
         }
         if (arg == "--rendered") {
@@ -116,8 +131,8 @@ int main(int argc, char **argv) {
             return 2;
         }
     }
-    // A name or a command is for a new terminal. Without any mode: the list with New terminal chosen, or a
-    // new terminal at once when none runs.
+    // A name or a command is for a new terminal. Without any mode: the list
+    // with New terminal chosen, or a new terminal at once when none runs.
     if (!attach && !list && !stop && !options.attachNew) {
         if (options.attachName.empty() && options.attachCommand.empty()) {
             options.attachDefault = true;
@@ -133,7 +148,8 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (options.attachNew && (list || stop)) {
-        std::cerr << "--new cannot be combined with --daemon-list or --daemon-stop\n";
+        std::cerr
+            << "--new cannot be combined with --daemon-list or --daemon-stop\n";
         return 2;
     }
     if (list && stop) {

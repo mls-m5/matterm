@@ -66,8 +66,14 @@ int runAttachTty(const DaemonOptions &daemonIn) {
     }
     (void)::signal(SIGPIPE, SIG_IGN); // A write to a gone terminal is an error
                                       // return, not a signal.
+    frontend::ClientPerf perfLog(daemon.perfLog, "matmux-rendered");
+    if (!perfLog.error().empty()) {
+        std::cerr << "matterm: performance log: " << perfLog.error() << '\n';
+    }
     TtyHost host;
     AttachTty::Options options;
+    if (perfLog.enabled())
+        options.metrics = &perfLog.second;
     options.ownSession = own;
     options.comeBack = daemon.attachProgram;
     options.startNew = daemon.attachNew;
@@ -92,7 +98,12 @@ int runAttachTty(const DaemonOptions &daemonIn) {
                 short(POLLIN | (mode.paneWantsWrite() ? POLLOUT : 0)),
                 0};
         }
-        const int rc = ::poll(fds, count, mode.timeoutMs(now));
+        const int timeout = mode.timeoutMs(now);
+        const int rc = ::poll(
+            fds,
+            count,
+            perfLog.enabled() ? (timeout < 0 ? 1000 : std::min(timeout, 1000))
+                              : timeout);
         now = steadyMs();
         if (rc < 0 && errno != EINTR) {
             break;
@@ -119,6 +130,7 @@ int runAttachTty(const DaemonOptions &daemonIn) {
             mode.quiet(now);
         }
         mode.tick(now);
+        perfLog.tick();
     }
     host.restore();
     if (!mode.farewell().empty()) {

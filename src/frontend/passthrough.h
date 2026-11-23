@@ -11,6 +11,7 @@
 // Contract with the caller: write hostOut() fully (the program's last words
 // included) before acting on outcome(); the host terminal is put back
 // (restore()) on every exit.
+#include "perfclient.h"
 #include "terminalview.h"
 #include "ttyattach.h"
 #include "ttyinput.h"
@@ -58,8 +59,13 @@ public:
             << 20; // Bytes waiting for the host before the daemon is not read.
         std::int64_t replayTimeoutMs =
             5000; // Show the screen anyway after this long.
-        // A new terminal's startup queries must reach the host unchanged.
+        // A terminal this client has just created has nothing to replay: it is
+        // live from the first byte, so startup queries reach the host.
         bool fresh = false;
+        // Optional performance measurements; milliseconds on a steady clock.
+        perf::Counters *counters = nullptr;
+        perf::EchoMeter *echo = nullptr;
+        std::function<double()> clockMs;
     };
 
     Session(AttachedPane &pane, Options options, std::int64_t now)
@@ -69,17 +75,26 @@ public:
         pane_.view().setOutputTap([this](std::string_view bytes) {
             if (live_) {
                 out_.append(bytes);
+                if (options_.echo && options_.clockMs) {
+                    options_.echo->outputArrived(options_.clockMs());
+                }
             }
         });
         if (options_.fresh) {
-            live_ = true;
+            live_ = true; // Nothing to replay: output goes straight through.
             if (!options_.attachLine.empty()) {
-                out_ += options_.attachLine + "\r\n";
+                out_ += options_.attachLine;
+                out_ += "\r\n";
             }
+        }
+        if (options_.counters) {
+            pane_.view().setParseTimer(
+                [c = options_.counters](double ms) { c->parseMs += ms; });
         }
     }
     ~Session() {
         pane_.view().setOutputTap({});
+        pane_.view().setParseTimer({});
     }
     Session(const Session &) = delete;
     Session &operator=(const Session &) = delete;
@@ -91,6 +106,9 @@ public:
         }
         if (!stalled()) {
             pane_.tick();
+        }
+        else if (options_.counters) {
+            ++options_.counters->stalls;
         }
         flushInput(); // Retry input queued before the connection was running.
         if (!live_) {
@@ -201,6 +219,9 @@ private:
         if (live_ && !forward_.empty() &&
             pane_.view().state() == TerminalView::State::Live) {
             if (pane_.view().sendInput(forward_)) {
+                if (options_.counters && options_.echo && options_.clockMs) {
+                    options_.echo->keySent(options_.clockMs());
+                }
                 forward_.clear();
             }
         }

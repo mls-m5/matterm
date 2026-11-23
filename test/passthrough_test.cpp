@@ -18,10 +18,11 @@ struct FakeLink : TerminalLink {
     void setEvents(Events e) override {
         events = std::move(e);
     }
-    bool accept = true;
+    bool accept = true; // False: not connected yet.
     bool sendInput(std::string_view bytes) override {
-        if (!accept)
+        if (!accept) {
             return false;
+        }
         sent.append(bytes);
         return true;
     }
@@ -137,6 +138,63 @@ TEST_CASE("Bytes that come with the replay but after the snapshot's point are "
     rig.session->consumed(rig.session->hostOut().size());
     rig.pane.output("c");
     EXPECT_EQ(rig.session->hostOut(), std::string("c"));
+}
+
+TEST_CASE("A terminal this client just made is live from the first byte: no "
+          "snapshot, the first bytes go through") {
+    Rig rig(1u << 20, "keys", true);
+    EXPECT(rig.session->live());
+    EXPECT_EQ(rig.session->hostOut(), std::string("keys\r\n"));
+    rig.session->consumed(rig.session->hostOut().size());
+    rig.pane.output(
+        "\x1b[c"); // What neovim asks first: it must reach the host terminal.
+    EXPECT_EQ(rig.session->hostOut(), std::string("\x1b[c"));
+    rig.tick();
+    EXPECT(rig.session->hostOut().find("SNAP") ==
+           std::string::npos); // Never a snapshot.
+    rig.session->consumed(rig.session->hostOut().size());
+    rig.pane.output("more");
+    EXPECT_EQ(rig.session->hostOut(), std::string("more"));
+}
+
+TEST_CASE(
+    "Input typed before the connection runs is kept and sent when it does") {
+    Rig rig(1u << 20, {}, true);
+    rig.pane.link.accept = false;
+    rig.session->input("ls");
+    rig.tick();
+    EXPECT(rig.pane.link.sent.empty());
+    rig.pane.link.accept = true;
+    rig.tick();
+    EXPECT_EQ(rig.pane.link.sent, std::string("ls"));
+    rig.tick();
+    EXPECT_EQ(rig.pane.link.sent, std::string("ls")); // Not twice.
+}
+
+TEST_CASE(
+    "Echo measures forwarded input, while wire counting belongs to transport") {
+    perf::Counters counters;
+    perf::EchoMeter echo;
+    double now = 0;
+    // A session of its own, with the meters.
+    Session::Options options;
+    options.fresh = true;
+    options.counters = &counters;
+    options.echo = &echo;
+    options.clockMs = [&] { return now; };
+    FakePane pane;
+    Session session(pane, options, 0);
+    pane.output("0123456789");
+    EXPECT_EQ(counters.bytesIn, std::uint64_t(0));
+    now = 100;
+    session.input("a");
+    EXPECT_EQ(counters.bytesOut, std::uint64_t(0));
+    now = 118;
+    pane.output("a");
+    EXPECT_EQ(echo.samples().summary().count, std::size_t(1));
+    EXPECT(std::abs(echo.samples().summary().avg - 18) < 1e-9);
+    EXPECT_EQ(counters.messagesIn, std::uint64_t(0));
+    EXPECT(counters.parseMs >= 0);
 }
 
 TEST_CASE("The screen is shown anyway when the replay never ends") {

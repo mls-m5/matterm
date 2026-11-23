@@ -73,6 +73,8 @@ void printUsage(std::ostream &out, const char *program) {
            "  --no-daemon          Run the programs in this process.\n"
            "  --daemon-socket PATH Socket of the daemon (default: "
            "$XDG_RUNTIME_DIR/matterm/daemon.sock).\n"
+           "  --perf-log FILE      Write client timings, RTT, traffic and CPU "
+           "diagnostics to FILE.\n"
            "  --daemon-host [USER@]HOST\n"
            "                       Use the daemon of another computer through "
            "an ssh tunnel\n"
@@ -136,8 +138,10 @@ void printUsage(std::ostream &out, const char *program) {
            "                       Works for any version; name one with "
            "--daemon-socket if several run.\n"
            "  --new [--name N] [-- COMMAND...]\n"
-           "                       With --attach-tty: start a terminal (your shell, or COMMAND) in the\n"
-           "                       daemon and attach to it at once; the program ends the client.\n"
+           "                       With --attach-tty: start a terminal (your "
+           "shell, or COMMAND) in the\n"
+           "                       daemon and attach to it at once; the "
+           "program ends the client.\n"
            "  --smooth-cursor      Animate cursor movement (native PTY only; "
            "default: off).\n"
            "  --record-output FILE Record raw PTY output to a new file (max 64 "
@@ -504,6 +508,7 @@ int main(int argc, char **argv) {
     std::string tabActivity = "icon";
     std::string daemonSocket;
     std::string daemonHost;
+    std::string perfLog;
     std::vector<std::string> sshArguments;
     bool daemonInstall = false;
     bool assumeYes = false;
@@ -597,6 +602,9 @@ int main(int argc, char **argv) {
                 return 1;
             }
             tabActivity = value;
+        }
+        else if (arg == "--perf-log" && i + 1 < argc) {
+            perfLog = argv[++i];
         }
         else if (arg == "--no-daemon") {
             useDaemon = false;
@@ -752,6 +760,7 @@ int main(int argc, char **argv) {
             options.sshArguments = sshArguments;
             options.installAlways = daemonInstall;
             options.assumeYes = assumeYes;
+            options.perfLog = perfLog;
             options.attachNew = attachNew;
             options.attachName = attachName;
             options.attachCommand = command;
@@ -802,6 +811,7 @@ int main(int argc, char **argv) {
         try {
             const auto font = applicationFontPath(fontOverride);
             DaemonOptions daemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll, daemonHost, sshArguments, daemonInstall, assumeYes, tabActivity, frontend::wantsOwnFrame(frameRequest)};
+            daemonOptions.perfLog = perfLog;
             daemonOptions.layoutSmoke = ptyLayoutSmokeTest;
             return runPtyFrontend(font.c_str(),
                                   fontSize,

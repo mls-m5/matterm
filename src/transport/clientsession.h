@@ -5,6 +5,7 @@
 #include "protocoltime.h"
 #include "terminallink.h"
 
+#include <chrono>
 #include <functional>
 #include <optional>
 #include <string>
@@ -27,7 +28,8 @@ public:
         ms pongTimeout{30000};            // Silence after a Ping is fatal.
         std::size_t maxInputChunk = 4096;
         bool replay = false;
-        // Further feature bits to offer in Hello (featureDaemon for the local daemon).
+        // Further feature bits to offer in Hello (featureDaemon for the local
+        // daemon).
         std::uint32_t extraFeatures = 0;
         std::string sessionId;
         std::uint64_t resumeOffset = 0;
@@ -49,6 +51,21 @@ public:
     void close() override;
 
     void tick();
+    // Measures the round trip to the peer: sends a Ping of its own (the
+    // keep-alive is not touched) unless one is out, and times its Pong.
+    // takeRoundTripMs() gives the last measurement once (nullopt when none
+    // arrived).
+    void probeRoundTrip();
+    // Encoded protocol payload bytes per accepted/sent message. A Unix socket
+    // caller adds its four-byte framing prefix; no socket chunk counting.
+    void setTrafficObserver(std::function<void(bool, std::size_t)> observer) {
+        trafficObserver_ = std::move(observer);
+    }
+    std::optional<double> takeRoundTripMs() {
+        auto r = roundTripMs_;
+        roundTripMs_.reset();
+        return r;
+    }
     std::optional<protocol::Time> nextDeadline() const;
     State state() const noexcept;
     const std::string &sessionId() const noexcept;
@@ -94,5 +111,10 @@ private:
     protocol::Time lastSent_{};
     protocol::Time lastReceived_{};
     std::optional<protocol::Time> pingSentAt_;
+    std::optional<protocol::Time> probeSentAt_;
+    std::uint32_t probeNonce_ = 0;
+    std::function<void(bool, std::size_t)> trafficObserver_;
+    std::optional<double> roundTripMs_;
     std::uint32_t pingNonce_ = 0;
+    std::uint32_t keepaliveNonce_ = 0;
 };

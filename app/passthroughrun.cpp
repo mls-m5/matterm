@@ -7,6 +7,7 @@
 #include "attachtty.h"
 #include "attachtty_impl.h"
 #include "passthrough.h"
+#include "perfclient.h"
 #include "tty/posix/terminal.h"
 
 #include "tty/matterm/snapshot.h"
@@ -20,6 +21,7 @@
 #include <iostream>
 #include <poll.h>
 #include <sys/ioctl.h>
+#include <sys/resource.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -166,7 +168,8 @@ private:
 Outcome showTerminal(DaemonPane &pane,
                      const std::string &title,
                      const std::string &attachLine,
-                     bool fresh) {
+                     bool fresh,
+                     frontend::ClientPerf &perfLog) {
     RawHost host;
     int columns = 0, rows = 0;
     RawHost::size(columns, rows);
@@ -176,7 +179,22 @@ Outcome showTerminal(DaemonPane &pane,
     options.snapshot = snapshotOf;
     options.restore = restoreFor;
     options.fresh = fresh;
+    auto &counters = perfLog.second.counters;
+    frontend::perf::EchoMeter echo;
+    frontend::HostWriteWait hostWait;
+    if (perfLog.enabled()) {
+        pane.setTrafficObserver([&](bool received, std::size_t bytes) {
+            if (received)
+                counters.in(bytes + 4);
+            else
+                counters.out(bytes + 4);
+        });
+        options.counters = &counters;
+        options.echo = &echo;
+        options.clockMs = [] { return double(steadyMs()); };
+    }
     frontend::passthrough::Session session(pane, options, steadyMs());
+    std::int64_t perfAt = perfLog.enabled() ? steadyMs() : 0;
     bool interrupted = false;
     bool hostGone = false;
     bool alt = false;
@@ -205,6 +223,11 @@ Outcome showTerminal(DaemonPane &pane,
                 : 50; // Until the screen is shown the replay is waited for.
         if (const auto due = pane.nextTickMs()) {
             const int left = int(std::max<std::int64_t>(0, *due - now));
+            timeout = timeout < 0 ? left : std::min(timeout, left);
+        }
+        if (perfLog.enabled()) { // Wake for the next line of the log.
+            const int left =
+                int(std::max<std::int64_t>(0, perfAt + 1000 - now));
             timeout = timeout < 0 ? left : std::min(timeout, left);
         }
         if (session.outcome()) {
@@ -243,7 +266,17 @@ Outcome showTerminal(DaemonPane &pane,
                 (fds[outIndex].revents & (POLLOUT | POLLERR | POLLHUP))) {
                 const std::size_t chunk =
                     std::min<std::size_t>(session.hostOut().size(), 65536);
+                const double writeStart =
+                    perfLog.enabled() ? frontend::perfClockMs() : 0;
                 const ssize_t n = ::write(1, session.hostOut().data(), chunk);
+                if (perfLog.enabled()) {
+                    const double at = frontend::perfClockMs();
+                    counters.blockedMs += at - writeStart;
+                    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+                        hostWait.blocked(at);
+                    else
+                        counters.blockedMs += hostWait.take(writeStart);
+                }
                 if (n > 0) {
                     session.consumed(std::size_t(n));
                 }
@@ -253,6 +286,18 @@ Outcome showTerminal(DaemonPane &pane,
             }
         }
         session.tick(steadyMs());
+        if (perfLog.enabled()) {
+            perfLog.second.echo.merge(echo.samples());
+            echo.samples().clear();
+            if (const auto measured = pane.takeRoundTripMs())
+                perfLog.second.rtt.add(*measured);
+            const std::int64_t at = steadyMs();
+            if (at - perfAt >= 1000) {
+                perfLog.tick();
+                perfAt = at;
+                pane.probeRoundTrip();
+            }
+        }
         if (session.live() && pane.view().model().alternateScreen() != alt) {
             alt = !alt;
             setCrashRestore(session.restore());
@@ -260,6 +305,10 @@ Outcome showTerminal(DaemonPane &pane,
         if (interrupted) {
             break;
         }
+    }
+    if (perfLog.enabled()) {
+        counters.blockedMs += hostWait.take(frontend::perfClockMs());
+        pane.setTrafficObserver({});
     }
     host.restore(session.restore());
     if (session.outcome()) {
@@ -287,7 +336,10 @@ int runPassthroughMode(const DaemonOptions &daemon,
     request.command = daemon.attachCommand;
     std::string id, title, message;
     bool hinted = false;
-    bool fresh = false; // This client just created the terminal.
+    bool fresh = false; // The terminal was just made by this client.
+    frontend::ClientPerf perfLog(daemon.perfLog, "matmux-passthrough");
+    if (!perfLog.error().empty())
+        std::cerr << "matmux: performance log: " << perfLog.error() << '\n';
     for (;;) {
         if (next == Next::List) {
             TtyHost host;
@@ -296,8 +348,8 @@ int runPassthroughMode(const DaemonOptions &daemon,
             options.comeBack = daemon.attachProgram;
             options.listOnly = true;
             options.selectNew =
-                daemon.attachDefault; // matmux without arguments:
-                                      // Enter = a new terminal.
+                daemon.attachDefault; // matmux without arguments: Enter = a new
+                                      // terminal.
             options.initialMessage = message;
             AttachTty list(host, source, options);
             list.start(steadyMs());
@@ -397,8 +449,9 @@ int runPassthroughMode(const DaemonOptions &daemon,
                    : std::string("matmux: Ctrl+B d leaves (the terminal keeps "
                                  "running), l the list, c a new terminal");
         hinted = true;
-        const Outcome outcome = showTerminal(pane, title, line, fresh);
-        fresh = false; // Taking back a running terminal is an ordinary attach.
+        const Outcome outcome = showTerminal(pane, title, line, fresh, perfLog);
+        fresh = false; // Taking it back after a take-over is an attach to a
+                       // running terminal.
         switch (outcome.kind) {
         case Outcome::Kind::Leave:
             say(title + " keeps running; " + daemon.attachProgram +

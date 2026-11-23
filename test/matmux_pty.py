@@ -136,7 +136,7 @@ try:
     first_id = started["sessions"][0]["id"]
 
     # --new -- COMMAND: a long history, then a program that goes on. Time to the first screen.
-    a = Tty(socket, ("--new", "--", "sh", "-c", "seq 1 20000; echo history-end; sleep 60"))
+    a = Tty(socket, ("--perf-log", tmp + "/passthrough.log", "--new", "--", "sh", "-c", "seq 1 20000; echo history-end; sleep 60"))
     ttys.append(a)
     check(a.wait_for("history-end", 20), "a new terminal with a long history is shown")
     print("      time to the last line of 20000: %.2f s" % (time.time() - a.start))
@@ -343,9 +343,15 @@ try:
     check(got == expected, "a freshly created terminal forwards startup questions without waiting for replay")
     got = asked((), False, "silent")
     check(got == repr(b""), "passthrough with a silent host: matterm answers nothing itself")
-    got = asked(("--rendered",), False, "rendered")
+    got = asked(("--rendered", "--perf-log", tmp + "/rendered.log"), False, "rendered")
     check(got is not None and "[?1;0c" in got, "with --rendered the model is the terminal and answers (device attributes)")
     print("      rendered got: " + str(got))
+    for role in ("passthrough", "rendered"):
+        with open(tmp + "/" + role + ".log") as stream:
+            log = stream.read()
+        check("matmux-" + role in log and "summary" in log and "verdict" in log
+              and "parse_ms=" in log and "in_msg=" in log,
+              role + " writes diagnostics and a final summary with a real daemon")
 
     # SIGTERM restores the terminal.
     k = Tty(socket, ("--new",))

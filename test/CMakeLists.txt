@@ -165,6 +165,11 @@ if(BUILD_TESTING)
     target_include_directories(emptyshell_test PRIVATE ../src/frontend)
     add_test(NAME empty_shell COMMAND emptyshell_test)
 
+    add_executable(perfclient_test perfclient_test.cpp)
+    target_link_libraries(perfclient_test PRIVATE mls_unit_test_main)
+    target_include_directories(perfclient_test PRIVATE ../src/frontend)
+    add_test(NAME perf_client COMMAND perfclient_test)
+
     add_executable(restorecwd_test restorecwd_test.cpp)
     target_link_libraries(restorecwd_test PRIVATE mls_unit_test_main)
     target_include_directories(restorecwd_test PRIVATE ../src/frontend)
@@ -540,6 +545,13 @@ if(BUILD_TESTING)
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/matmux_pty.py"
                         $<TARGET_FILE:matmux> $<TARGET_FILE:matterm-daemon-e2e>)
             set_tests_properties(matmux_pty PROPERTIES TIMEOUT 180)
+        endif()
+
+        if(Python3_Interpreter_FOUND AND TARGET matterm AND TARGET matterm-daemon)
+            add_test(NAME native_perf_log
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/native_perf_log.py"
+                        $<TARGET_FILE:matterm> $<TARGET_FILE:matterm-daemon>)
+            set_tests_properties(native_perf_log PROPERTIES TIMEOUT 100)
         endif()
 
         # Detach tab, then Attach tab... is offered: local daemon, and --daemon-host through the fake ssh.

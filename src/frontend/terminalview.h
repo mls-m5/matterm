@@ -1,14 +1,15 @@
 #pragma once
 
 #include "clientsession.h"
+#include "copymode.h"
 #include "cursorglide.h"
 #include "palette.h"
 #include "terminallink.h"
 #include "terminalmodel.h"
-#include "copymode.h"
 #include "textselection.h"
 #include "vtparser.h"
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -22,14 +23,16 @@ struct TerminalViewConfig {
     std::size_t rows = 24;
     std::size_t scrollback = 1000;
     CursorGlide::Config glide;
-    // Scrolling by wheel or finger stops on whole rows once it pauses. Off: the view may rest
-    // in the middle of a row (pixel scrolling).
+    // Scrolling by wheel or finger stops on whole rows once it pauses. Off: the
+    // view may rest in the middle of a row (pixel scrolling).
     bool snapScrollToRows = false;
-    // The line written into the terminal when another window takes the session over.
+    // The line written into the terminal when another window takes the session
+    // over.
     std::string replacedNotice = "session taken over by another window";
-    // The model answers the program's questions to the terminal (device attributes, cursor position,
-    // colours...). False for matmux's passthrough: the model there is hidden and the host terminal, which
-    // sees the same bytes, is the one that answers; two answers would confuse the program.
+    // The model answers the program's questions to the terminal (device
+    // attributes, cursor position, colours...). False for matmux's passthrough:
+    // the model there is hidden and the host terminal, which sees the same
+    // bytes, is the one that answers; two answers would confuse the program.
     bool answerQueries = true;
 };
 
@@ -81,7 +84,16 @@ public:
         TerminalLink::Events events;
         events.output = [this](std::string_view bytes) {
             outputBytes_ += bytes.size();
-            parser_->feed(bytes);
+            if (parseTimer_) {
+                const auto start = std::chrono::steady_clock::now();
+                parser_->feed(bytes);
+                parseTimer_(std::chrono::duration<double, std::milli>(
+                                std::chrono::steady_clock::now() - start)
+                                .count());
+            }
+            else {
+                parser_->feed(bytes);
+            }
             if (outputTap_) {
                 outputTap_(bytes);
             }
@@ -93,10 +105,20 @@ public:
         events.closed = [this](std::string_view reason) { onClosed(reason); };
         link.setEvents(std::move(events));
     }
-    // Gets every chunk of the program's output after the model has parsed it (matmux passes it on to
-    // the host terminal unchanged). Kept when the view is attached to another link.
+    // Gets every chunk of the program's output after the model has parsed it
+    // (matmux passes it on to the host terminal unchanged). Kept when the view
+    // is attached to another link.
     void setOutputTap(std::function<void(std::string_view)> tap) {
         outputTap_ = std::move(tap);
+    }
+    // Called with the milliseconds the model spent parsing each chunk of output
+    // (the performance log).
+    void setParseTimer(std::function<void(double)> timer) {
+        parseTimer_ = std::move(timer);
+    }
+    // Successful user input only: terminal-query replies are not echo samples.
+    void setInputTap(std::function<void()> tap) {
+        inputTap_ = std::move(tap);
     }
     void detach() {
         if (link_) {
@@ -122,8 +144,14 @@ public:
 
     // Input goes to the program only while the view is live.
     bool sendInput(std::string_view bytes) {
-        const bool sent = link_ && state_ == State::Live && link_->sendInput(bytes);
-        if (sent) inputBytes_ += bytes.size();
+        const bool sent =
+            link_ && state_ == State::Live && link_->sendInput(bytes);
+        if (sent) {
+            inputBytes_ += bytes.size();
+            if (!bytes.empty() && inputTap_) {
+                inputTap_();
+            }
+        }
         return sent;
     }
     void resize(std::size_t columns, std::size_t rows) {
@@ -157,11 +185,13 @@ public:
         changed();
     }
 
-    // Everything the program has written to this view so far (for "did it output lately").
+    // Everything the program has written to this view so far (for "did it
+    // output lately").
     std::uint64_t outputBytes() const {
         return outputBytes_;
     }
-    // Everything sent to the program (keys, paste, mouse reports): output soon after it is the echo.
+    // Everything sent to the program (keys, paste, mouse reports): output soon
+    // after it is the echo.
     std::uint64_t inputBytes() const {
         return inputBytes_;
     }
@@ -217,8 +247,8 @@ public:
     }
 
     std::optional<Selection> selection;
-    // Copy / scroll mode (docs/TABS_PLAN.md section 12): while set, the owner feeds it the keys and
-    // the program gets none.
+    // Copy / scroll mode (docs/TABS_PLAN.md section 12): while set, the owner
+    // feeds it the keys and the program gets none.
     std::optional<CopyMode> copyMode;
 
 private:
@@ -298,6 +328,7 @@ private:
     std::unique_ptr<TerminalModel> model_;
     std::unique_ptr<VtParser> parser_;
     TerminalLink *link_ = nullptr;
+    std::function<void()> inputTap_;
     ErrorSource errorCode_;
     std::uint64_t outputBytes_ = 0;
     std::uint64_t inputBytes_ = 0;
@@ -307,5 +338,6 @@ private:
     std::string title_;
     std::function<void()> changed_;
     std::function<void(std::string_view)> outputTap_;
+    std::function<void(double)> parseTimer_;
 };
 } // namespace frontend
