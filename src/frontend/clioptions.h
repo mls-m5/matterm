@@ -48,6 +48,7 @@ inline const std::vector<Program> &programs() {
              {"--system-frame", "", Value::None, "", "Use the window frame of the desktop, not our own", false},
              {"--borderless", "", Value::None, "", "The default: our own frame (accepted for old command lines)", false},
              {"--window-test", "", Value::None, "", "Print which window calls work here", false},
+             {"--attach-tty", "", Value::None, "", "Take over a running terminal in this terminal (no window)", false},
              {"--smooth-cursor", "", Value::None, "", "Animate cursor movement", false},
              {"--record-output", "", Value::File, "", "Record raw PTY output to a new file", false},
              {"--input", "", Value::File, "", "Play a VT file without a shell", false},

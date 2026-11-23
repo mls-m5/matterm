@@ -417,7 +417,7 @@ TEST_CASE("Window buttons close the row: minimise, maximise or restore, close") 
                 // Share and the palette button come before them.
                 EXPECT(strip.regions[n - 4].hit.kind == Kind::Palette);
                 EXPECT(strip.regions[n - 5].hit.kind == Kind::Share);
-                auto glyph = [&](const StripRegion &r) { return strip.cells[std::size_t(r.begin + 1)].codePoint; };
+                auto glyph = [&](const StripRegion &r) { return strip.cells[std::size_t(r.begin) + 1].codePoint; };
                 EXPECT(glyph(min) == kMinimizeIcon);
                 EXPECT(glyph(max) == (maximized ? kRestoreIcon : kMaximizeIcon));
                 EXPECT(glyph(close) == kCloseWindowIcon);

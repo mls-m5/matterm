@@ -49,8 +49,20 @@ public:
                                                ClientSession::Config config) {
         auto channel = std::make_unique<UnixSocketChannel>(socketPath);
         auto *raw = channel.get();
-        return std::make_unique<DaemonLink>(
+        auto link = std::make_unique<DaemonLink>(
             std::move(channel), std::move(config), [raw] { raw->poll(); });
+        link->socket_ = raw;
+        return link;
+    }
+
+    // For a loop that sleeps in poll(2) instead of ticking every frame: the
+    // descriptor to wait on (-1: none, or not a Unix socket) and whether it
+    // also has to be watched for writing.
+    int pollFd() const {
+        return socket_ ? socket_->fd() : -1;
+    }
+    bool wantsWrite() const {
+        return socket_ && socket_->hasPendingOutput();
     }
 
     // Drives the connection and the session (acks, pings). Call it every frame.
@@ -121,6 +133,8 @@ public:
 private:
     std::unique_ptr<MessageChannel> channel_;
     std::string requestedId_;
+    const UnixSocketChannel *socket_ =
+        nullptr; // Owned by channel_, when it is one.
     Pump pump_;
     ClientSession session_; // Last: it listens to the channel above.
 };

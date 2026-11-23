@@ -119,6 +119,26 @@ if(BUILD_TESTING)
     target_link_libraries(windowhit_test PRIVATE palette)
     add_test(NAME window_hit COMMAND windowhit_test)
 
+    add_executable(ttyinput_test ttyinput_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(ttyinput_test PRIVATE ../src/frontend)
+    target_link_libraries(ttyinput_test PRIVATE matterm::vt)
+    add_test(NAME tty_input COMMAND ttyinput_test)
+
+    add_executable(ttylist_test ttylist_test.cpp mls-unit-test/test_main.cpp ../src/daemon/control.cpp)
+    target_include_directories(ttylist_test PRIVATE ../src/frontend ../src/daemon)
+    target_link_libraries(ttylist_test PRIVATE matterm::transport matterm::vt)
+    add_test(NAME tty_list COMMAND ttylist_test)
+
+    add_executable(ttyattach_test ttyattach_test.cpp mls-unit-test/test_main.cpp ../src/daemon/control.cpp)
+    target_include_directories(ttyattach_test PRIVATE ../src/frontend ../src/daemon)
+    target_link_libraries(ttyattach_test PRIVATE matterm::transport matterm::vt matterm::terminal)
+    add_test(NAME tty_attach COMMAND ttyattach_test)
+
+    add_executable(ttyplain_test ttyplain_test.cpp mls-unit-test/test_main.cpp)
+    target_include_directories(ttyplain_test PRIVATE ../src/frontend)
+    target_link_libraries(ttyplain_test PRIVATE palette)
+    add_test(NAME tty_plain COMMAND ttyplain_test)
+
     add_executable(layoutsnapshot_test layoutsnapshot_test.cpp mls-unit-test/test_main.cpp)
     target_include_directories(layoutsnapshot_test PRIVATE ../src/frontend)
     add_test(NAME layout_snapshot COMMAND layoutsnapshot_test)
@@ -384,6 +404,15 @@ if(BUILD_TESTING)
         add_executable(daemon_test daemon_test.cpp mls-unit-test/test_main.cpp)
         target_link_libraries(daemon_test PRIVATE matterm-daemon-core)
         add_test(NAME daemon COMMAND daemon_test)
+
+        # matterm --attach-tty against a real daemon, in real ptys (needs python3).
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        if(Python3_Interpreter_FOUND AND TARGET matterm AND TARGET matterm-daemon-e2e)
+            add_test(NAME attach_tty_pty
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/attachtty_pty.py"
+                        $<TARGET_FILE:matterm> $<TARGET_FILE:matterm-daemon-e2e>)
+            set_tests_properties(attach_tty_pty PROPERTIES TIMEOUT 120)
+        endif()
 
         add_executable(daemonclient_test daemonclient_test.cpp mls-unit-test/test_main.cpp)
         target_include_directories(daemonclient_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)

@@ -99,6 +99,7 @@ TEST_CASE("The scripts offer every visible option and never a hidden one") {
             }
         }
         EXPECT(script.find("pty-tabs-smoke-test") == std::string::npos);
+        EXPECT(script.find("attach-tty") != std::string::npos);
         EXPECT(script.find("--daemon-host") != std::string::npos || std::string(shell) == "fish");
         EXPECT(script.find(".ssh/config") != std::string::npos); // Hosts come from ssh's config only.
         EXPECT(script.find("known_hosts") == std::string::npos);

@@ -165,6 +165,52 @@ round; it never blocks.
   `ssh` that relays Unix sockets (`test/fakessh.py`); the ssh options used are the documented ones
   but have not been run against a real sshd here.
 
+## d) From a phone, without a window: `matterm --attach-tty` (built)
+
+For a phone (Termux, JuiceSSH, any ssh client) there is no window and no browser needed. Log in to
+the computer that runs the daemon and start the terminal mode there:
+
+```
+ssh -t you@your-computer matterm --attach-tty
+```
+
+`-t` is needed (a terminal must be allocated; `ssh` does that by itself only without a command).
+The program shows a list of the terminals that run in the daemon (name, what runs, `(in use)` if
+another client has it), you choose with Up/Down (or `j`/`k`, or the digits 1..9) and Enter, and the
+terminal is shown full screen. Choosing is the confirmation: the other client (the window on the
+computer) is kicked, as when two windows share a terminal, and says "press Enter to take it back".
+
+| Where | Key | Does |
+|---|---|---|
+| list | Up/Down, `j`/`k`, `g`/`G`, 1..9 | choose |
+| list | Enter | take the terminal over |
+| list | `r` | read the list again |
+| list | `q`, Esc, Ctrl+C | quit |
+| terminal | **Ctrl+]** | back to the list; the terminal keeps running |
+| terminal, after being taken over or a lost connection | Enter | take it back / connect again |
+
+The first time in a run, a line at the bottom names Ctrl+] for a few seconds (until the first key).
+All other keys go to the program: arrows, function keys, Ctrl and Alt combinations, the mouse (only
+while the program asked for it, so the phone's own selection works otherwise) and paste (in
+brackets only if the program asked). The program has the size of the screen; turning the phone or
+resizing the terminal resizes it.
+
+If the connection drops (ssh ends), the terminal keeps running in the daemon. Log in again and run the
+same command: choose it, and the screen is rebuilt from the daemon's replay (a full-screen program
+such as `vim` or `htop` looks right).
+
+Options: `--daemon-socket PATH` for another daemon; `--daemon-host [user@]host` from a computer (not
+needed from the phone: you are already on the computer) to reach the daemon of a third one through
+the tunnel of section c). `--attach-tty` does not start a daemon: with none running the list says so.
+
+Needs: `matterm` and `matterm-daemon` installed on the computer, the daemon running (the window or
+`matterm-daemon --daemonize` starts it), a user that is the daemon's owner. The program is the
+native `matterm`, built with the same libraries as the window (SDL is linked but not started); a
+computer without them cannot run it yet.
+
+Draws with truecolor if `COLORTERM` is `truecolor` or `24bit`, else 256 colours. Wide (East
+Asian) characters and emoji are not handled specially yet.
+
 ## b) A native WebSocket client against `matterm-server --expose-local-sessions` (not built)
 
 The web version reaches a daemon through `matterm-server`: it logs in (password, `POST /login`,

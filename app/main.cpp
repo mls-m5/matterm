@@ -8,6 +8,9 @@
 #ifdef MATTERM_HAS_PTY
 #include "ptyfrontend.h"
 #endif
+#ifdef MATTERM_HAS_ATTACH_TTY
+#include "attachtty.h"
+#endif
 
 #include <SDL.h>
 #include <SDL_ttf.h>
@@ -87,6 +90,10 @@ void printUsage(std::ostream &out, const char *program) {
            "  --borderless         The default; accepted for old command lines.\n"
            "  --window-test        Print the video driver and which window calls work here, for\n"
            "                       trying the own frame on a new desktop. Opens a window briefly.\n"
+           "  --attach-tty         No window: list the terminals that run in the daemon, take one\n"
+           "                       over in this terminal (full screen) and leave it with Ctrl+].\n"
+           "                       Works with --daemon-socket and --daemon-host, for example from a\n"
+           "                       phone over ssh (docs/REMOTE_DAEMON.md).\n"
            "  --smooth-cursor      Animate cursor movement (native PTY only; "
            "default: off).\n"
            "  --record-output FILE Record raw PTY output to a new file (max 64 "
@@ -445,6 +452,7 @@ int main(int argc, char **argv) {
     bool borderlessFlag = false;
     bool systemFrameFlag = false;
     bool windowTestOnly = false;
+    bool attachTty = false;
     std::string tabActivity = "icon";
     std::string daemonSocket;
     std::string daemonHost;
@@ -510,6 +518,9 @@ int main(int argc, char **argv) {
         }
         else if (arg == "--window-test") {
             windowTestOnly = true;
+        }
+        else if (arg == "--attach-tty") {
+            attachTty = true;
         }
         else if (arg == "--snap-scroll") {
             snapScroll = true;
@@ -608,11 +619,44 @@ int main(int argc, char **argv) {
     }
 #endif
     if (windowTestOnly) {
-        if (inputPath || recordPath || smokeTest || showcase || ptySmokeTest || ptyTabsSmokeTest || !command.empty()) {
+        if (inputPath || recordPath || smokeTest || showcase || ptySmokeTest || ptyTabsSmokeTest || !command.empty() ||
+            attachTty) {
             std::cerr << "--window-test is a test of its own: do not combine it with other modes\n";
             return 1;
         }
         return windowTest();
+    }
+    if (attachTty) {
+        if (!valid) {
+            printUsage(std::cerr, argv[0]);
+            return 1;
+        }
+        if (inputPath || recordPath || smokeTest || showcase || ptySmokeTest || ptyTabsSmokeTest || !command.empty() ||
+            smoothCursor || !useDaemon || borderlessFlag || systemFrameFlag) {
+            std::cerr << "--attach-tty takes over a terminal of the daemon, without a window: it cannot be combined "
+                         "with a command, --no-daemon, --input, --showcase, --record-output, the frame options or "
+                         "the smoke tests\n";
+            return 1;
+        }
+#ifdef MATTERM_HAS_ATTACH_TTY
+        try {
+            DaemonOptions options;
+            options.enabled = true;
+            options.socketPath = daemonSocket;
+            options.host = daemonHost;
+            options.sshArguments = sshArguments;
+            options.installAlways = daemonInstall;
+            options.assumeYes = assumeYes;
+            return runAttachTty(options);
+        }
+        catch (const std::exception &error) {
+            std::cerr << error.what() << '\n';
+            return 1;
+        }
+#else
+        std::cerr << "This build has no --attach-tty (it needs POSIX and the PTY support)\n";
+        return 1;
+#endif
     }
     frontend::FrameRequest frameRequest = frontend::FrameRequest::Default;
     if (!frontend::combineFrameFlags(borderlessFlag, systemFrameFlag, frameRequest)) {

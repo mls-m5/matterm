@@ -118,6 +118,9 @@ private Unix socket, so they survive closing the window or a crash of the GUI.
   (only when the server offers them); choosing one opens a tab attached to it, and the laptop's
   window shows the take-over notice. Enter in the browser pane takes it back after the laptop
   took it again. `web/tools/e2e-local.js` checks the whole path with a real daemon.
+- **Without a window, from a phone**: `ssh -t you@computer matterm --attach-tty` lists the terminals
+  of the daemon, takes the one you choose over and shows it full screen in that terminal; Ctrl+]
+  goes back to the list. See [docs/REMOTE_DAEMON.md](docs/REMOTE_DAEMON.md) section d.
 - Details: [docs/tasks/daemon.md](docs/tasks/daemon.md), [docs/PROTOCOL.md](docs/PROTOCOL.md)
   section 12, [docs/TABS_PLAN.md](docs/TABS_PLAN.md) sections 10-11.
 

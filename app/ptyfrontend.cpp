@@ -1,4 +1,5 @@
 #include "ptyfrontend.h"
+#include "daemonconnect.h"
 
 #include "borderless.h"
 
@@ -478,30 +479,7 @@ int runPtyFrontend(const char *font,
     // The daemon is found (or started) before SDL and its threads exist.
     std::unique_ptr<frontend::SshTunnel> tunnel; // Lives as long as the window (the socket is its).
     if (!daemonOptions.host.empty()) {
-        std::cerr << "matterm: connecting to " << daemonOptions.host << " ...\n";
-        frontend::SshTunnelOptions tunnelOptions;
-        tunnelOptions.host = daemonOptions.host;
-        tunnelOptions.sshArguments = daemonOptions.sshArguments;
-        tunnelOptions.install = daemonOptions.installAlways ? frontend::DaemonInstall::Always : frontend::DaemonInstall::Auto;
-        tunnelOptions.assumeYes = daemonOptions.assumeYes;
-        tunnelOptions.progress = [](const std::string &line) { std::cerr << "matterm: " << line << "\n"; };
-        tunnelOptions.confirm = [](const std::string &question) {
-            if (!::isatty(0) || !::isatty(2)) {
-                return false; // Nobody to ask: --yes says yes in advance.
-            }
-            std::cerr << "matterm: " << question << " [y/N] " << std::flush;
-            std::string answer;
-            std::getline(std::cin, answer);
-            return answer == "y" || answer == "Y" || answer == "yes";
-        };
-        std::string tunnelError;
-        tunnel = frontend::SshTunnel::open(tunnelOptions, tunnelError);
-        if (!tunnel) {
-            throw std::runtime_error("--daemon-host: " + tunnelError);
-        }
-        daemonOptions.socketPath = tunnel->socketPath();
-        daemonOptions.enabled = true;
-        daemonOptions.required = true;
+        tunnel = openDaemonTunnel(daemonOptions);
     }
     const bool remoteDaemon = tunnel != nullptr;
     // Notices that ssh ended and starts it again on a worker thread (declared
