@@ -76,6 +76,7 @@ clang-tidy (`docs/STATIC_ANALYSIS.md`).
 - `docs/tasks/replay-performance.md`: measure replay and restore, batch drawing, checkpoint on detach (design first); agent2.
 - `docs/tasks/matmux-passthrough.md`: matmux forwards the program's output (host scrollback), snapshot on attach; agent2 + agent3.
 - `docs/tasks/settings.md`: settings file (JSON), themes per computer, settings TUI; agent2 (model, file, theme, watcher), agent3 (TUI) after the mockup is approved.
+- `docs/tasks/json-readers.md`: one JSON reader instead of three (tests first, then a decision); agent2.
 - `docs/CHAT.md`: the Mattrix OS chat (ChatRoom core, `chatd`, `mattrix-chat`).
   Worktree `.tmp/agent3`, branch `agent3-fakeos`.
 - `docs/tasks/web-sessions.md`: browser tabs/terminal views. **Paused** while the

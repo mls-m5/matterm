@@ -45,3 +45,9 @@ Owner's wishes (2026-11-23) and decisions (do not reopen; ask with alternatives 
 - Docs: README, TABS_PLAN (theme section), a feature description per agent in
   `docs/handover/features/agentN-<name>.md`. Rules as before: tests first, small commits, tidy
   clean, SHAs to the integrator; state what was not run (no display here).
+
+## Addendum (owner, 2026-11-23): where the computer's name sits
+The name goes roughly in the **middle** of the strip's draggable gap. Make the placement a setting
+to try out: `computerNamePlacement` = `center` (default) | `left` (next to the tabs) | `right`
+(against the buttons), a choice control in the settings, applied live like the theme.
+`placeComputerName` in `tabstrip.h` stays the one place. (agent2, small.)
