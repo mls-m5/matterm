@@ -46,3 +46,8 @@ Decided by the owner (do not reopen)
 Both: tests first, tidy clean (`tools/clang-tidy.sh build --changed <base>`; agent3 has no
 clang-tidy, the integrator runs it), small commits, feature descriptions in
 `docs/handover/features/agentN-<name>.md`, SHAs to the integrator.
+
+## Addendum (owner, 2026-11-23): names and cleanup (agent2)
+- The installed file names carry the version: `matterm-daemon-<format>.<breaking>.<additive>-<hash8>` and the same for `matterm-attach-...` (today the name is the content hash). Lists (`--daemon-list`, install messages) sort by the numbers, as numbers (1.10.0 after 1.9.0). A running file is never overwritten.
+- Cleanup of old versions is done by the installer (`--daemon-install`) after it has copied the new files: only files matching those two name patterns in matterm's own install directory; never a file that a process runs (`/proc/*/exe`); keep the newest older version as a fallback; no question, but print what was removed. Not done: the daemon cleaning up after itself (maybe later; ask the owner first).
+- A new daemon/attach binary must be able to stop older daemons (see the stop part above).
