@@ -248,6 +248,13 @@ int runAttachTty(const DaemonOptions &daemonIn) {
     if (!daemon.host.empty()) {
         tunnel = openDaemonTunnel(daemon);
     }
+    // A daemon of an incompatible version is refused, or a new one offered next
+    // to it.
+    if (const auto error = selectDaemon(daemon, tunnel != nullptr, false);
+        !error.empty()) {
+        std::cerr << "matterm: " << error << "\n";
+        return 1;
+    }
     DaemonSource source(daemonSocket(daemon.socketPath));
     (void)::signal(SIGPIPE, SIG_IGN); // A write to a gone terminal is an error return, not a signal.
     TtyHost host;

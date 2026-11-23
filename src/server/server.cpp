@@ -100,7 +100,7 @@ struct Shared {
         return text.data();
     }
     std::string daemonSocket() const {
-        return config.daemonSocket.empty() ? mtd::defaultSocketPath()
+        return config.daemonSocket.empty() ? mtd::newestDaemonSocket()
                                            : config.daemonSocket;
     }
     explicit Shared(ServerConfig cfg)
@@ -758,8 +758,9 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
                     "--expose-local-sessions beyond loopback needs "
                     "--allow-remote-listen");
             std::clog << "matterm-server: shared sessions of the local daemon ("
-                      << (config.daemonSocket.empty() ? mtd::defaultSocketPath()
-                                                      : config.daemonSocket)
+                      << (config.daemonSocket.empty()
+                              ? mtd::newestDaemonSocket()
+                              : config.daemonSocket)
                       << ") are offered to logged-in browsers\n";
             if (!address.is_loopback())
                 std::clog << "WARNING: local terminals are reachable from the "

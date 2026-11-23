@@ -2,15 +2,18 @@
 // (test/fakessh.py) that relays Unix sockets like `ssh -L local:remote` does. The real matterm-daemon runs
 // behind it, started by `matterm-daemon --ensure --print-socket` exactly as the tunnel does over ssh.
 #include "daemonclient.h"
+#include "daemoninstall.h"
 #include "daemonlink.h"
 #include "mls-unit-test/unittest.h"
 #include "sshtunnel.h"
 
 #include <algorithm>
 #include <chrono>
-#include <dirent.h>
 #include <csignal>
 #include <cstdlib>
+#include <dirent.h>
+#include <fcntl.h>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <sstream>
@@ -39,8 +42,7 @@ struct TempDir {
     }
     ~TempDir() {
         const std::string command = "rm -rf '" + path + "'";
-        // NOLINTNEXTLINE(cert-env33-c): test cleanup of a directory this test
-        // made
+        // NOLINTNEXTLINE(cert-env33-c): cleanup of our own directory
         [[maybe_unused]] const int rc = std::system(command.c_str());
     }
 };
@@ -132,7 +134,10 @@ std::vector<std::string> installed(const Fake &fake) {
     if (auto *d = ::opendir(directory.c_str())) {
         while (const auto *entry = ::readdir(d)) {
             const std::string name = entry->d_name;
-            if (name != "." && name != "..") names.push_back(name);
+            // The versioned daemon files only (not matterm-attach, not the
+            // stable links).
+            if (name.rfind("matterm-daemon-", 0) == 0)
+                names.push_back(name);
         }
         ::closedir(d);
     }
@@ -368,7 +373,11 @@ TEST_CASE("--daemon-install: our daemon is copied (after asking), named after it
     const auto names = installed(fake);
     EXPECT_EQ(names.size(), std::size_t(1));
     EXPECT(names[0].rfind("matterm-daemon-", 0) == 0);
-    EXPECT_EQ(names[0].size(), std::string("matterm-daemon-").size() + 24);
+    const auto own = mtd::ownVersion();
+    EXPECT_EQ(
+        names[0],
+        installedName("matterm-daemon", own)); // matterm-daemon-1.3.1-<hash8>
+    EXPECT(parseInstalledName(names[0]).has_value());
     // The copy is mode 0700, the same bytes, and it is the one that runs.
     const auto file = fake.dir.path + "/home/.local/share/matterm/bin/" + names[0];
     struct stat st {};
@@ -385,6 +394,122 @@ TEST_CASE("--daemon-install: our daemon is copied (after asking), named after it
     EXPECT_EQ(installed(fake).size(), std::size_t(1));
     again.reset();
     stopRemote(fake.dir.path + "/remote.sock");
+}
+
+TEST_CASE("matterm-attach is copied with the daemon, and old versions of both "
+          "are removed") {
+    Fake fake;
+    ::unsetenv("FAKE_SSH_DAEMON_ON_PATH");
+    const auto directory = fake.dir.path + "/home/.local/share/matterm/bin";
+    std::filesystem::create_directories(directory);
+    // Left from earlier installs: an old daemon and attach, an older fallback,
+    // a newer one, one that runs (a copy of sleep), and files that are not
+    // ours.
+    const auto put = [&](const std::string &name,
+                         const std::string &text = "x") {
+        std::ofstream(directory + "/" + name) << text;
+    };
+    put("matterm-daemon-1.2.0-aaaaaaa1");
+    put("matterm-daemon-1.1.0-aaaaaaa2");
+    put("matterm-daemon-1.0.0-aaaaaaa3");
+    put("matterm-attach-1.1.0-aaaaaaa4");
+    put("matterm-daemon-9.9.9-aaaaaaa5");
+    put("matterm-daemon-0123456789abcdef01234567");
+    put("notes.txt");
+    auto options = fake.options();
+    options.install = DaemonInstall::Always;
+    options.assumeYes = true;
+    options.localDaemon = daemonBinary();
+    std::vector<std::string> said;
+    options.progress = [&](const std::string &l) { said.push_back(l); };
+    std::string error;
+    auto tunnel = SshTunnel::open(options, error);
+    EXPECT(tunnel != nullptr);
+    std::vector<std::string> names;
+    for (const auto &entry : std::filesystem::directory_iterator(directory)) {
+        names.push_back(entry.path().filename().string());
+    }
+    std::sort(names.begin(), names.end());
+    const auto own = mtd::ownVersion();
+    const auto has = [&](const std::string &n) {
+        return std::find(names.begin(), names.end(), n) != names.end();
+    };
+    EXPECT(has(installedName("matterm-daemon", own)));
+    EXPECT(has(installedName("matterm-attach", own)));
+    EXPECT(has("matterm-daemon-1.2.0-aaaaaaa1")); // The newest older one stays.
+    EXPECT(!has("matterm-daemon-1.1.0-aaaaaaa2"));
+    EXPECT(!has("matterm-daemon-1.0.0-aaaaaaa3"));
+    EXPECT(has("matterm-attach-1.1.0-aaaaaaa4")); // The only older attach: the
+                                                  // fallback.
+    EXPECT(has("matterm-daemon-9.9.9-aaaaaaa5")); // Newer: left alone.
+    EXPECT(has("matterm-daemon-0123456789abcdef01234567")); // Not our naming
+                                                            // now: left alone.
+    EXPECT(has("notes.txt"));
+    bool reported = false;
+    for (const auto &line : said) {
+        reported = reported ||
+                   line.find("removed the old matterm-daemon-1.1.0-aaaaaaa2") !=
+                       std::string::npos;
+    }
+    EXPECT(reported);
+    tunnel.reset();
+    stopRemote(fake.dir.path + "/remote.sock");
+}
+
+TEST_CASE("matterm-attach on the other computer: installed on demand, stable "
+          "names, list and stop") {
+    Fake fake;
+    ::unsetenv("FAKE_SSH_DAEMON_ON_PATH");
+    auto options = fake.options();
+    options.install = DaemonInstall::Never;
+    options.assumeYes = true;
+    options.localDaemon = daemonBinary();
+    std::string error;
+    EXPECT_EQ(SshTunnel::runRemoteAttach(options, {"--version"}, error),
+              -1); // Not there, not allowed to copy.
+    EXPECT(error.find("--daemon-install") != std::string::npos);
+    options.install = DaemonInstall::Auto; // Copies ours, with the daemon.
+    auto tunnel = SshTunnel::open(options, error);
+    EXPECT(tunnel != nullptr);
+    tunnel.reset();
+    const auto directory = fake.dir.path + "/home/.local/share/matterm/bin";
+    // The stable names point at the installed versions.
+    struct stat st {};
+    EXPECT_EQ(::lstat((directory + "/matterm-attach").c_str(), &st), 0);
+    EXPECT(S_ISLNK(st.st_mode));
+    EXPECT_EQ(::lstat((directory + "/matterm-daemon").c_str(), &st), 0);
+    EXPECT(S_ISLNK(st.st_mode));
+    const auto out = fake.dir.path + "/out.txt";
+    const auto run = [&](const std::vector<std::string> &args) {
+        const int saved = ::dup(1);
+        const int fd = ::open(out.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        ::dup2(fd, 1);
+        ::close(fd);
+        const int code = SshTunnel::runRemoteAttach(options, args, error);
+        (void)::fflush(stdout);
+        ::dup2(saved, 1);
+        ::close(saved);
+        return code;
+    };
+    EXPECT_EQ(run({"--version"}), 0);
+    EXPECT(fileText(out).find("matterm-attach " +
+                              mtd::toString(mtd::ownVersion())) !=
+           std::string::npos);
+    // The daemon on the other computer is listed there, then stopped (nothing
+    // to ask on: refused).
+    auto again = SshTunnel::open(options, error);
+    EXPECT(again != nullptr);
+    EXPECT_EQ(run({"--daemon-list", "--daemon-socket", options.remoteSocket}),
+              0);
+    EXPECT(fileText(out).find(options.remoteSocket) != std::string::npos);
+    EXPECT(fileText(out).find("terminals") != std::string::npos);
+    EXPECT(statusOf(again->socketPath()).has_value());
+    EXPECT_EQ(run({"--daemon-stop", "--daemon-socket", options.remoteSocket}),
+              1);
+    EXPECT(fileText(out).find("Not stopped") != std::string::npos);
+    EXPECT(statusOf(again->socketPath()).has_value());
+    again.reset();
+    stopRemote(options.remoteSocket);
 }
 
 TEST_CASE("Nothing is copied without a yes; --yes copies without asking") {

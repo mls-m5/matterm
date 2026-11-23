@@ -39,7 +39,8 @@ constexpr std::size_t kMaxQueueMessages = 1024;
 
 DaemonConfig defaultConfig() {
     DaemonConfig c;
-    c.socketPath = defaultSocketPath();
+    const auto v = ownVersion();
+    c.socketPath = versionedSocketPath(v.format, v.breaking, v.additive);
     c.registry.persistentSessions = true;
     c.registry.replayBufferBytes = 4u << 20;
     c.registry.replayTotalBytes = 256u << 20;
@@ -171,9 +172,10 @@ private:
             mode_ = exposed ? Mode::Exposed : Mode::Control;
             peerVersion_ = exposed ? std::get<ExposedHello>(*request).version : std::get<ControlHello>(*request).version;
             ControlWelcome w;
+            w.version = d_.config.version.breaking;
             w.pid = std::uint32_t(getpid());
             w.features = protocol::featureDaemon;
-            w.build = d_.config.build;
+            w.build = welcomeBuild(d_.config.build, d_.config.version);
             reply(w);
             return;
         }
@@ -216,6 +218,22 @@ private:
         const auto request = decodeRequest(frame);
         if (!request) {
             controlError(ControlErrorCode::BadMessage, "bad control message");
+            closeAfterFlush();
+            return;
+        }
+        // A client of a newer breaking version than ours may ask what the
+        // frozen part of the protocol allows (status, shutdown), nothing else:
+        // it expects things we cannot do. An older one is served as before (the
+        // client decides whether that is good enough).
+        if (mode_ == Mode::Control &&
+            peerVersion_ > d_.config.version.breaking &&
+            !std::holds_alternative<GetStatus>(*request) &&
+            !std::holds_alternative<Shutdown>(*request)) {
+            controlError(ControlErrorCode::BadMessage,
+                         "incompatible control version: this daemon is " +
+                             toString(d_.config.version) +
+                             ", the client speaks breaking version " +
+                             std::to_string(peerVersion_));
             closeAfterFlush();
             return;
         }
@@ -316,7 +334,9 @@ private:
         if (!encode(ControlReply(message), bytes, peerVersion_)) return kill();
         sendRaw(bytes);
     }
-    void controlError(ControlErrorCode code, const char *reason) { reply(ControlError{code, reason}); }
+    void controlError(ControlErrorCode code, const std::string &reason) {
+        reply(ControlError{code, reason});
+    }
     void protocolError(protocol::ErrorCode code, const char *reason) {
         std::string bytes;
         protocol::encode(protocol::ServerMessage{protocol::Error{code, reason}}, bytes);

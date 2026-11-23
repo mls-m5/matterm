@@ -18,6 +18,7 @@
 //
 // Blocking calls, for startup; the tunnel object lives as long as the window does.
 #include "daemonclient.h"
+#include "daemoninstall.h"
 #include "sha256.h"
 
 #include <algorithm>
@@ -34,6 +35,7 @@
 #include <mutex>
 #include <optional>
 #include <poll.h>
+#include <set>
 #include <spawn.h>
 #include <string>
 #include <sys/stat.h>
@@ -65,6 +67,8 @@ struct SshTunnelOptions {
     std::function<bool(const std::string &question)> confirm;
     std::function<void(const std::string &line)> progress; // Messages while copying.
     std::string localDaemon;             // The file to copy; empty: the daemon beside this program.
+    std::string localAttach; // matterm-attach to copy with it; empty: the one
+                             // beside the daemon file.
     std::string installDirectory;        // On the other computer, absolute; empty: $HOME/.local/share/matterm/bin.
     int installTimeoutMs = 180000;       // For copying and checking.
 };
@@ -117,6 +121,116 @@ inline bool safeSshWord(const std::string &s, bool allowSlash) {
 
 class SshTunnel {
 public:
+    // Where matterm-attach is on the other computer: on its PATH, or the copy
+    // in our install folder; if there is none, ours is copied first when
+    // `install` allows (and asks as for the daemon).
+    static bool remoteAttachPath(const SshTunnelOptions &options,
+                                 std::string &path,
+                                 std::string &error) {
+        if (!safeSshWord(options.host, false)) {
+            error = "--daemon-host: not a host name ssh can be given safely";
+            return false;
+        }
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::milliseconds(options.timeoutMs);
+        const std::string standard =
+            "\"${HOME}/.local/share/matterm/bin/matterm-attach\"";
+        const std::string find = "command -v matterm-attach || { [ -x " +
+                                 standard + " ] && echo " + standard + "; }";
+        const auto look = [&]() {
+            std::vector<std::string> arguments = baseArguments(options);
+            arguments.insert(arguments.end(),
+                             {"--", options.host, "sh -c '" + find + "'"});
+            std::string output, why;
+            int status = 0;
+            if (!runCapture(options.ssh,
+                            arguments,
+                            deadline,
+                            output,
+                            why,
+                            {},
+                            &status) &&
+                status != 1) {
+                error = "ssh " + options.host + ": " + why;
+                return false;
+            }
+            path = lastLine(output);
+            return true;
+        };
+        if (options.install != DaemonInstall::Always) {
+            if (!look()) {
+                return false;
+            }
+            if (!path.empty() && path.front() == '/') {
+                return safeSshWord(path, true);
+            }
+            if (path == "matterm-attach") {
+                return true;
+            }
+            if (options.install == DaemonInstall::Never) {
+                error = options.host + " has no matterm-attach "
+                                       "(--daemon-install copies one there)";
+                return false;
+            }
+        }
+        std::string daemonPath;
+        if (!installRemote(options, daemonPath, error)) {
+            return false;
+        }
+        path = daemonPath.substr(0, daemonPath.rfind('/')) + "/matterm-attach";
+        return true;
+    }
+
+    // Runs `matterm-attach ARGS` on the other computer with this program's
+    // terminal and returns its exit status (-1 with `error` when it could not
+    // be run). `args` are plain words (checked).
+    static int runRemoteAttach(const SshTunnelOptions &options,
+                               const std::vector<std::string> &args,
+                               std::string &error) {
+        std::string path;
+        if (!remoteAttachPath(options, path, error)) {
+            return -1;
+        }
+        std::string command = path;
+        for (const auto &arg : args) {
+            if (!safeSshWord(
+                    "x" + arg,
+                    true)) { // (A leading dash is fine after the program.)
+                error =
+                    "not a word the remote shell can be given safely: " + arg;
+                return -1;
+            }
+            command += " " + arg;
+        }
+        std::vector<std::string> arguments = {options.ssh};
+        arguments.insert(arguments.end(),
+                         options.sshArguments.begin(),
+                         options.sshArguments.end());
+        if (::isatty(0)) {
+            arguments.push_back(
+                "-t"); // So that the questions and the full screen reach us.
+        }
+        arguments.insert(
+            arguments.end(),
+            {"-o", "ConnectTimeout=10", "--", options.host, command});
+        auto argv = pointers(arguments);
+        pid_t pid = 0;
+        const int rc = ::posix_spawnp(
+            &pid, options.ssh.c_str(), nullptr, nullptr, argv.data(), environ);
+        if (rc != 0) {
+            error = "cannot start " + options.ssh + ": " + std::strerror(rc);
+            return -1;
+        }
+        int status = 0;
+        while (::waitpid(pid, &status, 0) < 0) {
+            if (errno != EINTR) {
+                error = "cannot wait for ssh";
+                return -1;
+            }
+        }
+        return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    }
+
     // Null with `error` set when the tunnel could not be made.
     static std::unique_ptr<SshTunnel> open(const SshTunnelOptions &options, std::string &error) {
         if (!safeSshWord(options.host, false)) {
@@ -349,17 +463,175 @@ private:
         return ask;
     }
 
-    // Copies our matterm-daemon to the other computer when it is not there yet and says where it is
-    // (`path`, absolute). The file is named after its SHA-256, so the name says which version it is: a
-    // new version is a new file, one that runs is never replaced, and a copy that is there is the right one.
+    // Copies our matterm-daemon, and matterm-attach with it, to the other
+    // computer when they are not there yet, says where the daemon is (`path`,
+    // absolute) and removes old versions of both (only files named like ours,
+    // never one that runs, the newest older version stays as a fallback). The
+    // files are named after what they are
+    // (matterm-daemon-<format>.<breaking>.<additive>-<hash8>): a new version is
+    // a new file, one that runs is never replaced, and a copy that is there is
+    // the right one.
     static bool installRemote(const SshTunnelOptions &options, std::string &path, std::string &error) {
+        std::string daemonName;
+        if (!installRemoteProgram(options,
+                                  "matterm-daemon",
+                                  options.localDaemon,
+                                  true,
+                                  path,
+                                  daemonName,
+                                  error)) {
+            return false;
+        }
+        const auto say = [&](const std::string &line) {
+            if (options.progress) {
+                options.progress(line);
+            }
+        };
+        std::string attachLocal = options.localAttach;
+        if (attachLocal.empty()) {
+            const auto slash = options.localDaemon.rfind('/');
+            const std::string beside =
+                slash == std::string::npos
+                    ? std::string()
+                    : options.localDaemon.substr(0, slash + 1) +
+                          "matterm-attach";
+            attachLocal = !beside.empty() && ::access(beside.c_str(), X_OK) == 0
+                              ? beside
+                              : std::string();
+        }
+        std::string attachPath, attachName, attachError;
+        if (installRemoteProgram(options,
+                                 "matterm-attach",
+                                 attachLocal,
+                                 false,
+                                 attachPath,
+                                 attachName,
+                                 attachError)) {
+            linkCurrent(options,
+                        path.substr(0, path.rfind('/')),
+                        {{"matterm-daemon", daemonName},
+                         {"matterm-attach", attachName}});
+            cleanupRemote(options,
+                          path.substr(0, path.rfind('/')),
+                          {daemonName, attachName});
+        }
+        else {
+            say("note: matterm-attach was not copied (" + attachError + ")");
+            linkCurrent(options,
+                        path.substr(0, path.rfind('/')),
+                        {{"matterm-daemon", daemonName}});
+            cleanupRemote(
+                options, path.substr(0, path.rfind('/')), {daemonName});
+        }
+        return true;
+    }
+
+    // The names a person can type: matterm-daemon and matterm-attach in the
+    // install folder point at the versions just installed
+    // (`ssh -t host ~/.local/share/matterm/bin/matterm-attach` always works).
+    static void linkCurrent(
+        const SshTunnelOptions &options,
+        const std::string &directory,
+        const std::vector<std::pair<std::string, std::string>> &links) {
+        if (!safeSshWord(directory, true)) {
+            return;
+        }
+        std::string command = "cd \"" + directory + "\"";
+        for (const auto &[link, target] : links) {
+            if (!parseInstalledName(target)) {
+                return;
+            }
+            command += " && ln -sfn " + target + " " + link;
+        }
+        std::vector<std::string> arguments = baseArguments(options);
+        arguments.insert(arguments.end(),
+                         {"--", options.host, "sh -c '" + command + "'"});
+        std::string output, error;
+        (void)runCapture(
+            options.ssh,
+            arguments,
+            std::chrono::steady_clock::now() +
+                std::chrono::milliseconds(options.installTimeoutMs),
+            output,
+            error);
+    }
+
+    // Removes the old versions in `directory` on the other computer; says what
+    // it removed.
+    static void cleanupRemote(const SshTunnelOptions &options,
+                              const std::string &directory,
+                              const std::set<std::string> &current) {
+        const auto say = [&](const std::string &line) {
+            if (options.progress) {
+                options.progress(line);
+            }
+        };
+        if (!safeSshWord(directory, true)) {
+            return;
+        }
+        const auto deadline =
+            std::chrono::steady_clock::now() +
+            std::chrono::milliseconds(options.installTimeoutMs);
+        // Which of our files are there, and does a process run each (Linux:
+        // /proc/*/exe).
+        const std::string list =
+            "cd \"" + directory +
+            "\" 2>/dev/null && D=$(pwd -P) && [ -d /proc/self ] && for f in "
+            "matterm-daemon-* matterm-attach-*; do "
+            "[ -f \"$f\" ] || continue; r=0; for p in /proc/[0-9]*/exe; do "
+            "[ \"$(readlink \"$p\" 2>/dev/null)\" = \"$D/$f\" ] && { r=1; "
+            "break; }; done; echo \"$f $r\"; done";
+        std::vector<std::string> arguments = baseArguments(options);
+        arguments.insert(arguments.end(),
+                         {"--", options.host, "sh -c '" + list + "'"});
+        std::string output, error;
+        if (!runCapture(options.ssh, arguments, deadline, output, error)) {
+            return; // Cleaning up is a courtesy; the install worked.
+        }
+        const auto remove =
+            filesToRemove(parseInstalledListing(output), current);
+        if (remove.empty()) {
+            return;
+        }
+        std::string command = "cd \"" + directory + "\" && rm -f --";
+        for (const auto &name : remove) {
+            command += " " + name; // Only names that parseInstalledName()
+                                   // accepted: [a-z0-9.-].
+        }
+        arguments = baseArguments(options);
+        arguments.insert(arguments.end(),
+                         {"--", options.host, "sh -c '" + command + "'"});
+        output.clear();
+        if (runCapture(options.ssh, arguments, deadline, output, error)) {
+            for (const auto &name : remove) {
+                say("removed the old " + name + " from " + options.host);
+            }
+        }
+    }
+
+    // One program: its file beside this program (or `localOverride`), copied to
+    // the other computer under a name that carries its version. `askFirst`:
+    // this is the one the question is about.
+    static bool installRemoteProgram(const SshTunnelOptions &options,
+                                     const std::string &program,
+                                     const std::string &localOverride,
+                                     bool askFirst,
+                                     std::string &path,
+                                     std::string &installedFileName,
+                                     std::string &error) {
         const auto say = [&](const std::string &line) {
             if (options.progress) {
                 options.progress(line);
             }
         };
         // Our file: beside this program, else on PATH.
-        std::string local = options.localDaemon.empty() ? daemonExecutable() : options.localDaemon;
+        std::string local =
+            localOverride.empty() ? siblingExecutable(program) : localOverride;
+        if (local.empty()) {
+            error = "cannot find our own " + program +
+                    " to copy (looked beside this program and on PATH)";
+            return false;
+        }
         if (local.find('/') == std::string::npos) {
             const char *searchPath = std::getenv("PATH");
             std::string rest = searchPath ? searchPath : "";
@@ -377,7 +649,8 @@ private:
                 from = colon + 1;
             }
             if (found.empty()) {
-                error = "cannot find our own matterm-daemon to copy (looked beside this program and on PATH)";
+                error = "cannot find our own " + program +
+                        " to copy (looked beside this program and on PATH)";
                 return false;
             }
             local = found;
@@ -402,7 +675,31 @@ private:
             say("note: " + local + " is not a static binary; it needs the libraries it was built with on " +
                 options.host + " (build with -DMATTERM_STATIC_DAEMON=ON to copy one that needs nothing)");
         }
-        const std::string name = "matterm-daemon-" + hash.substr(0, 24);
+        // What the file says it is: `<program> --version` prints "<program>
+        // F.B.A+hash".
+        std::string name =
+            program + "-" +
+            hash.substr(0, 24); // Fallback: a build that cannot say.
+        {
+            std::string versionText, versionError;
+            const auto versionDeadline = std::chrono::steady_clock::now() +
+                                         std::chrono::milliseconds(5000);
+            if (runCapture(local,
+                           {"--version"},
+                           versionDeadline,
+                           versionText,
+                           versionError)) {
+                if (auto version = mtd::findVersionInText(versionText)) {
+                    if (version->hash.size() < 8 ||
+                        version->hash == "unknown") {
+                        version->hash = hash; // Not built from git: the content
+                                              // stands in for the commit.
+                    }
+                    name = installedName(program, *version);
+                }
+            }
+        }
+        installedFileName = name;
         const std::string directory = options.installDirectory.empty() ? "\"${HOME}/.local/share/matterm/bin\""
                                                                        : options.installDirectory;
         if (!options.installDirectory.empty() &&
@@ -446,13 +743,16 @@ private:
         const std::string state = lines[lines.size() - 1];
         const std::string localMachine = std::string(here.sysname) + " " + here.machine;
         if (remoteMachine != localMachine) {
-            error = options.host + " is \"" + remoteMachine + "\" and this matterm-daemon is for \"" + localMachine +
-                    "\": it cannot run there. Build matterm-daemon on " + options.host +
+            error = options.host + " is \"" + remoteMachine + "\" and this " +
+                    program + " is for \"" + localMachine +
+                    "\": it cannot run there. Build " + program + " on " +
+                    options.host +
                     " (docs/REMOTE_DAEMON.md) and put it on its PATH";
             return false;
         }
         if (remoteDirectory.empty() || remoteDirectory.front() != '/' || !safeSshWord(remoteDirectory, true)) {
-            error = options.host + ": the folder for matterm-daemon there (" + remoteDirectory +
+            error = options.host + ": the folder for " + program + " there (" +
+                    remoteDirectory +
                     ") has characters that cannot be handled safely";
             return false;
         }
@@ -464,25 +764,36 @@ private:
             error = "ssh " + options.host + ": unexpected answer while checking for a copy";
             return false;
         }
-        if (!options.assumeYes) {
-            const std::string question = options.host + " has no matterm-daemon of this version. Copy ours (" +
-                                         std::to_string((size + 1023) / 1024) + " KiB, " + remoteDirectory +
-                                         "/" + name + ") and start it there?";
+        if (!options.assumeYes && askFirst) {
+            const std::string question =
+                options.host +
+                " has no matterm-daemon of this version. Copy ours (" +
+                std::to_string((size + 1023) / 1024) + " KiB, " +
+                remoteDirectory + "/" + name +
+                ") and start it there? (matterm-attach is copied with it.)";
             if (!options.confirm || !options.confirm(question)) {
-                error = "matterm-daemon is not installed on " + options.host +
-                        " and the copy was not confirmed (--yes copies without asking)";
+                error = program + " is not installed on " + options.host +
+                        " and the copy was not confirmed (--yes copies without "
+                        "asking)";
                 return false;
             }
         }
-        say("copying matterm-daemon to " + options.host + ":" + path + " ...");
+        say("copying " + program + " to " + options.host + ":" + path + " ...");
         // Temporary file in the same folder, checked (size, SHA-256 when sha256sum exists, and that it runs
         // at all), then renamed: nobody ever sees half a file under the final name.
         const std::string copy =
-            "umask 077; d=\"" + remoteDirectory + "\"; t=\"$d/.matterm-daemon.$$\"; "
-            "if cat > \"$t\" && chmod 0700 \"$t\" && [ \"$(wc -c < \"$t\")\" -eq " + std::to_string(size) +
-            " ] && { s=$(sha256sum \"$t\" 2>/dev/null | cut -d\" \" -f1); [ -z \"$s\" ] || [ \"$s\" = " + hash +
-            " ]; } && \"$t\" --print-socket >/dev/null && mv -f \"$t\" \"$d/" + name +
-            "\"; then echo installed; else rm -f \"$t\"; echo failed; exit 1; fi";
+            "umask 077; d=\"" + remoteDirectory + "\"; t=\"$d/." + program +
+            ".$$\"; "
+            "if cat > \"$t\" && chmod 0700 \"$t\" && [ \"$(wc -c < \"$t\")\" "
+            "-eq " +
+            std::to_string(size) +
+            " ] && { s=$(sha256sum \"$t\" 2>/dev/null | cut -d\" \" -f1); [ -z "
+            "\"$s\" ] || [ \"$s\" = " +
+            hash +
+            " ]; } && \"$t\" --version >/dev/null && mv -f \"$t\" \"$d/" +
+            name +
+            "\"; then echo installed; else rm -f \"$t\"; echo failed; exit 1; "
+            "fi";
         arguments = baseArguments(options);
         arguments.insert(arguments.end(), {"--", options.host, "sh -c '" + copy + "'"});
         output.clear();
@@ -499,14 +810,16 @@ private:
                      copyError.find("cannot open shared object") != std::string::npos) {
                 hint = " (a dynamically linked daemon needs its libraries there: build with -DMATTERM_STATIC_DAEMON=ON)";
             }
-            error = "copying matterm-daemon to " + options.host + " failed: " + copyError + hint;
+            error = "copying " + program + " to " + options.host +
+                    " failed: " + copyError + hint;
             return false;
         }
         if (lastLine(output) != "installed") {
-            error = "copying matterm-daemon to " + options.host + " failed (the copy did not check out)";
+            error = "copying " + program + " to " + options.host +
+                    " failed (the copy did not check out)";
             return false;
         }
-        say("matterm-daemon installed on " + options.host);
+        say(program + " installed on " + options.host);
         return true;
     }
 

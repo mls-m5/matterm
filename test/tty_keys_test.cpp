@@ -111,4 +111,73 @@ TEST_CASE("Replies and bracketed paste do not become keys") {
     EXPECT(keys[4].is(Key::Type::Enter));
 }
 
+TEST_CASE("Function keys, Insert and Shift+Tab") {
+    KeyDecoder d;
+    auto one = [&](const char *bytes) {
+        const auto keys = d.feed(bytes);
+        return keys.size() == 1
+                   ? keys[0]
+                   : Key{Key::Type::Escape}; // Not what it should be.
+    };
+    EXPECT(one("\x1bOP").is(Key::Type::Function) && one("\x1bOP").number == 1);
+    EXPECT_EQ(one("\x1bOS").number, 4);
+    EXPECT_EQ(one("\x1b[11~").number, 1);
+    EXPECT_EQ(one("\x1b[15~").number, 5);
+    EXPECT_EQ(one("\x1b[17~").number, 6);
+    EXPECT_EQ(one("\x1b[21~").number, 10);
+    EXPECT_EQ(one("\x1b[23~").number, 11);
+    EXPECT_EQ(one("\x1b[24~").number, 12);
+    const auto f5 = one("\x1b[15;5~"); // Ctrl+F5
+    EXPECT(f5.number == 5 && f5.ctrl && !f5.shift);
+    const auto f2 = one("\x1b[1;2Q"); // Shift+F2
+    EXPECT(f2.is(Key::Type::Function) && f2.number == 2 && f2.shift);
+    EXPECT(one("\x1b[2~").is(Key::Type::Insert));
+    const auto back = one("\x1b[Z");
+    EXPECT(back.is(Key::Type::Tab) && back.shift);
+    EXPECT(!one("\t").shift);
+}
+
+TEST_CASE("Shift on arrows, and a cursor position report is no key") {
+    KeyDecoder d;
+    const auto keys = d.feed("\x1b[1;2A\x1b[1;6C");
+    EXPECT_EQ(keys.size(), std::size_t(2));
+    EXPECT(keys[0].is(Key::Type::Up) && keys[0].shift && !keys[0].ctrl);
+    EXPECT(keys[1].is(Key::Type::Right) && keys[1].shift && keys[1].ctrl);
+    EXPECT(d.feed("\x1b[24;80R").empty()); // Not F3.
+    EXPECT(d.feed("\x1b[?1;2c").empty());
+}
+
+TEST_CASE("Every key keeps the exact bytes it came from") {
+    KeyDecoder d;
+    const std::string input = "a\xc3\xa5\r\x7f\x03\x1b[A\x1b[1;5D\x1bOP\x1b[15~"
+                              "\x1bx\x1b[<0;5;6M\t\x1b[Z";
+    const auto keys = d.feed(input);
+    std::string joined;
+    for (const auto &key : keys) {
+        EXPECT(!key.raw.empty());
+        joined += key.raw;
+    }
+    EXPECT(joined == input);
+    EXPECT(keys[1].raw == "\xc3\xa5");
+    EXPECT(keys[5].raw == "\x1b[A");
+    EXPECT(keys[9].raw == "\x1bx"); // Alt+x
+    EXPECT(keys[9].alt);
+}
+
+TEST_CASE("Raw bytes survive being split across chunks, and replies leave none "
+          "behind") {
+    KeyDecoder d;
+    std::string joined;
+    for (const char *part : {"\x1b", "[1;", "5D", "\xe2\x82", "\xac"}) {
+        for (const auto &key : d.feed(part)) {
+            joined += key.raw;
+        }
+    }
+    EXPECT(joined == "\x1b[1;5D\xe2\x82\xac");
+    EXPECT(d.feed("\x1b[24;80R").empty());
+    const auto after = d.feed("z");
+    EXPECT_EQ(after.size(), std::size_t(1));
+    EXPECT(after[0].raw == "z");
+}
+
 TEST_SUIT_END

@@ -23,8 +23,10 @@ struct Key {
         End,
         PageUp,
         PageDown,
-        Ctrl,  // `text` holds the lowercase letter: Ctrl-C is "c".
-        Mouse, // SGR mouse report, see the fields below.
+        Insert,
+        Function, // F1..F12 in `number`.
+        Ctrl,     // `text` holds the lowercase letter: Ctrl-C is "c".
+        Mouse,    // SGR mouse report, see the fields below.
     };
     Type type = Type::Text;
     std::string text;
@@ -33,7 +35,13 @@ struct Key {
     int column = 0, row = 0, button = 0;
     bool press = true, motion = false;
     bool alt = false;
-    bool ctrl = false; // From a CSI modifier (Ctrl+Left, Ctrl+Delete, ...).
+    bool ctrl = false;  // From a CSI modifier (Ctrl+Left, Ctrl+Delete, ...).
+    bool shift = false; // From a CSI modifier, or Shift+Tab (CSI Z).
+    int number = 0;     // Function: 1..12.
+    // The exact bytes this key came from (an escape sequence, or the UTF-8
+    // character), so that a program that forwards input can send it on
+    // unchanged.
+    std::string raw;
 
     bool is(Type t) const {
         return type == t;
@@ -55,12 +63,15 @@ private:
     enum class State { Ground, Esc, Csi, Ss3, String, StringEsc };
     void finishCsi(std::vector<Key> &out);
     void textByte(unsigned char byte, std::vector<Key> &out);
+    void step(unsigned char byte, bool last, std::vector<Key> &out);
+    void finishUnit(std::vector<Key> &out, std::size_t before);
 
     State state_ = State::Ground;
     std::string params_;
     std::string pending_; // Partial UTF-8 sequence.
     std::size_t need_ = 0;
     bool pasting_ = false;
+    std::string raw_; // Bytes of the key being read.
     bool afterCr_ = false;
 };
 

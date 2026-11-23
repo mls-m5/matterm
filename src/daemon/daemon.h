@@ -6,6 +6,7 @@
 #include "ptysessionhost.h"
 #include "sessionregistry.h"
 #include "socketpath.h"
+#include "version.h"
 
 #include <memory>
 #include <optional>
@@ -25,7 +26,11 @@ struct DaemonConfig {
     unsigned helloTimeoutMs = 5000;
     server::ProcessConfig process;
     server::RegistryConfig registry;     // Filled with daemon defaults by defaultConfig().
-    std::string build = "matterm-daemon";
+    std::string build =
+        "matterm-daemon"; // The program's name in the Welcome text.
+    // The control version it announces and enforces. Tests change it to fake
+    // another daemon.
+    Version version = ownVersion();
 };
 
 // Persistent sessions, large rings, detached sessions never expire, offers the "daemon" feature.

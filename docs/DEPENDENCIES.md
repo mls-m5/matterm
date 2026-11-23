@@ -25,7 +25,7 @@ daemon the native app falls back to running programs in its own process (with a 
 | Boost >= 1.74 (headers) | `libboost-dev` | 1.74 | Beast/Asio in server, daemon, chatd |
 | libsodium | `libsodium-dev` | 1.0.18 | server/daemon auth and keys |
 | libutil (`forkpty`) | in `libc6-dev` | glibc 2.36 | PTYs |
-| Static daemon | `libc6-dev` (`libc.a`) and `libsodium-dev` (`libsodium.a`) | | `matterm-daemon` linked fully static (`MATTERM_STATIC_DAEMON`, ON by default; without them the build warns and links dynamically) |
+| Static daemon | `libc6-dev` (`libc.a`) and `libsodium-dev` (`libsodium.a`) | | `matterm-daemon` and `matterm-attach` (no SDL) linked fully static (`MATTERM_STATIC_DAEMON`, ON by default; without them the build warns and links dynamically) |
 | Python 3 | `python3` | 3.11 | a few tests (fake ssh in `test/fakessh.py`, helpers) |
 | Submodules | `git submodule update --init` | | `lib/fast-json` (server config; the build stops without it), `test/mls-unit-test`, `matperf` |
 
@@ -65,7 +65,7 @@ Use `build/src/server/matterm-server`, not `build/server` (stale). `e2e-local.js
 
 ## Running on another computer
 
-- `matterm-daemon` linked static needs nothing there (`matterm --daemon-host` copies it, see `docs/REMOTE_DAEMON.md`).
+- `matterm-daemon` and `matterm-attach` linked static need nothing there (`matterm --daemon-host --daemon-install` copies both, see `docs/REMOTE_DAEMON.md`).
   A dynamic one needs `libsodium23`.
 - Native app at runtime: `libsdl2-2.0-0 libsdl2-ttf-2.0-0 libfontconfig1 libfreetype6 libharfbuzz0b`.
 - Window frame on GNOME Wayland: SDL draws the system frame through libdecor, which needs a plugin:

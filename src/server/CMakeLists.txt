@@ -17,7 +17,7 @@ if(NOT EXISTS "${PROJECT_SOURCE_DIR}/lib/fast-json/include/fast-json/json.h")
 endif()
 # The daemon's wire format (framing and control messages), shared by the daemon and by the
 # server, which is a client of the daemon with --expose-local-sessions.
-add_library(matterm-daemon-wire ${PROJECT_SOURCE_DIR}/src/daemon/control.cpp ${PROJECT_SOURCE_DIR}/src/daemon/socketpath.cpp)
+add_library(matterm-daemon-wire ${PROJECT_SOURCE_DIR}/src/daemon/control.cpp ${PROJECT_SOURCE_DIR}/src/daemon/socketpath.cpp ${PROJECT_SOURCE_DIR}/src/daemon/buildhash.cpp)
 target_compile_features(matterm-daemon-wire PUBLIC cxx_std_17)
 target_include_directories(matterm-daemon-wire PUBLIC ${PROJECT_SOURCE_DIR}/src/daemon)
 target_link_libraries(matterm-daemon-wire PUBLIC matterm::protocol)

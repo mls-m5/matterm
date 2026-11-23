@@ -10,6 +10,35 @@ Key simple(Key::Type type) {
     key.type = type;
     return key;
 }
+// The F-key of the "CSI n ~" codes 11..24 (rxvt/xterm numbering, with gaps).
+int functionNumber(int code) {
+    switch (code) {
+    case 11:
+        return 1;
+    case 12:
+        return 2;
+    case 13:
+        return 3;
+    case 14:
+        return 4;
+    case 15:
+        return 5;
+    case 17:
+        return 6;
+    case 18:
+        return 7;
+    case 19:
+        return 8;
+    case 20:
+        return 9;
+    case 21:
+        return 10;
+    case 23:
+        return 11;
+    default:
+        return 12;
+    }
+}
 } // namespace
 
 void KeyDecoder::textByte(unsigned char byte, std::vector<Key> &out) {
@@ -99,8 +128,46 @@ void KeyDecoder::finishCsi(std::vector<Key> &out) {
     case 'F':
         out.push_back(simple(Key::Type::End));
         break;
+    case 'Z': {
+        Key key = simple(Key::Type::Tab);
+        key.shift = true;
+        out.push_back(std::move(key));
+        break;
+    }
+    case 'P':
+    case 'Q':
+    case 'R':
+    case 'S': { // F1..F4 with a modifier ("1;5P"); "24;80R" is a cursor report.
+        if (args.size() < 2 || args[0] != '1' || args[1] != ';') {
+            break;
+        }
+        Key key = simple(Key::Type::Function);
+        key.number = 1 + (final - 'P');
+        out.push_back(std::move(key));
+        break;
+    }
     case '~':
         switch (number(0, 0)) {
+        case 2:
+            out.push_back(simple(Key::Type::Insert));
+            break;
+        case 11:
+        case 12:
+        case 13:
+        case 14:
+        case 15:
+        case 17:
+        case 18:
+        case 19:
+        case 20:
+        case 21:
+        case 23:
+        case 24: {
+            Key key = simple(Key::Type::Function);
+            key.number = functionNumber(number(0, 0));
+            out.push_back(std::move(key));
+            break;
+        }
         case 1:
         case 7:
             out.push_back(simple(Key::Type::Home));
@@ -134,6 +201,9 @@ void KeyDecoder::finishCsi(std::vector<Key> &out) {
     // A modifier parameter ("1;5D", "3;5~"): 1 + (shift 1, alt 2, ctrl 4).
     const int modifier = number(1, 1) - 1;
     for (std::size_t i = before; i < out.size(); ++i) {
+        if (modifier & 1) {
+            out[i].shift = true;
+        }
         if (modifier & 2) {
             out[i].alt = true;
         }
@@ -146,7 +216,30 @@ void KeyDecoder::finishCsi(std::vector<Key> &out) {
 std::vector<Key> KeyDecoder::feed(std::string_view bytes) {
     std::vector<Key> out;
     for (std::size_t i = 0; i < bytes.size(); ++i) {
-        const auto byte = (unsigned char)bytes[i];
+        const std::size_t before = out.size();
+        raw_.push_back(bytes[i]);
+        step((unsigned char)bytes[i], i + 1 == bytes.size(), out);
+        finishUnit(out, before);
+    }
+    // A lone ESC split from its sequence by the chunk boundary stays pending.
+    return out;
+}
+
+void KeyDecoder::finishUnit(std::vector<Key> &out, std::size_t before) {
+    if (out.size() > before) {
+        if (!raw_.empty()) { // (Empty after Alt+key: the inner read has set
+                             // it.)
+            out[before].raw = std::move(raw_);
+        }
+        raw_.clear();
+    }
+    else if (state_ == State::Ground && need_ == 0) {
+        raw_.clear(); // A sequence that is no key (a reply): forget its bytes.
+    }
+}
+
+void KeyDecoder::step(unsigned char byte, bool last, std::vector<Key> &out) {
+    {
         switch (state_) {
         case State::Esc:
             state_ = State::Ground;
@@ -167,12 +260,13 @@ std::vector<Key> KeyDecoder::feed(std::string_view bytes) {
             }
             else { // Alt+key: the byte is read as it would be on its own.
                 const char one = char(byte);
+                raw_.pop_back(); // feed() adds the byte itself.
                 for (auto &key : feed(std::string_view(&one, 1))) {
                     key.alt = true;
                     out.push_back(std::move(key));
                 }
             }
-            continue;
+            return;
         case State::Csi:
             params_.push_back(char(byte));
             if (byte >= 0x40 && byte <= 0x7e) {
@@ -182,7 +276,7 @@ std::vector<Key> KeyDecoder::feed(std::string_view bytes) {
             else if (params_.size() > 32) {
                 state_ = State::Ground;
             }
-            continue;
+            return;
         case State::Ss3:
             state_ = State::Ground;
             switch (byte) {
@@ -204,10 +298,19 @@ std::vector<Key> KeyDecoder::feed(std::string_view bytes) {
             case 'F':
                 out.push_back(simple(Key::Type::End));
                 break;
+            case 'P':
+            case 'Q':
+            case 'R':
+            case 'S': {
+                Key key = simple(Key::Type::Function);
+                key.number = 1 + (byte - 'P');
+                out.push_back(std::move(key));
+                break;
+            }
             default:
                 break;
             }
-            continue;
+            return;
         case State::String:
             if (byte == 0x07) {
                 state_ = State::Ground;
@@ -215,10 +318,10 @@ std::vector<Key> KeyDecoder::feed(std::string_view bytes) {
             else if (byte == 0x1b) {
                 state_ = State::StringEsc;
             }
-            continue;
+            return;
         case State::StringEsc:
             state_ = byte == 0x1b ? State::StringEsc : State::Ground;
-            continue;
+            return;
         case State::Ground:
             break;
         }
@@ -227,11 +330,11 @@ std::vector<Key> KeyDecoder::feed(std::string_view bytes) {
         }
         if (need_ > 0) {
             textByte(byte, out);
-            continue;
+            return;
         }
         switch (byte) {
         case 0x1b:
-            if (i + 1 == bytes.size()) {
+            if (last) {
                 out.push_back(simple(Key::Type::Escape));
             }
             else {
@@ -273,8 +376,6 @@ std::vector<Key> KeyDecoder::feed(std::string_view bytes) {
             break;
         }
     }
-    // A lone ESC split from its sequence by the chunk boundary stays pending.
-    return out;
 }
 
 } // namespace tty

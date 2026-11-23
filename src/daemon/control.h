@@ -20,6 +20,13 @@ namespace mtd {
 //    more; older clients keep getting the old types, which decode to the same structs without
 //    a name. An older daemon answers SetName with BadMessage.
 constexpr std::uint16_t kControlVersion = 3;
+// The same number under its new name (docs/tasks/daemon-versioning.md,
+// version.h): the "breaking" part of format.breaking.additive. `additive`
+// counts compatible extensions since breaking 3 began: 1 = the version scheme
+// itself (the version in ControlWelcome::build).
+constexpr std::uint16_t kControlFormat = 1;
+constexpr std::uint16_t kControlBreaking = kControlVersion;
+constexpr std::uint16_t kControlAdditive = 1;
 constexpr std::size_t kMaxName = 64;
 constexpr std::size_t kMaxListed = 256;
 constexpr std::size_t kMaxPath = 4096;

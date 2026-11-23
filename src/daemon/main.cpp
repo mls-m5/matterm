@@ -1,5 +1,6 @@
 // matterm-daemon: keeps terminal sessions alive on a private Unix socket (docs/tasks/daemon.md).
 #include "daemon.h"
+#include "daemonclient.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -13,13 +14,22 @@
 
 namespace {
 void usage() {
-    (void)std::fputs("usage: matterm-daemon [--daemon-socket PATH] [--idle-seconds N] [--daemonize]\n"
-               "  --daemon-socket PATH  use PATH instead of $XDG_RUNTIME_DIR/matterm/daemon.sock\n"
-               "  --idle-seconds N      exit after N seconds with no sessions and no client (default 60, 0 = never)\n"
-               "  --daemonize           detach; the parent returns once the socket is ready\n"
-               "  --ensure              like --daemonize, but do nothing when a daemon already answers there\n"
-               "  --print-socket        print the socket path (after the daemon is up, with --ensure/--daemonize)\n",
-               stderr);
+    (void)std::fputs("usage: matterm-daemon [--daemon-socket PATH] "
+                     "[--idle-seconds N] [--daemonize]\n"
+                     "  --daemon-socket PATH  use PATH instead of "
+                     "$XDG_RUNTIME_DIR/matterm/daemon-<version>.sock\n"
+                     "  --idle-seconds N      exit after N seconds with no "
+                     "sessions and no client (default 60, 0 = never)\n"
+                     "  --daemonize           detach; the parent returns once "
+                     "the socket is ready\n"
+                     "  --ensure              like --daemonize, but do nothing "
+                     "when a daemon already answers there\n"
+                     "                        (without --daemon-socket: when a "
+                     "compatible daemon runs in the socket folder)\n"
+                     "  --version             print the control version\n"
+                     "  --print-socket        print the socket path (after the "
+                     "daemon is up, with --ensure/--daemonize)\n",
+                     stderr);
 }
 // True when something accepts connections on `path` (for --ensure; the caller checks nothing else).
 bool answers(const std::string &path) {
@@ -33,6 +43,27 @@ bool answers(const std::string &path) {
     ::close(fd);
     return ok;
 }
+// The newest daemon in the socket folder that this build can work with (a
+// daemon of the same breaking version, whatever the name of its socket), or
+// empty. For --ensure without a socket name: an older compatible daemon is
+// reused instead of starting a second one next to it.
+std::string compatibleSocket() {
+    const auto mine = mtd::ownVersion();
+    std::string best;
+    mtd::Version bestVersion;
+    for (const auto &socket : mtd::daemonSocketsIn(mtd::socketDirectory())) {
+        std::string error;
+        const auto info = frontend::probeDaemon(socket, error, 1000);
+        if (!info || mtd::compatibility(mine, info->version) ==
+                         mtd::Compatibility::Incompatible)
+            continue;
+        if (best.empty() || bestVersion.additive < info->version.additive) {
+            best = socket;
+            bestVersion = info->version;
+        }
+    }
+    return best;
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -40,11 +71,13 @@ int main(int argc, char **argv) {
     bool detach = false;
     bool ensure = false;
     bool printSocket = false;
+    bool explicitSocket = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--daemon-socket" && i + 1 < argc) {
             config.socketPath = argv[++i];
             config.privateDirectory = false;
+            explicitSocket = true;
         }
         else if (a == "--idle-seconds" && i + 1 < argc) {
             char *end = nullptr;
@@ -62,6 +95,11 @@ int main(int argc, char **argv) {
             detach = true;
             ensure = true;
         }
+        else if (a == "--version") {
+            (void)std::printf("matterm-daemon %s\n",
+                              mtd::toString(mtd::ownVersion()).c_str());
+            return 0;
+        }
         else if (a == "--print-socket") {
             printSocket = true;
         }
@@ -73,6 +111,13 @@ int main(int argc, char **argv) {
     if (printSocket && !detach) {
         (void)std::printf("%s\n", config.socketPath.c_str());
         return 0;
+    }
+    if (ensure && !explicitSocket) {
+        if (const auto existing = compatibleSocket(); !existing.empty()) {
+            if (printSocket)
+                (void)std::printf("%s\n", existing.c_str());
+            return 0;
+        }
     }
     if (ensure && answers(config.socketPath)) {
         if (printSocket) (void)std::printf("%s\n", config.socketPath.c_str());

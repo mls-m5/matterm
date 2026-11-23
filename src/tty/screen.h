@@ -33,7 +33,10 @@ struct Cursor {
 // What to ask the host terminal for while the screen is entered. The matching
 // reports arrive as input (tty/keys.h).
 struct ScreenOptions {
-    bool mouse = false;          // Button and drag reports, SGR encoding.
+    // Mouse reports, SGR encoding: Click presses and releases, Drag also moves
+    // with a button held, Any all motion.
+    enum class Mouse { Off, Click, Drag, Any };
+    Mouse mouse = Mouse::Off;
     bool bracketedPaste = false; // Pasted text arrives between markers.
     bool focusEvents = false;
 };
@@ -59,15 +62,20 @@ public:
     // Switches to the alternate screen (when the terminal has one), hides the
     // cursor, clears and turns the reports on. Empty when already entered.
     std::string enter();
+    // Changes what is asked of the terminal while entered (a program inside
+    // asks for the mouse later); returns the bytes for the difference. Before
+    // enter() it only remembers them.
+    std::string setOptions(const ScreenOptions &options);
     // Undoes enter() and everything present() changed (cursor shape, colours).
     // Empty when not entered. leave() is safe to call on every way out.
     std::string leave();
     bool entered() const {
         return entered_;
     }
-    // What leave() writes, whatever the state: for a signal handler or a
-    // crash, which must write the restoring bytes without calling anything
-    // else of this class.
+    // What leave() writes, whatever the state (all reports are turned off, also
+    // ones set after this was first read): for a signal handler or a crash,
+    // which must write the restoring bytes without calling anything else of
+    // this class.
     std::string restoreSequence() const;
 
     // The terminal changed size (the host's own screen is cleared and every

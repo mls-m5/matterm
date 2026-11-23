@@ -488,10 +488,13 @@ int runPtyFrontend(const char *font,
     if (tunnel) {
         reconnector = std::make_unique<frontend::TunnelReconnector>(*tunnel);
     }
-    const std::string daemonPath = daemonSocket(daemonOptions.socketPath);
     std::optional<std::string> daemonFallbackReason; // set: the daemon was wanted and is not there
     if (daemonOptions.enabled) {
-        const auto error = ensureDaemon(daemonOptions.socketPath);
+        // Finds or starts the daemon, checks its version and may switch to a
+        // new daemon next to an incompatible one (daemonOptions.socketPath is
+        // then the new socket).
+        const auto error =
+            selectDaemon(daemonOptions, remoteDaemon, !remoteDaemon);
         if (!error.empty()) {
             if (daemonOptions.required) {
                 throw std::runtime_error("--daemon: " + error);
@@ -501,6 +504,7 @@ int runPtyFrontend(const char *font,
             daemonFallbackReason = error;
         }
     }
+    const std::string daemonPath = daemonSocket(daemonOptions.socketPath);
     Uint64 lastSharedPoll = 0;
     bool keepTerminals = false;           // Leave the programs running in the daemon when we go.
     std::uint32_t daemonStopCount = 0;    // What the "Stop daemon" question named.

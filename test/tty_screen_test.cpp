@@ -52,7 +52,8 @@ TEST_CASE("A terminal without an alternate screen is cleared and left below") {
 
 TEST_CASE("Mouse, paste and focus reports are asked for and given back") {
     ScreenOptions options;
-    options.mouse = options.bracketedPaste = options.focusEvents = true;
+    options.mouse = ScreenOptions::Mouse::Drag;
+    options.bracketedPaste = options.focusEvents = true;
     Screen screen(10, 3, {}, options);
     const auto in = screen.enter();
     EXPECT(has(in, "?1002h") && has(in, "?1006h"));
@@ -65,6 +66,54 @@ TEST_CASE("Mouse, paste and focus reports are asked for and given back") {
     Screen plain(10, 3);
     EXPECT(!has(plain.enter(), "?1002h"));
     EXPECT(!has(plain.enter(), "?2004h"));
+}
+
+TEST_CASE(
+    "Options can change while entered, and only the difference is written") {
+    Screen screen(10, 3);
+    EXPECT(screen.setOptions({}).empty()); // Not entered: applied by enter().
+    screen.enter();
+    ScreenOptions options;
+    options.mouse = ScreenOptions::Mouse::Any;
+    options.bracketedPaste = true;
+    const auto on = screen.setOptions(options);
+    EXPECT(has(on, "?1003h") && has(on, "?1006h") && has(on, "?2004h"));
+    EXPECT(!has(on, "?1004h"));
+    EXPECT(screen.setOptions(options).empty());
+    options.mouse =
+        ScreenOptions::Mouse::Click; // Another level: the old one goes off.
+    const auto level = screen.setOptions(options);
+    EXPECT(has(level, "?1003l") && has(level, "?1000h"));
+    EXPECT(!has(level, "?2004"));
+    options.mouse = ScreenOptions::Mouse::Off;
+    options.bracketedPaste = false;
+    const auto off = screen.setOptions(options);
+    EXPECT(has(off, "?1000l") && has(off, "?1006l") && has(off, "?2004l"));
+}
+
+TEST_CASE("setOptions before enter is applied by enter") {
+    Screen screen(10, 3);
+    ScreenOptions options;
+    options.mouse = ScreenOptions::Mouse::Drag;
+    EXPECT(screen.setOptions(options).empty());
+    EXPECT(has(screen.enter(), "?1002h"));
+}
+
+TEST_CASE(
+    "The restore sequence turns every report off, whatever was set when") {
+    Screen screen(10, 3);
+    const auto before =
+        screen.restoreSequence(); // What a crash handler captured early.
+    screen.enter();
+    ScreenOptions options;
+    options.mouse = ScreenOptions::Mouse::Any;
+    options.bracketedPaste = options.focusEvents = true;
+    screen.setOptions(options);
+    for (const char *mode :
+         {"?1000l", "?1002l", "?1003l", "?1006l", "?2004l", "?1004l"}) {
+        EXPECT(has(before, mode));
+        EXPECT(has(screen.restoreSequence(), mode));
+    }
 }
 
 TEST_CASE("present draws the canvas and puts the cursor where it belongs") {

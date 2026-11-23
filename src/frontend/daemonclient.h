@@ -7,6 +7,7 @@
 // entry), not for every frame.
 #include "control.h"
 #include "unixchannel.h"
+#include "version.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -33,7 +34,8 @@ inline std::optional<mtd::ControlReply> askDaemon(
     const std::string &socketPath,
     const mtd::ControlRequest &request,
     std::string &error,
-    int timeoutMs = 2000) {
+    int timeoutMs = 2000,
+    mtd::ControlWelcome *welcomeOut = nullptr) {
     try {
         UnixSocketChannel channel(socketPath);
         std::optional<mtd::ControlReply> answer;
@@ -57,6 +59,9 @@ inline std::optional<mtd::ControlReply> askDaemon(
             else if (!welcomed &&
                      std::holds_alternative<mtd::ControlWelcome>(*reply)) {
                 welcomed = true;
+                if (welcomeOut) {
+                    *welcomeOut = std::get<mtd::ControlWelcome>(*reply);
+                }
             }
             else {
                 answer = *reply;
@@ -96,6 +101,38 @@ inline std::optional<mtd::ControlReply> askDaemon(
     }
 }
 
+// Who runs on a socket: the Welcome, its version, and the status (GetStatus is
+// part of the frozen handshake, so every version answers it; `status` is empty
+// when it did not).
+struct DaemonInfo {
+    mtd::ControlWelcome welcome;
+    mtd::Version version;
+    std::optional<mtd::Status> status;
+};
+
+inline std::optional<DaemonInfo> probeDaemon(const std::string &socketPath,
+                                             std::string &error,
+                                             int timeoutMs = 2000) {
+    DaemonInfo info;
+    bool welcomed = false;
+    info.welcome.version = 0;
+    const auto reply = askDaemon(
+        socketPath, mtd::GetStatus{}, error, timeoutMs, &info.welcome);
+    welcomed = info.welcome.version != 0;
+    if (!welcomed) {
+        return std::nullopt;
+    }
+    info.version =
+        mtd::versionFromWelcome(info.welcome.build, info.welcome.version);
+    if (reply) {
+        if (const auto *status = std::get_if<mtd::Status>(&*reply)) {
+            info.status = *status;
+        }
+    }
+    error.clear();
+    return info;
+}
+
 // True when something accepts connections on the socket.
 inline bool daemonRunning(const std::string &socketPath) {
     try {
@@ -108,22 +145,26 @@ inline bool daemonRunning(const std::string &socketPath) {
     }
 }
 
-// matterm-daemon next to this program, else the one on PATH.
-inline std::string daemonExecutable() {
+// `program` next to this program, else its bare name (found on PATH).
+inline std::string siblingExecutable(const std::string &program) {
     std::string self(4096, '\0');
     const auto n = ::readlink("/proc/self/exe", self.data(), self.size());
     if (n > 0) {
         self.resize(std::size_t(n));
         const auto slash = self.rfind('/');
         if (slash != std::string::npos) {
-            const std::string beside =
-                self.substr(0, slash + 1) + "matterm-daemon";
+            const std::string beside = self.substr(0, slash + 1) + program;
             if (::access(beside.c_str(), X_OK) == 0) {
                 return beside;
             }
         }
     }
-    return "matterm-daemon";
+    return program;
+}
+
+// matterm-daemon next to this program, else the one on PATH.
+inline std::string daemonExecutable() {
+    return siblingExecutable("matterm-daemon");
 }
 
 // Starts `matterm-daemon --daemonize` (with --daemon-socket when a path is

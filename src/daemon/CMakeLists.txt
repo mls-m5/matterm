@@ -6,7 +6,8 @@ target_compile_features(matterm-daemon-core PUBLIC cxx_std_20)
 target_include_directories(matterm-daemon-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(matterm-daemon-core PUBLIC matterm-daemon-wire matterm-server-core sessionfiles)
 add_executable(matterm-daemon main.cpp)
-target_link_libraries(matterm-daemon PRIVATE matterm-daemon-core)
+target_link_libraries(matterm-daemon PRIVATE matterm-daemon-core matterm::unixchannel matterm::transport)
+target_include_directories(matterm-daemon PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
 if(MATTERM_STATIC_DAEMON)
     # One file that runs on any Linux of the same architecture, no packages needed: this is what
     # `matterm --daemon-host` copies to another computer (docs/REMOTE_DAEMON.md). libsodium is static

@@ -10,6 +10,7 @@
 #endif
 #ifdef MATTERM_HAS_ATTACH_TTY
 #include "attachtty.h"
+#include "daemoncli.h"
 #endif
 
 #include <SDL.h>
@@ -40,60 +41,99 @@ void printUsage(std::ostream &out, const char *program) {
            "default.\n"
            "Options must precede --; arguments after -- belong to the "
            "child.\n\n"
-           "Getting started: the terminals live in matterm-daemon, which starts by "
+           "Getting started: the terminals live in matterm-daemon, which "
+           "starts by "
            "itself\n"
-           "(--no-daemon runs them in the window). To use one from a browser: share it "
+           "(--no-daemon runs them in the window). To use one from a browser: "
+           "share it "
            "(the\n"
            "Share button in the tab strip, or Ctrl+Shift+P, \"Share this "
            "terminal\"), run\n"
-           "matterm-server --expose-local-sessions as the same user, and in the web "
+           "matterm-server --expose-local-sessions as the same user, and in "
+           "the web "
            "page choose\n"
-           "\"Local terminals...\" in the palette (Ctrl+B :). Ctrl+Shift+H lists all "
+           "\"Local terminals...\" in the palette (Ctrl+B :). Ctrl+Shift+H "
+           "lists all "
            "shortcuts;\n"
-           "\"Attach terminal...\" in the palette shows a daemon terminal in another "
+           "\"Attach terminal...\" in the palette shows a daemon terminal in "
+           "another "
            "window.\n\n"
            "  --help, -h           Show this help without opening a window.\n"
            "  --font-size PIXELS   Font size, 1..128 renderer pixels (default: "
            "18).\n"
            "  --term TERM          Child TERM (default: xterm-256color).\n"
-           "  --daemon             Keep the terminals in matterm-daemon (started if "
+           "  --daemon             Keep the terminals in matterm-daemon "
+           "(started if "
            "missing),\n"
-           "                       so they survive closing this window (default;\n"
-           "                       not with a command; falls back if it cannot start).\n"
+           "                       so they survive closing this window "
+           "(default;\n"
+           "                       not with a command; falls back if it cannot "
+           "start).\n"
            "  --no-daemon          Run the programs in this process.\n"
            "  --daemon-socket PATH Socket of the daemon (default: "
            "$XDG_RUNTIME_DIR/matterm/daemon.sock).\n"
            "  --daemon-host [USER@]HOST\n"
-           "                       Use the daemon of another computer through an ssh tunnel\n"
-           "                       (started there if missing; needs ssh keys, no questions are\n"
+           "                       Use the daemon of another computer through "
+           "an ssh tunnel\n"
+           "                       (started there if missing; needs ssh keys, "
+           "no questions are\n"
            "                       asked; see docs/REMOTE_DAEMON.md).\n"
-           "  --daemon-install     With --daemon-host: use our own matterm-daemon there, copied to\n"
-           "                       ~/.local/share/matterm/bin/ when missing (asks first; without\n"
-           "                       this it is copied only if the other computer has none on PATH).\n"
+           "  --daemon-install     With --daemon-host: use our own "
+           "matterm-daemon there, copied to\n"
+           "                       ~/.local/share/matterm/bin/ when missing "
+           "(asks first; without\n"
+           "                       this it is copied only if the other "
+           "computer has none on PATH).\n"
            "  --yes                Copy without asking.\n"
-           "  --ssh-arg ARG        An extra argument for ssh (repeatable), e.g. -p / 2222.\n"
-           "  --completion SHELL   Print the shell completion script (bash, zsh or fish) for "
+           "  --ssh-arg ARG        An extra argument for ssh (repeatable), "
+           "e.g. -p / 2222.\n"
+           "  --completion SHELL   Print the shell completion script (bash, "
+           "zsh or fish) for "
            "matterm,\n"
-           "                       matterm-server and matterm-daemon; see the README.\n"
-           "  --tab-activity=MODE  What a tab shows while its terminals print on their own: icon\n"
-           "                       (default, a small static mark), pulse (the background\n"
+           "                       matterm-server and matterm-daemon; see the "
+           "README.\n"
+           "  --tab-activity=MODE  What a tab shows while its terminals print "
+           "on their own: icon\n"
+           "                       (default, a small static mark), pulse (the "
+           "background\n"
            "                       alternates once a second) or off.\n"
            "  --no-tab-pulse       Same as --tab-activity=off.\n"
-           "  --snap-scroll        Let scrolling come to rest on whole rows (default: "
+           "  --snap-scroll        Let scrolling come to rest on whole rows "
+           "(default: "
            "smooth\n"
-           "                       pixel scrolling, which may stop inside a row).\n"
-           "  --system-frame       Use the desktop's window frame instead of our own. By default the\n"
-           "                       window has no system frame: the tab strip is the title bar (drag\n"
-           "                       the empty part, minimise / maximise / close at the right) and the\n"
-           "                       edges resize. Where SDL cannot do that (no hit test) the system\n"
-           "                       frame is used, with a note (docs/TABS_PLAN.md section 16).\n"
-           "  --borderless         The default; accepted for old command lines.\n"
-           "  --window-test        Print the video driver and which window calls work here, for\n"
-           "                       trying the own frame on a new desktop. Opens a window briefly.\n"
-           "  --attach-tty         No window: list the terminals that run in the daemon, take one\n"
-           "                       over in this terminal (full screen) and leave it with Ctrl+].\n"
-           "                       Works with --daemon-socket and --daemon-host, for example from a\n"
+           "                       pixel scrolling, which may stop inside a "
+           "row).\n"
+           "  --system-frame       Use the desktop's window frame instead of "
+           "our own. By default the\n"
+           "                       window has no system frame: the tab strip "
+           "is the title bar (drag\n"
+           "                       the empty part, minimise / maximise / close "
+           "at the right) and the\n"
+           "                       edges resize. Where SDL cannot do that (no "
+           "hit test) the system\n"
+           "                       frame is used, with a note "
+           "(docs/TABS_PLAN.md section 16).\n"
+           "  --borderless         The default; accepted for old command "
+           "lines.\n"
+           "  --window-test        Print the video driver and which window "
+           "calls work here, for\n"
+           "                       trying the own frame on a new desktop. "
+           "Opens a window briefly.\n"
+           "  --attach-tty         No window: list the terminals that run in "
+           "the daemon, take one\n"
+           "                       over in this terminal (full screen) and "
+           "leave it with Ctrl+].\n"
+           "                       Works with --daemon-socket and "
+           "--daemon-host, for example from a\n"
            "                       phone over ssh (docs/REMOTE_DAEMON.md).\n"
+           "  --daemon-list        List the daemons of this user: socket, pid, "
+           "version, number of\n"
+           "                       terminals. With --daemon-socket only that "
+           "one.\n"
+           "  --daemon-stop        Stop a daemon after asking (and naming how "
+           "many terminals end).\n"
+           "                       Works for any version; name one with "
+           "--daemon-socket if several run.\n"
            "  --smooth-cursor      Animate cursor movement (native PTY only; "
            "default: off).\n"
            "  --record-output FILE Record raw PTY output to a new file (max 64 "
@@ -454,6 +494,7 @@ int main(int argc, char **argv) {
     bool systemFrameFlag = false;
     bool windowTestOnly = false;
     bool attachTty = false;
+    bool daemonList = false, daemonStop = false;
     std::string tabActivity = "icon";
     std::string daemonSocket;
     std::string daemonHost;
@@ -522,6 +563,12 @@ int main(int argc, char **argv) {
         }
         else if (arg == "--attach-tty") {
             attachTty = true;
+        }
+        else if (arg == "--daemon-list") {
+            daemonList = true;
+        }
+        else if (arg == "--daemon-stop") {
+            daemonStop = true;
         }
         else if (arg == "--snap-scroll") {
             snapScroll = true;
@@ -629,6 +676,35 @@ int main(int argc, char **argv) {
             return 1;
         }
         return windowTest();
+    }
+    if (daemonList || daemonStop) {
+        if (!valid || (daemonList && daemonStop) || inputPath || recordPath ||
+            smokeTest || showcase || ptySmokeTest || ptyTabsSmokeTest ||
+            !command.empty() || smoothCursor || attachTty) {
+            std::cerr << "--daemon-list and --daemon-stop are commands of "
+                         "their own: use one of them, "
+                         "with at most --daemon-socket, --daemon-host and "
+                         "--ssh-arg\n";
+            return 1;
+        }
+#ifdef MATTERM_HAS_ATTACH_TTY
+        DaemonOptions options;
+        options.enabled = true;
+        options.socketPath = daemonSocket;
+        options.host = daemonHost;
+        options.sshArguments = sshArguments;
+        try {
+            return daemonList ? runDaemonList(options) : runDaemonStop(options);
+        }
+        catch (const std::exception &error) {
+            std::cerr << error.what() << '\n';
+            return 1;
+        }
+#else
+        std::cerr << "This build has no --daemon-list / --daemon-stop (it "
+                     "needs POSIX and the PTY support)\n";
+        return 1;
+#endif
     }
     if (ptyLayoutSmokeTest && (!useDaemon || !command.empty() || ptyTabsSmokeTest || ptySmokeTest || inputPath || showcase ||
                                smokeTest || attachTty)) {

@@ -185,7 +185,8 @@ protocol::Hello hello(const std::string &id = {}, std::uint64_t offset = 0) {
     return h;
 }
 
-std::optional<protocol::Welcome> attach(DaemonClient &c, const std::string &id = {}, std::uint64_t offset = 0) {
+[[maybe_unused]] std::optional<protocol::Welcome> attach(
+    DaemonClient &c, const std::string &id = {}, std::uint64_t offset = 0) {
     if (!c.send(hello(id, offset))) return std::nullopt;
     const auto m = c.server();
     if (!m) return std::nullopt;
@@ -197,7 +198,8 @@ std::optional<protocol::Welcome> attach(DaemonClient &c, const std::string &id =
 
 namespace {
 // ControlHello and return a connected control client.
-std::unique_ptr<DaemonClient> controlClient(const std::string &path) {
+[[maybe_unused]] std::unique_ptr<DaemonClient> controlClient(
+    const std::string &path) {
     auto c = std::make_unique<DaemonClient>(path);
     if (!c->sendControl(mtd::ControlHello{})) return nullptr;
     const auto w = c->controlReply();
@@ -209,7 +211,8 @@ std::unique_ptr<DaemonClient> controlClient(const std::string &path) {
     const auto w = c->controlReply();
     return w && std::holds_alternative<mtd::ControlWelcome>(*w) ? std::move(c) : nullptr;
 }
-std::optional<std::string> createSession(DaemonClient &ctl, const std::string &cwd) {
+[[maybe_unused]] std::optional<std::string> createSession(
+    DaemonClient &ctl, const std::string &cwd) {
     if (!ctl.sendControl(mtd::CreateSession{cwd, 100, 30})) return std::nullopt;
     const auto r = ctl.controlReply();
     if (r && std::holds_alternative<mtd::SessionCreated>(*r)) return std::get<mtd::SessionCreated>(*r).id;

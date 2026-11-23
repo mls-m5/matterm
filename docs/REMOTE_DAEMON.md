@@ -107,6 +107,32 @@ taken from the remote. No sudo, nothing outside `~/.local/share/matterm/bin` is 
 validated against a short character list, the remote shell only sees validated words and one fixed script),
 the first copy needs a yes, and the file is content-named, 0700, and renamed into place.
 
+### Versions, several daemons, `matterm-attach` (2026-11-23)
+
+**Names.** `--daemon-install` copies two files into `~/.local/share/matterm/bin/` on the other computer,
+`matterm-daemon-<format>.<breaking>.<additive>-<hash8>` and the same for `matterm-attach` (a static
+program without SDL: `--attach-tty`, `--daemon-list`, `--daemon-stop`), and points the stable names
+`matterm-daemon` and `matterm-attach` in that folder at them. So `ssh -t you@computer
+'~/.local/share/matterm/bin/matterm-attach'` always works (no `.bashrc` change; put the folder on PATH
+only if you want the short name). A running file is never replaced; after copying, old versions are
+removed: only files with exactly those names, never one that a process runs (`/proc/*/exe`), the newest
+older version stays as a fallback, no question, and what was removed is printed. Versions are compared
+as numbers (1.10.0 is newer than 1.9.0). Files from before (named after their content) are left alone.
+
+**Versions.** The daemon's control protocol is `format.breaking.additive` plus the build hash
+(docs/PROTOCOL.md "Control version"). A different *breaking* number is refused with an explanation
+(which version runs, how many terminals it keeps) and, on this computer, an offer to start a new daemon
+on its own socket `daemon-<version>.sock` next to the old one. Over `--daemon-host` nothing is offered:
+the message says how to list and stop. A different *additive* number is only a note.
+
+**Seeing and stopping.** `matterm --daemon-list` (or `matterm-attach --daemon-list`) lists the daemons of
+this user: socket, pid, version and hash, number of terminals, and whether it can work with this build.
+`--daemon-stop` asks first ("This ends N terminals"), then asks the daemon to shut down; a daemon that
+does not answer the handshake (too old) is found by the pid of the process behind the socket
+(`SO_PEERCRED`, same user only) and sent SIGTERM. With several daemons, name one with `--daemon-socket`.
+With `--daemon-host` the same commands run `matterm-attach` on the other computer (copied there first if
+needed, as for the daemon). `matterm-daemon --ensure` reuses a compatible daemon on any socket name.
+
 ### Security
 
 * Remote side: sshd runs the forwarded connection as the account you logged in as, so the daemon's

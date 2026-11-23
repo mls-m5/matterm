@@ -559,3 +559,31 @@ nothing leaks about private sessions. Any other control message gets `ControlErr
 connection is closed. When the owner stops sharing a session (`SetShared false`) an exposed
 connection attached to it receives `Error Replaced "sharing stopped"` and is closed; the session
 itself keeps running.
+
+**Control version `format.breaking.additive+hash`** (2026-11-23). The number the daemon announces is
+now three numbers and a build hash, so that a client can tell "different but compatible" from "cannot
+work together", and any version can still be asked to stop.
+
+- **format** (1): the shape of the handshake, `ControlHello`/`ControlWelcome` (0x40, 0xc0) and
+  `GetStatus`/`Shutdown` (0x43, 0x44). Frozen: these bytes stay readable by every version.
+- **breaking** (3 today): the `version` field of the hello and the welcome, as before. A different
+  value: the client refuses to connect, says what runs where, and offers a new daemon next to the old
+  one (the old one keeps its terminals). A daemon serves an older client as before; to a client with a
+  *higher* breaking number it answers only `GetStatus` and `Shutdown` (others get `ControlError`
+  BadMessage "incompatible control version ...").
+- **additive** (1 today; counts compatible extensions since breaking 3 began): a different value is a
+  note; the newer side handles the older.
+- **hash**: the git commit of the build, for messages and lists; it never decides anything.
+
+The Welcome carries the whole version in its free text `build`, `"matterm-daemon 1.3.1+abc12345"`, so
+no handshake byte changed. A daemon from before the scheme prints no such text: its Welcome `version` is
+its breaking number and its additive number is 0 (`src/daemon/version.h`). If the text disagrees with
+the number in the handshake, the handshake wins.
+
+**Several daemons.** A daemon is identified by its socket. A new daemon listens on
+`daemon-<format>.<breaking>.<additive>.sock` next to today's `daemon.sock`. Without `--daemon-socket`
+the window and `--attach-tty` ask every socket in the folder (the frozen handshake) and use the one
+compatible daemon; of several the newest, after a question; with none compatible a new one is offered.
+`--daemon-list` shows all of them; `--daemon-stop` stops one (asking first and naming its terminals):
+`Shutdown` for any daemon that answers the handshake, else SIGTERM to the pid the kernel reports for
+the socket (`SO_PEERCRED`), only for a process of the same user.

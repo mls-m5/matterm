@@ -8,6 +8,37 @@ int shapeCode(const Cursor &cursor) {
                                                                 : 5;
     return base + (cursor.blink ? 0 : 1);
 }
+
+// The bytes that take the terminal from `from` to `to`.
+std::string optionBytes(const ScreenOptions &from, const ScreenOptions &to) {
+    std::string out;
+    if (from.mouse != to.mouse) {
+        const auto code = [](ScreenOptions::Mouse m) {
+            return m == ScreenOptions::Mouse::Click  ? "1000"
+                   : m == ScreenOptions::Mouse::Drag ? "1002"
+                                                     : "1003";
+        };
+        if (from.mouse != ScreenOptions::Mouse::Off) {
+            out += std::string("\x1b[?") + code(from.mouse) + "l";
+            if (to.mouse == ScreenOptions::Mouse::Off) {
+                out += "\x1b[?1006l";
+            }
+        }
+        if (to.mouse != ScreenOptions::Mouse::Off) {
+            out += std::string("\x1b[?") + code(to.mouse) + "h";
+            if (from.mouse == ScreenOptions::Mouse::Off) {
+                out += "\x1b[?1006h";
+            }
+        }
+    }
+    if (from.bracketedPaste != to.bracketedPaste) {
+        out += to.bracketedPaste ? "\x1b[?2004h" : "\x1b[?2004l";
+    }
+    if (from.focusEvents != to.focusEvents) {
+        out += to.focusEvents ? "\x1b[?1004h" : "\x1b[?1004l";
+    }
+    return out;
+}
 } // namespace
 
 Screen::Screen(int columns, int rows, Caps caps, ScreenOptions options)
@@ -28,15 +59,7 @@ std::string Screen::enter() {
         out += "\x1b[?1049h";
     }
     out += "\x1b[?25l\x1b[0m\x1b[2J";
-    if (options_.mouse) {
-        out += "\x1b[?1002h\x1b[?1006h";
-    }
-    if (options_.bracketedPaste) {
-        out += "\x1b[?2004h";
-    }
-    if (options_.focusEvents) {
-        out += "\x1b[?1004h";
-    }
+    out += optionBytes(ScreenOptions{}, options_);
     hostCursorVisible_ = false;
     cursorKnown_ = false;
     pendingClear_ = false;
@@ -45,16 +68,10 @@ std::string Screen::enter() {
 }
 
 std::string Screen::restoreSequence() const {
-    std::string out;
-    if (options_.focusEvents) {
-        out += "\x1b[?1004l";
-    }
-    if (options_.bracketedPaste) {
-        out += "\x1b[?2004l";
-    }
-    if (options_.mouse) {
-        out += "\x1b[?1006l\x1b[?1002l";
-    }
+    // Every report off, whatever options_ is now: the caller may hold this from
+    // before.
+    std::string out =
+        "\x1b[?1004l\x1b[?2004l\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l";
     out += "\x1b[0 q\x1b[0m\x1b[?25h";
     if (caps_.alternateScreen) {
         out += "\x1b[?1049l";
@@ -63,6 +80,12 @@ std::string Screen::restoreSequence() const {
         out += "\x1b[" + std::to_string(rows()) + ";1H\r\n";
     }
     return out;
+}
+
+std::string Screen::setOptions(const ScreenOptions &options) {
+    const ScreenOptions before = options_;
+    options_ = options;
+    return entered_ ? optionBytes(before, options) : std::string();
 }
 
 std::string Screen::leave() {

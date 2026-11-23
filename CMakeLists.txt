@@ -86,6 +86,20 @@ add_library(matterm::chat ALIAS chatcore)
 target_compile_features(chatcore PUBLIC cxx_std_17)
 target_include_directories(chatcore PUBLIC src/chat)
 
+# The commit this build comes from, shown in version messages and lists (never decides anything).
+# Taken when cmake runs; "unknown" without git.
+find_package(Git QUIET)
+set(MATTERM_BUILD_HASH "unknown")
+if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short=8 HEAD
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} OUTPUT_VARIABLE git_hash
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE git_status)
+    if(git_status EQUAL 0 AND NOT git_hash STREQUAL "")
+        set(MATTERM_BUILD_HASH ${git_hash})
+    endif()
+endif()
+add_compile_definitions(MATTERM_BUILD_HASH="${MATTERM_BUILD_HASH}")
+
 # tty: the terminal drawing layer (cell buffer in, smallest VT update out, colour
 # reduction, key and mouse decoding) with no matterm types, meant to stand alone
 # later. The pure part has no I/O (enforced by test/check_fakeos_includes.cmake);
@@ -272,12 +286,25 @@ endif()
 # client and the shared tty layer. matterm links it; a program without SDL (matterm-attach) can too.
 # Entry point: runAttachTty(DaemonOptions) in app/attachtty.h.
 if(UNIX AND TARGET ptysession)
-    add_library(attachtty app/attachtty.cpp src/daemon/control.cpp)
+    add_library(attachtty app/attachtty.cpp app/daemoncli.cpp src/daemon/control.cpp src/daemon/buildhash.cpp
+                      src/daemon/socketpath.cpp)
     add_library(matterm::attachtty ALIAS attachtty)
     target_compile_features(attachtty PUBLIC cxx_std_17)
     target_include_directories(attachtty PUBLIC app src/frontend src/daemon)
     target_link_libraries(attachtty PUBLIC matterm::transport matterm::unixchannel matterm::vt matterm::terminal
                                            matterm::ttyposix matterm::ttymatterm)
+endif()
+
+# matterm-attach: matterm --attach-tty plus --daemon-list/--daemon-stop in one file without SDL,
+# static where the daemon is (what --daemon-install copies next to matterm-daemon).
+if(TARGET attachtty AND UNIX)
+    add_executable(matterm-attach app/attach/main.cpp)
+    target_link_libraries(matterm-attach PRIVATE matterm::attachtty)
+    if(MATTERM_STATIC_DAEMON)
+        target_link_options(matterm-attach PRIVATE -static)
+    endif()
+    set_target_properties(matterm-attach PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+    install(TARGETS matterm-attach RUNTIME DESTINATION bin)
 endif()
 
 if(MATTERM_BUILD_APP)
@@ -292,7 +319,6 @@ if(MATTERM_BUILD_APP)
         target_compile_definitions(matterm PRIVATE MATTERM_HAS_PTY=1)
         if(UNIX)
             # The daemon's control messages (a codec only: no server code) and its socket.
-            target_sources(matterm PRIVATE src/daemon/control.cpp)
             target_link_libraries(matterm PRIVATE matterm::attachtty)
             target_include_directories(matterm PRIVATE src/daemon)
             target_compile_definitions(matterm PRIVATE MATTERM_HAS_ATTACH_TTY=1)
