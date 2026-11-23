@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs clang-tidy over matterm's own sources (not lib/, matperf/, test/mls-unit-test).
+# Runs clang-tidy over matterm's own sources (not lib/, test/mls-unit-test).
 #   tools/clang-tidy.sh [build-dir] [--changed [base]] [extra run-clang-tidy args]
 # Needs a configured build dir (compile_commands.json is exported by default).
 # The full run takes minutes. --changed checks only the .cpp files that differ from

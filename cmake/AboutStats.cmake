@@ -1,7 +1,7 @@
 # Counts the repository for the demo's `about` command and writes them as a
 # header (run with -DROOT=<source dir> -DOUT=<header>; used as a build step, so
 # the numbers always match the files that were built). Lines are newline
-# characters. Third-party code (lib/, matperf/, test/mls-unit-test, node_modules)
+# characters. Third-party code (lib/, test/mls-unit-test, node_modules)
 # is not counted.
 function(count_lines files out_lines out_files)
     set(total 0)

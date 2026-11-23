@@ -9,7 +9,7 @@ needs. Package names are Debian/Ubuntu apt packages; versions are what is instal
 sudo apt install build-essential cmake git \
     libsdl2-dev libsdl2-ttf-dev libfontconfig-dev libfreetype-dev libharfbuzz-dev \
     libboost-dev libsodium-dev libc6-dev python3
-git submodule update --init            # lib/fast-json, test/mls-unit-test, matperf
+git submodule update --init            # lib/fast-json, test/mls-unit-test, lib/matperf
 cmake -B build -DMATTERM_BUILD_SERVER=ON && cmake --build build -j8
 ```
 
@@ -27,7 +27,7 @@ daemon the native app falls back to running programs in its own process (with a 
 | libutil (`forkpty`) | in `libc6-dev` | glibc 2.36 | PTYs |
 | Static daemon | `libc6-dev` (`libc.a`) and `libsodium-dev` (`libsodium.a`) | | `matterm-daemon` and `matmux` (no SDL) linked fully static (`MATTERM_STATIC_DAEMON`, ON by default; without them the build warns and links dynamically) |
 | Python 3 | `python3` | 3.11 | a few tests (fake ssh in `test/fakessh.py`, helpers) |
-| Submodules | `git submodule update --init` | | `lib/fast-json` (server config; the build stops without it), `test/mls-unit-test`, `matperf` |
+| Submodules | `git submodule update --init` | | `lib/fast-json` (server config; the build stops without it), `test/mls-unit-test`, `lib/matperf` |
 
 The container build for the chat server uses `-DBUILD_TESTING=OFF` (no test submodule in a `git archive`).
 

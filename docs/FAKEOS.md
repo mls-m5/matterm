@@ -91,7 +91,7 @@ files of C++, of JavaScript/HTML/CSS, test cases and test files, documents, and 
 size of this demo. The numbers are not typed in: `cmake/AboutStats.cmake` counts the
 repository in a build step (`fakeos_aboutstats`, also in `web/CMakeLists.txt`) and
 writes `fakeos_about_stats.h` into the build directory, so they always match the
-files that were built (newline characters; `lib/`, `matperf/`, the unit-test
+files that were built (newline characters; `lib/`, the unit-test
 framework and `node_modules` are not counted). `test/fakeos_about_test.cpp` counts
 them again from the sources and compares. It ends with the credit "Byggt av
 Mattias Lasersk\u00f6ld" and the tools used. `neofetch` signs its picture with the

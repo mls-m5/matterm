@@ -8,7 +8,7 @@ starts independent agents; this document does not launch any work automatically.
 
 Before starting: read Agents.md, DESIGN.md, ROADMAP.md and the task's subsystem
 notes. Initialize submodules with `git submodule update --init --recursive`.
-Currently matperf is at repository root (`matperf/`), not under lib/. Its URL
+The matperf submodule lives under `lib/matperf/`. Its URL
 uses SSH, so other clones need suitable access or a local URL override. Do not
 rewrite or advance submodule pins as part of unrelated tasks.
 

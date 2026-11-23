@@ -54,8 +54,9 @@ atlas/cache behavior from cold runs. Start with measurements, not optimizations.
 
 ## matperf Inspection
 
-The operator's staged submodule is currently `matperf/` at the root, pinned to
-71a53334cf7cefedad4c0d51a836904deb470a72. Do not relocate or modify it implicitly.
+The matperf submodule lives at `lib/matperf/`. Its relocation from the repository
+root was explicitly requested by the owner; the pinned commit was preserved
+(c648bd1a1bc3390609ee79b046fed3d4c067c5b3). Do not modify or advance it implicitly.
 README is minimal; the API is in include/matperf/profiler.h. It exposes
 PROFILE_FUNCTION(), PROFILE_PART(literal), enableProfiling(settings), and thread
 naming. Scope labels borrow string storage, so use static literals. Its public
