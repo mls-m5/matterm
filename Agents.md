@@ -72,6 +72,15 @@ and runs integration tests before committing.
   files there. Never commit a submodule pointer by accident.
 - Pushes go through the host approval tool with a full commit SHA, one push per
   approval. Use `pkill -x name`, never `pkill -f`.
+- **Reuse before writing.** Look in `src/` (and `app/`) for existing code before writing something new
+  (a parser, a terminal drawing or input routine, a file or path helper, a dialog or list), and reuse
+  or extend it so the same thing is not implemented twice. If there is a good reason to write a
+  separate one, say so in the code comment and in the feature description (what was missing and why
+  the existing code could not be used). The integrator checks for duplicates when merging.
+- **History is linear.** The integrator squash-merges each finished task into `main` (one commit per
+  task, `git merge --squash`) and then resets the agent's branch to `main`; agents merge `main`
+  into their branch before starting new work. Do not run `git worktree` commands from an agent
+  sandbox (the host paths differ and git may prune the worktree's metadata).
 - `ROADMAP.md` tracks progress; designs for larger features are written in
   `docs/` and agreed before implementation (see "Later" in the roadmap).
 - Warnings and clang-tidy: the tree builds warning-free (`cmake/Warnings.cmake`); keep
