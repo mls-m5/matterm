@@ -93,6 +93,37 @@ TEST_CASE("One pane fills the window below the strip, keeping the scrollbar stri
     EXPECT(!r.space.focusedPane()->link.resizes.empty());
 }
 
+TEST_CASE("A theme colours the strip, and the other computer's name is in the "
+          "gap, not in the tab") {
+    Rig r(1200, 800);
+    auto text = [](const FramePlan &plan) {
+        std::string out;
+        for (const auto &c : plan.strip.cells) {
+            out += c.codePoint < 128 ? char(c.codePoint) : '?';
+        }
+        return out;
+    };
+    const auto before = r.view.plan();
+    const auto greyStrip =
+        before.strip.cells.back()
+            .background; // The strip's own colour at its end.
+    Palette red;
+    red.frame = Rgb8{94, 33, 37};
+    r.view.setStripPalette(red);
+    r.view.setHostLabel("server");
+    const auto after = r.view.plan();
+    EXPECT(text(after).find("server") !=
+           std::string::npos); // Written as text...
+    EXPECT(text(after).find("server: t1") ==
+           std::string::npos); // ...but not in the tab's name.
+    EXPECT(text(after).find("t1") != std::string::npos);
+    const auto strip = after.strip.cells.back().background;
+    EXPECT(strip.r == 94 && strip.g == 33 && strip.b == 37);
+    EXPECT(strip.r != greyStrip.r);
+    r.view.setHostLabel("");
+    EXPECT(text(r.view.plan()).find("server") == std::string::npos);
+}
+
 TEST_CASE("The strip can hide with one tab") {
     Space space([] { return std::make_unique<Pane>(); });
     ViewConfig c;

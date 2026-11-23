@@ -342,6 +342,26 @@ if(BUILD_TESTING)
     target_link_libraries(ttymatterm_test PRIVATE matterm::ttymatterm matterm::vt)
     add_test(NAME tty_matterm COMMAND ttymatterm_test)
 
+    add_executable(jsonvalue_test jsonvalue_test.cpp)
+    target_link_libraries(jsonvalue_test PRIVATE mls_unit_test_main)
+    target_include_directories(jsonvalue_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+    add_test(NAME json_value COMMAND jsonvalue_test)
+
+    add_executable(settings_test settings_test.cpp)
+    target_link_libraries(settings_test PRIVATE mls_unit_test_main)
+    target_include_directories(settings_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+    add_test(NAME settings COMMAND settings_test)
+
+    add_executable(settingswatch_test settingswatch_test.cpp)
+    target_link_libraries(settingswatch_test PRIVATE mls_unit_test_main)
+    target_include_directories(settingswatch_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+    add_test(NAME settings_watch COMMAND settingswatch_test)
+
+    add_executable(themes_test themes_test.cpp)
+    target_link_libraries(themes_test PRIVATE mls_unit_test_main palette)
+    target_include_directories(themes_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+    add_test(NAME themes COMMAND themes_test)
+
     add_executable(ttysnapshot_test ttysnapshot_test.cpp)
     target_link_libraries(ttysnapshot_test PRIVATE mls_unit_test_main)
     target_link_libraries(ttysnapshot_test PRIVATE matterm::ttymatterm matterm::vt)

@@ -1,8 +1,9 @@
 #include "borderless.h"
 #include "clioptions.h"
-#include "tabtypes.h"
 #include "fontpath.h"
 #include "render/sdlbackend.h"
+#include "settingswatch.h"
+#include "tabtypes.h"
 #include "terminal/terminalmodel.h"
 #include "terminal/vt/vtparser.h"
 #ifdef MATTERM_HAS_PTY
@@ -769,6 +770,18 @@ int main(int argc, char **argv) {
     if (!frontend::combineFrameFlags(borderlessFlag, systemFrameFlag, frameRequest)) {
         std::cerr << "--borderless and --system-frame contradict each other\n";
         return 1;
+    }
+    if (frameRequest == frontend::FrameRequest::Default) {
+        // Where the command line said nothing, settings.json decides
+        // (docs/tasks/settings.md).
+        frontend::settings::RealFileSystem settingsFs;
+        const auto settingsAtStart = frontend::settings::loadSettingsOnce(
+            settingsFs,
+            frontend::settings::settingsPath(std::getenv("XDG_CONFIG_HOME"),
+                                             std::getenv("HOME")));
+        if (settingsAtStart.choice("windowFrame") == "system") {
+            frameRequest = frontend::FrameRequest::System;
+        }
     }
     if (!valid || (inputPath && smokeTest) ||
         (recordPath && (inputPath || smokeTest || showcase || ptySmokeTest ||

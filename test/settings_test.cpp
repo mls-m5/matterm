@@ -1,0 +1,159 @@
+#include "mls-unit-test/unittest.h"
+#include "settings.h"
+
+using namespace frontend::settings;
+
+TEST_SUIT_BEGIN(Settings)
+
+TEST_CASE("The definitions: unique keys, a default that is allowed, a text for "
+          "each") {
+    std::set<std::string> keys;
+    for (const auto &d : definitions()) {
+        EXPECT(keys.insert(d.key).second);
+        EXPECT(std::string(d.label).size() > 0 &&
+               std::string(d.text).size() > 0);
+        Settings fresh;
+        if (d.type == Type::Choice) {
+            EXPECT(std::find(d.choices.begin(),
+                             d.choices.end(),
+                             std::string(d.defaultValue)) != d.choices.end());
+            EXPECT_EQ(fresh.choice(d.key), std::string(d.defaultValue));
+        }
+    }
+    EXPECT(keys.count("theme") && keys.count("computers") &&
+           keys.count("tabActivity") && keys.count("windowFrame") &&
+           keys.count("scrollbackRows") && keys.count("confirmClose"));
+}
+
+TEST_CASE("No file: the defaults") {
+    Settings s;
+    EXPECT_EQ(s.choice("theme"), std::string("grey"));
+    EXPECT_EQ(s.choice("tabActivity"), std::string("icon"));
+    EXPECT_EQ(s.choice("windowFrame"), std::string("own"));
+    EXPECT_EQ(s.integer("scrollbackRows"), 1000);
+    EXPECT(s.flag("confirmClose"));
+    EXPECT_EQ(s.computerChoice("server"), std::string("auto"));
+}
+
+TEST_CASE("A file sets what it names; the rest stays default; nothing to warn "
+          "about") {
+    const auto loaded = Settings::fromText(
+        R"({"theme":"blue","tabActivity":"off","scrollbackRows":5000,"confirmClose":false,"computers":{"server":"green","box":"auto"}})");
+    EXPECT(loaded.ok());
+    EXPECT(loaded.warnings.empty());
+    const auto &s = loaded.settings;
+    EXPECT_EQ(s.choice("theme"), std::string("blue"));
+    EXPECT_EQ(s.choice("tabActivity"), std::string("off"));
+    EXPECT_EQ(s.choice("windowFrame"), std::string("own"));
+    EXPECT_EQ(s.integer("scrollbackRows"), 5000);
+    EXPECT(!s.flag("confirmClose"));
+    EXPECT_EQ(s.computerChoice("server"), std::string("green"));
+    EXPECT_EQ(s.computerChoice("box"), std::string("auto"));
+    EXPECT_EQ(s.computerChoice("elsewhere"), std::string("auto"));
+}
+
+TEST_CASE("A value that does not fit is reported and the default is used; the "
+          "rest still applies") {
+    const auto loaded = Settings::fromText(
+        R"({"theme":"purple","tabActivity":3,"scrollbackRows":5,"confirmClose":"yes","windowFrame":"system","computers":{"a":"nope","b":"red"}})");
+    EXPECT(loaded.ok());
+    EXPECT_EQ(loaded.warnings.size(), std::size_t(5));
+    const auto &s = loaded.settings;
+    EXPECT_EQ(s.choice("theme"), std::string("grey"));
+    EXPECT_EQ(s.choice("tabActivity"), std::string("icon"));
+    EXPECT_EQ(s.integer("scrollbackRows"), 1000);
+    EXPECT(s.flag("confirmClose"));
+    EXPECT_EQ(s.choice("windowFrame"), std::string("system"));
+    EXPECT_EQ(s.computerChoice("a"), std::string("auto"));
+    EXPECT_EQ(s.computerChoice("b"), std::string("red"));
+    bool namesTheme = false;
+    for (const auto &w : loaded.warnings) {
+        namesTheme = namesTheme || (w.find("theme") != std::string::npos &&
+                                    w.find("purple") != std::string::npos);
+    }
+    EXPECT(namesTheme);
+}
+
+TEST_CASE("A broken file is an error, there are no settings from it") {
+    for (const char *bad : {"",
+                            "{",
+                            "[1]",
+                            "\"x\"",
+                            "{\"theme\":}",
+                            "{\"theme\":\"grey\",\"theme\":\"blue\"}",
+                            "null"}) {
+        const auto loaded = Settings::fromText(bad);
+        EXPECT(!loaded.ok());
+        EXPECT(!loaded.error.empty());
+    }
+}
+
+TEST_CASE("Unknown keys and values are written back as they were, in place") {
+    const std::string text =
+        R"({"future":{"a":[1,2.5,null]},"theme":"red","note":"keep me"})";
+    auto loaded = Settings::fromText(text);
+    EXPECT(loaded.ok());
+    std::string error;
+    EXPECT(loaded.settings.set("theme", "green", error));
+    EXPECT(loaded.settings.set("tabActivity", "pulse", error));
+    const auto out = loaded.settings.toText();
+    const auto again = Settings::fromText(out);
+    EXPECT(again.ok());
+    EXPECT_EQ(again.settings.choice("theme"), std::string("green"));
+    EXPECT_EQ(again.settings.choice("tabActivity"), std::string("pulse"));
+    EXPECT(out.find("\"future\"") != std::string::npos &&
+           out.find("2.5") != std::string::npos);
+    EXPECT(out.find("keep me") != std::string::npos);
+    EXPECT(out.find("\"future\"") <
+           out.find("\"theme\"")); // Order kept; new keys at the end.
+    EXPECT(out.find("\"theme\"") < out.find("\"tabActivity\""));
+}
+
+TEST_CASE("set checks the value against the definition") {
+    Settings s;
+    std::string error;
+    EXPECT(!s.set("theme", "purple", error));
+    EXPECT(error.find("grey") != std::string::npos); // Names what is allowed.
+    EXPECT(!s.set("nosuchkey", "x", error));
+    EXPECT(!s.set("scrollbackRows", "5", error));
+    EXPECT(!s.set("scrollbackRows", "many", error));
+    EXPECT(s.set("scrollbackRows", "2000", error));
+    EXPECT_EQ(s.integer("scrollbackRows"), 2000);
+    EXPECT(!s.set("confirmClose", "maybe", error));
+    EXPECT(s.set("confirmClose", "off", error));
+    EXPECT(!s.flag("confirmClose"));
+    EXPECT(s.set("confirmClose", "on", error));
+    EXPECT(s.flag("confirmClose"));
+    EXPECT_EQ(s.choice("theme"),
+              std::string("grey")); // The failed ones changed nothing.
+}
+
+TEST_CASE("The theme of a computer: set, back to automatic, and the name must "
+          "be sane") {
+    Settings s;
+    std::string error;
+    EXPECT(s.setComputer("server", "green", error));
+    EXPECT_EQ(s.computerChoice("server"), std::string("green"));
+    EXPECT(s.setComputer("server", "auto", error));
+    EXPECT_EQ(s.computerChoice("server"), std::string("auto"));
+    EXPECT(!s.setComputer("server", "plaid", error));
+    EXPECT(!s.setComputer("", "red", error));
+    EXPECT(!s.setComputer(std::string(300, 'x'), "red", error));
+    EXPECT(!s.setComputer("bad\nname", "red", error));
+    // A round trip keeps it.
+    EXPECT(s.setComputer("box", "blue", error));
+    const auto again = Settings::fromText(s.toText());
+    EXPECT(again.ok());
+    EXPECT_EQ(again.settings.computerChoice("box"), std::string("blue"));
+}
+
+TEST_CASE("Equal settings compare equal, whatever else is in the file") {
+    const auto a = Settings::fromText(R"({"theme":"blue","other":1})");
+    const auto b = Settings::fromText(R"({"other":2,"theme":"blue"})");
+    const auto c = Settings::fromText(R"({"theme":"green"})");
+    EXPECT(a.settings.sameValues(b.settings));
+    EXPECT(!a.settings.sameValues(c.settings));
+    EXPECT(Settings().sameValues(Settings::fromText("{}").settings));
+}
+
+TEST_SUIT_END

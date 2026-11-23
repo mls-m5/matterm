@@ -173,6 +173,13 @@ public:
     const TerminalModes &modes() const {
         return parser_->modes();
     }
+    // The terminal's default background (a theme tints it,
+    // src/frontend/themes.h). Programs' own colours are not touched.
+    void setDefaultBackground(Rgb8 background) {
+        defaultPalette_.background = background;
+        palette_.background = background;
+        changed();
+    }
     const Palette &palette() const {
         return palette_;
     }
@@ -281,7 +288,7 @@ private:
     }
 
     Config config_;
-    const Palette defaultPalette_;
+    Palette defaultPalette_;
     Palette palette_;
     CursorGlide glide_;
     std::unique_ptr<TerminalModel> model_;

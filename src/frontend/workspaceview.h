@@ -68,7 +68,12 @@ struct ViewConfig {
     // widens or the focus moves.
     int compactBelowColumns = 0;
     std::int64_t resizeIntervalMs = 40; // at most one size change per pane this often during a drag
-    Palette palette;             // for the strip
+    Palette palette; // for the strip (a theme sets its frame colour,
+                     // src/frontend/themes.h)
+    // The name of the computer the terminals are on, written in the strip's gap
+    // when it is not this one: the colour of a theme is not the only sign of
+    // where a window is connected (placeComputerName, tabstrip.h).
+    std::string hostLabel;
 };
 
 // One pane as it should be drawn.
@@ -190,9 +195,16 @@ public:
         const int stripH = stripHeight();
         if (stripH > 0) {
             out.stripRect = {0, 0, metrics_.width, stripH};
-            out.strip = buildTabStrip(pulsed(workspace_.tabInfos(titleOf)), stripColumns(), config_.palette, stripFirst_,
-                                  config_.paletteButton, ShareButton{config_.shareButton && probeShared_, sharedInActiveTab()},
-                                  WindowButtons{config_.windowButtons, windowMaximized_});
+            out.strip = buildTabStrip(
+                pulsed(workspace_.tabInfos(titleOf)),
+                stripColumns(),
+                config_.palette,
+                stripFirst_,
+                config_.paletteButton,
+                ShareButton{config_.shareButton && probeShared_,
+                            sharedInActiveTab()},
+                WindowButtons{config_.windowButtons, windowMaximized_});
+            placeComputerName(out.strip, config_.hostLabel, config_.palette);
         }
         const Layout layout = activeLayout();
         out.dividers = layout.dividers;
@@ -533,6 +545,15 @@ public:
 
     // A key press is pending after the prefix key (the next printable key is a command).
     bool prefixWaiting() const { return prefix_.waiting(); }
+    void setStripPalette(const Palette &palette) {
+        config_.palette = palette;
+    }
+    void setHostLabel(std::string label) {
+        config_.hostLabel = std::move(label);
+    }
+    const Palette &stripPalette() const {
+        return config_.palette;
+    }
     void setTabActivity(TabActivity mode) {
         config_.tabActivity = mode;
         lastPulse_ = iconBits_ = 0;

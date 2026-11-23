@@ -120,6 +120,75 @@ bool hasKind(const TabStrip &strip, Kind kind) {
 
 TEST_SUIT_BEGIN(TabStrip)
 
+TEST_CASE("The computer's name is written in the gap of the strip, muted, and "
+          "changes nothing else") {
+    Palette themed;
+    themed.frame = Rgb8{30, 46, 88};
+    const auto tabs = makeTabs(2, 0);
+    auto strip = buildTabStrip(
+        tabs, 80, themed, 0, true, ShareButton{true, 0}, WindowButtons{});
+    const auto before = strip;
+    placeComputerName(strip, "server", themed);
+    EXPECT(text(strip).find("server") != std::string::npos);
+    // Right-aligned in the gap, before the share button; titles, regions and
+    // every other cell stay.
+    EXPECT_EQ(strip.regions.size(), before.regions.size());
+    const auto at = text(strip).find("server");
+    int differing = 0;
+    for (std::size_t i = 0; i < strip.cells.size(); ++i) {
+        if (strip.cells[i].codePoint != before.cells[i].codePoint) {
+            ++differing;
+            EXPECT(i >= at && i < at + 6); // Only the cells of the name.
+        }
+    }
+    EXPECT(differing >= 5);
+    EXPECT(text(strip).find("shell0") != std::string::npos);
+    // The gap is no click target: nothing was added to the regions, and a click
+    // on the name is a click on the gap.
+    EXPECT(strip.hit(int(at)).kind == Kind::None);
+    // Muted: a colour of the theme, readable on the strip, not the bright tab
+    // text.
+    const auto colour = strip.cells[at].foreground;
+    const auto colours = tabstrip_detail::colors(themed);
+    EXPECT(colour.r != colours.stripBg.r || colour.g != colours.stripBg.g ||
+           colour.b != colours.stripBg.b);
+    EXPECT(strip.cells[at].background.r == colours.stripBg.r);
+    EXPECT(colour.r < colours.tabFg.r || colour.g < colours.tabFg.g ||
+           colour.b < colours.tabFg.b);
+}
+
+TEST_CASE("The name is shortened to fit the gap, and left out when there is no "
+          "room or no name") {
+    Palette p;
+    const auto tabs = makeTabs(1, 0);
+    {
+        auto strip = buildTabStrip(
+            tabs, 40, p, 0, true, ShareButton{true, 0}, WindowButtons{});
+        placeComputerName(strip, "a-very-long-computer-name-indeed", p);
+        const auto shown = text(strip);
+        EXPECT(shown.find("a-very-long-computer-name-indeed") ==
+               std::string::npos);
+        EXPECT(shown.find("shell0") !=
+               std::string::npos); // The tab is untouched.
+    }
+    {
+        auto strip = buildTabStrip(makeTabs(6, 0, "a-long-title-"),
+                                   40,
+                                   p,
+                                   0,
+                                   true,
+                                   ShareButton{true, 0},
+                                   WindowButtons{});
+        const auto before = text(strip);
+        placeComputerName(strip, "server", p); // No gap left.
+        EXPECT_EQ(text(strip), before);
+    }
+    auto strip = buildTabStrip(tabs, 80, p);
+    const auto before = text(strip);
+    placeComputerName(strip, "", p);
+    EXPECT_EQ(text(strip), before);
+}
+
 TEST_CASE("Widths of characters") {
     EXPECT_EQ(displayWidth(U'a'), 1);
     EXPECT_EQ(displayWidth(U'å'), 1);

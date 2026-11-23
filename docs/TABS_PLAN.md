@@ -679,3 +679,39 @@ default makes it moot). Nothing of these is in the code.
 border leaves, the border colour equals the strip's, cursor shapes, the frame request flags and the
 fallback), `test/tabstrip_test.cpp` (the buttons at every width), `test/workspaceview_test.cpp` (clicks,
 double click, restore mark), `test/clioptions_test.cpp` (the flags and the completion).
+
+## 17. Settings and themes (agent2; decided by the owner, 2026-11-23)
+
+**The file.** `$XDG_CONFIG_HOME/matterm/settings.json` (else `~/.config/matterm/settings.json`), on the computer the window runs on,
+also with `--daemon-host`. Strict JSON (`src/frontend/jsonvalue.h`: duplicate keys, bad UTF-8, lone surrogates, too deep or over
+1 MiB are refused), written atomically (a temporary file next to it, synced, mode 0600, renamed; the folders 0700). Keys this version
+does not know are written back as they were. The definitions (key, text, type, default, allowed values) are in
+`src/frontend/settings.h`:
+
+| key | values | default |
+|---|---|---|
+| `theme` | grey, blue, green, red, amber | grey |
+| `computers` | `{"<name>": "<theme>"\|"auto"}` | `{}` |
+| `tabActivity` | icon, pulse, off | icon (the command line wins where given) |
+| `windowFrame` | own, system | own (read at start; the command line wins) |
+| `scrollbackRows` | 100..100000 | 1000 (terminals made afterwards) |
+| `confirmClose` | true, false | true |
+
+A value that does not fit is a warning and its default is used; a file that is not JSON is reported (in the window title) and the
+values from before stay; saving over a broken file is refused.
+
+**Following the file.** `SettingsWatcher` reads the file at start and looks at it about once a second (one `stat`; the file is read
+only when its time or size changed), pure given a file system and a clock. The palette entry "Reload settings" reads at once.
+inotify can come later; polling stays the baseline.
+
+**Themes** (`src/frontend/themes.h`). Dark only. A theme colours the frame (tab strip, its marks, the window border, which is the
+strip's colour: `Palette::frame`) and tints the terminals' default background by 5 % (`TerminalView::setDefaultBackground`);
+programs' own colours are not touched. The themes differ in **hue only** (about the brightness of grey, today's look; tests keep the
+hues apart and the text on the strip and on the terminal readable). Colour is not the only sign of where a window is connected: for
+terminals on another computer its **name is written in the strip's gap** (between the last tab and the share button), muted in the
+theme's colour, not in the tab's name (`placeComputerName` in `tabstrip.h`, the one place to change when it moves).
+
+**Per computer.** The local computer has the user's theme. A computer reached with `--daemon-host NAME` (the part after `user@`)
+has its override from `computers`, else an automatic choice: a hash of the lower-cased name picks among the themes other than the
+local one, so the same computer always gets the same theme and a remote window never looks like the local one. Two computers may
+get the same theme; an override fixes that. Detecting a plain `ssh host` typed in a shell is later.

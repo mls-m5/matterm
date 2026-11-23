@@ -9,22 +9,24 @@
 
 #include "cellbuffer.h"
 #include "cursorglide.h"
-#include "daemoncommands.h"
-#include "sessioncommands.h"
 #include "daemonclient.h"
+#include "daemoncommands.h"
 #include "daemonlink.h"
+#include "framesignature.h"
 #include "inputencoder.h"
+#include "procinfo.h"
+#include "ptylink.h"
 #include "ptysession.h"
 #include "sdlbackend.h"
 #include "sdlinput.h"
-#include "terminalmodel.h"
-#include "ptylink.h"
-#include "procinfo.h"
+#include "sessioncommands.h"
 #include "sessionfiles.h"
-#include "framesignature.h"
 #include "sessionrestore.h"
+#include "settingswatch.h"
 #include "sshtunnel.h"
+#include "terminalmodel.h"
 #include "terminalview.h"
+#include "themes.h"
 #include "ui/commandpalette.h"
 #include "ui/dialogs.h"
 #include "workspaceview.h"
@@ -247,9 +249,12 @@ private:
 
 // --snap-scroll: scrolling comes to rest on whole rows (default: pixel scrolling).
 bool gSnapScroll = false;
+std::size_t gScrollbackRows =
+    1000; // settings.json "scrollbackRows" (for panes made from now on)
 
 TerminalViewConfig paneViewConfig(int columns, int rows) {
-    TerminalViewConfig config{std::size_t(columns), std::size_t(rows), 1000, {}};
+    TerminalViewConfig config{
+        std::size_t(columns), std::size_t(rows), gScrollbackRows, {}};
     config.snapScrollToRows = gSnapScroll;
     return config;
 }
@@ -901,11 +906,12 @@ int runPtyFrontend(const char *font,
         const auto here = std::filesystem::current_path(ec);
         return ec ? std::string() : here.string();
     };
+    bool confirmCloseBusy = true; // settings.json "confirmClose"
     {
         // Closing a pane, tab or the window asks when a program other than the shell runs there.
         wv.setBusyProbe([&](PaneId id) -> std::optional<std::string> {
             NativePane *pane = workspace.pane(id);
-            if (!pane || pane->finished()) {
+            if (!pane || pane->finished() || !confirmCloseBusy) {
                 return std::nullopt;
             }
             if (smokeBusy) {
@@ -921,6 +927,69 @@ int runPtyFrontend(const char *font,
     const auto notify = [&](const std::string &text) {
         linkError = text; // Shown in the window title, like the other errors of the app.
     };
+    // The settings file (docs/tasks/settings.md): read now, looked at about
+    // once a second, reloaded when it changed. It belongs to this computer,
+    // also with --daemon-host. A theme colours the frame and tints the
+    // terminals' background; a window connected to another computer names it in
+    // every tab.
+    settings::RealFileSystem settingsFs;
+    settings::SettingsWatcher settingsWatch(
+        settingsFs,
+        settings::settingsPath(std::getenv("XDG_CONFIG_HOME"),
+                               std::getenv("HOME")),
+        [] {
+            return std::int64_t(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch())
+                    .count());
+        });
+    const std::string computerName =
+        [&] { // "user@host" is "host" to the settings and in the tabs.
+            const auto at = daemonOptions.host.rfind('@');
+            return at == std::string::npos ? daemonOptions.host
+                                           : daemonOptions.host.substr(at + 1);
+        }();
+    Rgb8 themeBackground = Palette().background;
+    const auto applySettings = [&] {
+        const auto &current = settingsWatch.settings();
+        const auto &theme =
+            themes::theme(themes::themeIdFor(current, computerName));
+        wv.setStripPalette(themes::stripPalette(theme));
+        wv.setHostLabel(computerName);
+        themeBackground = themes::terminalBackground(theme);
+        // The command line wins over the file where it was given (the default
+        // is "icon").
+        TabActivity mode = TabActivity::Icon;
+        parseTabActivity(daemonOptions.tabActivity != "icon"
+                             ? daemonOptions.tabActivity
+                             : current.choice("tabActivity"),
+                         mode);
+        wv.setTabActivity(mode);
+        gScrollbackRows = std::size_t(current.integer("scrollbackRows"));
+        confirmCloseBusy = current.flag("confirmClose");
+    };
+    const auto reportSettings = [&](settings::SettingsWatcher::Event event,
+                                    bool explicitReload) {
+        if (event == settings::SettingsWatcher::Event::Failed) {
+            notify("settings.json: " + settingsWatch.error() +
+                   " (the old values stay)");
+        }
+        else if (event == settings::SettingsWatcher::Event::Changed ||
+                 explicitReload) {
+            applySettings();
+            notify(settingsWatch.warnings().empty()
+                       ? std::string()
+                       : "settings.json: " + settingsWatch.warnings().front());
+        }
+    };
+    if (!settingsWatch.error().empty()) {
+        notify("settings.json: " + settingsWatch.error() +
+               " (using the defaults)");
+    }
+    applySettings();
+    if (!settingsWatch.warnings().empty()) {
+        notify("settings.json: " + settingsWatch.warnings().front());
+    }
     if (daemonOptions.enabled) {
         wv.setShareProbe([&](PaneId id) {
             const NativePane *pane = workspace.pane(id);
@@ -1206,9 +1275,30 @@ int runPtyFrontend(const char *font,
     // What the palette offers besides the built-in commands, from the window's state right now.
     const auto paletteExtra = [&] {
         std::vector<CommandEntry> extra = {
-            {"session.open", "Open session...", "Choose a saved session to open", std::nullopt, {}, {}},
-            {"session.save", "Save session as...", "Save the tabs and panes under a name", std::nullopt, {}, {}},
-            {"tab.rename", "Rename tab...", "Give the tab a name that stays", std::nullopt, {}, {}},
+            {"session.open",
+             "Open session...",
+             "Choose a saved session to open",
+             std::nullopt,
+             {},
+             {}},
+            {"session.save",
+             "Save session as...",
+             "Save the tabs and panes under a name",
+             std::nullopt,
+             {},
+             {}},
+            {"tab.rename",
+             "Rename tab...",
+             "Give the tab a name that stays",
+             std::nullopt,
+             {},
+             {}},
+            {"settings.reload",
+             "Reload settings",
+             "Read settings.json again now",
+             std::nullopt,
+             {},
+             {}},
         };
         for (auto &entry : sessionCommandEntries()) {
             extra.push_back(std::move(entry));
@@ -1293,6 +1383,15 @@ int runPtyFrontend(const char *font,
                 else if (const auto offer = offerText(program.saved); !offer.empty()) {
                     deliver(program.pane, offer, rerunInput(program.saved));
                 }
+            }
+        }
+        else if (id == "settings.reload") {
+            const auto event = settingsWatch.reloadNow();
+            reportSettings(event, true);
+            if (event == settings::SettingsWatcher::Event::None &&
+                settingsWatch.error().empty() &&
+                settingsWatch.warnings().empty()) {
+                notify(""); // Read again, nothing to say.
             }
         }
         else if (id == "session.open" && colon == std::string::npos) {
@@ -2099,6 +2198,17 @@ int runPtyFrontend(const char *font,
     while (running) {
         ++iterations;
         skipText = false;
+        reportSettings(settingsWatch.poll(), false);
+        workspace.forEachPane(
+            [&](PaneId,
+                NativePane &pane,
+                bool) { // Panes made since, and a theme that changed.
+                const auto &now = pane.v.palette().background;
+                if (now.r != themeBackground.r || now.g != themeBackground.g ||
+                    now.b != themeBackground.b) {
+                    pane.v.setDefaultBackground(themeBackground);
+                }
+            });
         if (gShutdownSignal != 0) {
             keepTerminals = true; // The terminal or session went away, not the owner's wish to end them.
             break; // SIGTERM or SIGHUP: leave through the shutdown save below, no question asked.
@@ -2634,7 +2744,7 @@ int runPtyFrontend(const char *font,
             hitState.set(borderless::geometryOf(
                 window.get(), plan.strip, plan.stripRect.h, backend.cellWidth(), drawableSize().first, insetNow().left));
         }
-        const Palette stripPalette;
+        const Palette stripPalette = wv.stripPalette();
         std::optional<CellBuffer> stripBuffer;
         std::optional<RenderFrame> stripFrame;
         if (plan.stripRect.h > 0) {

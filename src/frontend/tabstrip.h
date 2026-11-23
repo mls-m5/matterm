@@ -192,12 +192,20 @@ inline Rgb8 mix(Rgb8 a, Rgb8 b, int percentOfB) {
 
 inline Colors colors(const Palette &p) {
     Colors c;
-    c.stripBg = mix(p.background, p.foreground, 8);
-    c.tabBg = mix(p.background, p.foreground, 18);
-    c.tabFg = mix(p.foreground, p.background, 25);
+    if (p.frame) { // A theme: the strip is its colour, the tabs a little
+                   // lighter, the text a little brighter.
+        c.stripBg = *p.frame;
+        c.tabBg = mix(*p.frame, p.foreground, 12);
+        c.tabFg = mix(p.foreground, p.background, 10);
+    }
+    else {
+        c.stripBg = mix(p.background, p.foreground, 8);
+        c.tabBg = mix(p.background, p.foreground, 18);
+        c.tabFg = mix(p.foreground, p.background, 25);
+    }
     c.activeBg = p.foreground;
     c.activeFg = p.background;
-    c.dim = mix(p.foreground, p.background, 55);
+    c.dim = mix(p.foreground, p.background, p.frame ? 35 : 55);
     c.mark = {255, 190, 60};
     c.activeMark = {150, 90, 0};
     c.working = {90, 200, 120};
@@ -281,6 +289,53 @@ struct WindowButtons {
     bool shown = false;
     bool maximized = false; // The middle button then restores (kRestoreIcon).
 };
+
+// Where the name of the computer goes (and the one place to change when it
+// moves): the gap of the strip, between the last tab (or its new-tab button)
+// and the share, palette and window buttons, right-aligned so that it sits next
+// to the buttons. In a muted colour of the theme; shortened with an ellipsis to
+// fit; nothing when there is no room for at least three characters. No click
+// region is added: the gap is where the window is dragged.
+inline void placeComputerName(TabStrip &strip,
+                              const std::string &name,
+                              const Palette &palette) {
+    if (name.empty() || strip.cells.empty()) {
+        return;
+    }
+    const int columns = int(strip.cells.size());
+    int begin = 0, end = columns;
+    for (const auto &r : strip.regions) {
+        switch (r.hit.kind) {
+        case StripHit::Kind::Tab:
+        case StripHit::Kind::Close:
+        case StripHit::Kind::NewTab:
+        case StripHit::Kind::ScrollLeft:
+        case StripHit::Kind::ScrollRight:
+            begin = std::max(begin, r.end);
+            break;
+        default: // The buttons at the right.
+            end = std::min(end, r.begin);
+            break;
+        }
+    }
+    constexpr int kMargin = 1; // A blank each side.
+    const int room = end - begin - 2 * kMargin;
+    if (room < 3) {
+        return;
+    }
+    const auto text = tabstrip_detail::cut(tabstrip_detail::decode(name), room);
+    const auto colours = tabstrip_detail::colors(palette);
+    // A muted colour of the theme: its own colour lifted toward the text, so
+    // that it reads on the strip.
+    const Rgb8 muted =
+        palette.frame
+            ? tabstrip_detail::mix(*palette.frame, palette.foreground, 55)
+            : colours.dim;
+    int at = end - kMargin - int(text.size());
+    for (const char32_t c : text) {
+        strip.cells[std::size_t(at++)] = FChar{c, muted, colours.stripBg};
+    }
+}
 
 inline TabStrip buildTabStrip(const std::vector<TabInfo> &tabs,
                               int columns,
