@@ -58,3 +58,9 @@ clang-tidy, the integrator runs it), small commits, feature descriptions in
   terminals. Window and `--attach-tty` pick: one socket -> it; several -> the newest compatible one,
   with a question when more than one fits; `--daemon-socket` always wins. "Open next to the old one"
   = a new daemon on its own socket; "stop the old one" names it by socket.
+- Stray daemons (owner, 2026-11-23): never kill terminals automatically. When the window or
+  `--attach-tty` starts and more than one daemon runs, or one of an older version, show a one-line
+  notice ("2 other daemons run (1 old): --daemon-list"). `--daemon-list` also shows how long since
+  each daemon had a client. "Stop daemon..." (palette) and `--daemon-stop` ask first and name how
+  many terminals run (and the programs when known). Empty daemons already leave by themselves after
+  `--idle-seconds` (60 s) with no sessions and no client.
