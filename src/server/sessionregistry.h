@@ -45,7 +45,13 @@ public:
     void onMessage(const Attachment &, std::string_view, protocol::Time now);
     void detach(const Attachment &, protocol::Time now);
     void fail(const Attachment &, protocol::Time now);
-    void tick(protocol::Time now);
+    struct TickMetrics {
+        std::uint64_t ptyBytes = 0; // Fresh PTY reads only, never replay bytes.
+        std::uint64_t windowBlockedSessions =
+            0; // Running sessions with zero output budget.
+    };
+    // Optional metrics are reset per tick; the default path adds no clocks.
+    void tick(protocol::Time now, TickMetrics *metrics = nullptr);
     std::optional<protocol::Time> nextDeadline() const;
     void closeAll(protocol::Time now);
     // What a control client may know about a session. No terminal contents.

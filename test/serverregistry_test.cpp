@@ -69,6 +69,54 @@ server::RegistryConfig persistent() {
 }
 } // namespace
 TEST_SUIT_BEGIN(ServerRegistry)
+TEST_CASE("Optional tick metrics count fresh PTY bytes once, never replay") {
+    server::SessionRegistry registry(
+        persistent(), process("printf ready; exec sleep 30"), {});
+    Sink first, second;
+    auto a = registry.attach(hello(), first.transport(), now());
+    EXPECT(a.has_value());
+    std::uint64_t bytes = 0;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (first.output() != "ready" &&
+           std::chrono::steady_clock::now() < deadline) {
+        server::SessionRegistry::TickMetrics metrics{999, 999};
+        registry.tick(now(), &metrics);
+        bytes += metrics.ptyBytes;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT(first.output() == "ready");
+    EXPECT(bytes == 5u);
+    registry.detach(*a, now());
+    auto b = registry.attach(hello(a->id), second.transport(), now());
+    EXPECT(b.has_value());
+    server::SessionRegistry::TickMetrics replay{999, 999};
+    registry.tick(now(), &replay);
+    EXPECT(second.output() == "ready");
+    EXPECT(replay.ptyBytes == 0u);
+    registry.closeAll(now());
+    EXPECT(until(registry, [&] { return registry.size() == 0; }));
+}
+TEST_CASE("Tick metrics sample exhausted output windows without claiming "
+          "pending PTY data") {
+    protocol::SessionConfig config;
+    config.outputWindow = 5;
+    server::SessionRegistry registry(
+        persistent(), process("printf ready; exec sleep 30"), config);
+    Sink sink;
+    auto a = registry.attach(hello(), sink.transport(), now());
+    EXPECT(a.has_value());
+    EXPECT(until(registry, [&] { return sink.output() == "ready"; }));
+    server::SessionRegistry::TickMetrics metrics;
+    registry.tick(now(), &metrics);
+    EXPECT(metrics.ptyBytes == 0u);
+    EXPECT(metrics.windowBlockedSessions == 1u);
+    registry.onMessage(*a, wire(protocol::Ack{5}), now());
+    registry.tick(now(), &metrics);
+    EXPECT(metrics.windowBlockedSessions == 0u);
+    registry.closeAll(now());
+    EXPECT(until(registry, [&] { return registry.size() == 0; }));
+}
 TEST_CASE("Detached timeout zero is unlimited and only live attachment timers "
           "remain") {
     auto config = persistent();

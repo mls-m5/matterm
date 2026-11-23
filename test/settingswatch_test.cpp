@@ -72,6 +72,22 @@ TEST_CASE("The file is in $XDG_CONFIG_HOME/matterm, else ~/.config/matterm") {
     EXPECT_EQ(settingsPath(nullptr, nullptr), std::string());
 }
 
+TEST_CASE(
+    "Saving a sparse file writes defaults and unknowns with idempotent text") {
+    FakeFs fs;
+    fs.put(kPath, R"({"future":{"x":2.50},"theme":"blue"})");
+    SettingsWatcher watcher(fs, kPath, [] { return 0; });
+    std::string error;
+    EXPECT(watcher.save(watcher.settings(), error));
+    const auto first = fs.files[kPath].text;
+    EXPECT(first.find("  \"confirmClose\": true") != std::string::npos);
+    EXPECT(first.find("\"confirmClose\"") < first.find("\"future\""));
+    EXPECT(first.find("2.50") != std::string::npos);
+    EXPECT(watcher.save(watcher.settings(), error));
+    EXPECT_EQ(fs.files[kPath].text, first);
+    EXPECT(watcher.settings().choice("theme") == "blue");
+}
+
 TEST_CASE("No file: the defaults, and nothing to report") {
     FakeFs fs;
     std::int64_t now = 0;

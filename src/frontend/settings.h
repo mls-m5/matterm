@@ -84,6 +84,13 @@ inline const std::vector<Definition> &definitions() {
          100,
          100000,
          true},
+        {"computerNamePlacement",
+         "Computer name in the tab strip",
+         "Where the name of another computer is written in the strip's gap: in "
+         "the middle, next to the tabs, or against the buttons.",
+         Type::Choice,
+         {"center", "left", "right"},
+         "center"},
         {"confirmClose",
          "Confirm closing a busy pane",
          "Ask before closing a pane that runs a program other than the shell.",
@@ -294,9 +301,37 @@ public:
         return true;
     }
 
-    // The whole document (unknown keys included), indented.
+    // Rewrite the whole file in definition order, including effective defaults.
+    // Unknown top-level members follow the known settings in their original
+    // order. Build a new document so saving never mutates the loaded state.
     std::string toText() const {
-        return json::dump(doc_, true);
+        auto out = json::Value::object();
+        for (const auto &d : definitions()) {
+            switch (d.type) {
+            case Type::Choice:
+                out.set(d.key, json::Value::text(choice(d.key)));
+                break;
+            case Type::Bool:
+                out.set(d.key, json::Value::boolean(flag(d.key)));
+                break;
+            case Type::Integer:
+                out.set(d.key, json::Value::number(integer(d.key)));
+                break;
+            case Type::Computers: {
+                auto computers = json::Value::object();
+                for (const auto &name : computerNames())
+                    computers.set(name,
+                                  json::Value::text(computerChoice(name)));
+                out.set(d.key, std::move(computers));
+                break;
+            }
+            }
+        }
+        for (const auto &member : doc_.members()) {
+            if (!definition(member.first))
+                out.set(member.first, member.second);
+        }
+        return json::dump(out, true);
     }
 
     // The values that matter are equal (what else the file holds does not

@@ -115,12 +115,17 @@ struct Entry : SessionHost {
             current->shutdown(now);
         pty.terminateProcess();
     }
-    void pump(Time now, std::uint64_t serial) {
+    void pump(Time now,
+              std::uint64_t serial,
+              SessionRegistry::TickMetrics *metrics) {
         if (ended)
             return;
         auto current = session;
         if (attached && current) {
             current->tick(now);
+            if (metrics && current->state() == ServerSession::State::Running &&
+                current->outputBudget() == 0)
+                ++metrics->windowBlockedSessions;
             if (replayAt < ring.end() &&
                 current->state() == ServerSession::State::Running) {
                 // Up to the window in one go (each message is at most
@@ -153,6 +158,8 @@ struct Entry : SessionHost {
         pty.pump(budget,
                  now,
                  {[&](std::string_view bytes) {
+                      if (metrics)
+                          metrics->ptyBytes += bytes.size();
                       ring.append(now, bytes, serial);
                       if (attached && current)
                           current->onProcessOutput(bytes, now);
@@ -384,14 +391,16 @@ void SessionRegistry::fail(const Attachment &a, Time now) {
             current->onTransportClosed(now);
     }
 }
-void SessionRegistry::tick(Time now) {
+void SessionRegistry::tick(Time now, TickMetrics *metrics) {
+    if (metrics)
+        *metrics = {};
     for (auto it = impl_->entries.begin(); it != impl_->entries.end();) {
         auto entry = it->second;
         if (!entry->attached && !entry->closing &&
             impl_->config.detachedTimeout.count() &&
             now - entry->detachedAt >= impl_->config.detachedTimeout)
             entry->stop(now);
-        entry->pump(now, ++impl_->serial);
+        entry->pump(now, ++impl_->serial, metrics);
         impl_->trim();
         if (!entry->ended) {
             ++it;

@@ -695,6 +695,7 @@ does not know are written back as they were. The definitions (key, text, type, d
 | `tabActivity` | icon, pulse, off | icon (the command line wins where given) |
 | `windowFrame` | own, system | own (read at start; the command line wins) |
 | `scrollbackRows` | 100..100000 | 1000 (terminals made afterwards) |
+| `computerNamePlacement` | center, left, right | center |
 | `confirmClose` | true, false | true |
 
 A value that does not fit is a warning and its default is used; a file that is not JSON is reported (in the window title) and the
@@ -709,7 +710,7 @@ strip's colour: `Palette::frame`) and tints the terminals' default background by
 programs' own colours are not touched. The themes differ in **hue only** (about the brightness of grey, today's look; tests keep the
 hues apart and the text on the strip and on the terminal readable). Colour is not the only sign of where a window is connected: for
 terminals on another computer its **name is written in the strip's gap** (between the last tab and the share button), muted in the
-theme's colour, not in the tab's name (`placeComputerName` in `tabstrip.h`, the one place to change when it moves).
+theme's colour, not in the tab's name (`placeComputerName` in `tabstrip.h`, the one place to change when it moves; `computerNamePlacement` puts it in the middle of the gap (default), next to the tabs or against the buttons, applied live).
 
 **Per computer.** The local computer has the user's theme. A computer reached with `--daemon-host NAME` (the part after `user@`)
 has its override from `computers`, else an automatic choice: a hash of the lower-cased name picks among the themes other than the

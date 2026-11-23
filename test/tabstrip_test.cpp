@@ -128,7 +128,7 @@ TEST_CASE("The computer's name is written in the gap of the strip, muted, and "
     auto strip = buildTabStrip(
         tabs, 80, themed, 0, true, ShareButton{true, 0}, WindowButtons{});
     const auto before = strip;
-    placeComputerName(strip, "server", themed);
+    placeComputerName(strip, "server", themed, NamePlacement::Right);
     EXPECT(text(strip).find("server") != std::string::npos);
     // Right-aligned in the gap, before the share button; titles, regions and
     // every other cell stay.
@@ -164,7 +164,8 @@ TEST_CASE("The name is shortened to fit the gap, and left out when there is no "
     {
         auto strip = buildTabStrip(
             tabs, 40, p, 0, true, ShareButton{true, 0}, WindowButtons{});
-        placeComputerName(strip, "a-very-long-computer-name-indeed", p);
+        placeComputerName(
+            strip, "a-very-long-computer-name-indeed", p, NamePlacement::Right);
         const auto shown = text(strip);
         EXPECT(shown.find("a-very-long-computer-name-indeed") ==
                std::string::npos);
@@ -180,13 +181,52 @@ TEST_CASE("The name is shortened to fit the gap, and left out when there is no "
                                    ShareButton{true, 0},
                                    WindowButtons{});
         const auto before = text(strip);
-        placeComputerName(strip, "server", p); // No gap left.
+        placeComputerName(
+            strip, "server", p, NamePlacement::Center); // No gap left.
         EXPECT_EQ(text(strip), before);
     }
     auto strip = buildTabStrip(tabs, 80, p);
     const auto before = text(strip);
-    placeComputerName(strip, "", p);
+    placeComputerName(strip, "", p, NamePlacement::Left);
     EXPECT_EQ(text(strip), before);
+}
+
+TEST_CASE("The name sits at the left of the gap, in the middle, or at the "
+          "right, by the setting") {
+    Palette p;
+    const auto tabs = makeTabs(1, 0);
+    const auto base = buildTabStrip(
+        tabs, 80, p, 0, true, ShareButton{true, 0}, WindowButtons{});
+    int gapBegin = 0, gapEnd = 80;
+    for (const auto &r : base.regions) {
+        if (r.hit.kind == Kind::Tab || r.hit.kind == Kind::Close ||
+            r.hit.kind == Kind::NewTab) {
+            gapBegin = std::max(gapBegin, r.end);
+        }
+        else {
+            gapEnd = std::min(gapEnd, r.begin);
+        }
+    }
+    const auto positionOf = [&](NamePlacement placement) {
+        auto strip = base;
+        placeComputerName(strip, "server", p, placement);
+        return int(text(strip).find("server"));
+    };
+    EXPECT_EQ(positionOf(NamePlacement::Left),
+              gapBegin + 1); // A blank after the last tab.
+    EXPECT_EQ(positionOf(NamePlacement::Right),
+              gapEnd - 1 - 6); // A blank before the buttons.
+    const int left = gapBegin + 1, right = gapEnd - 1 - 6;
+    EXPECT_EQ(positionOf(NamePlacement::Center),
+              left + (right - left) / 2); // Roughly in the middle.
+    EXPECT(positionOf(NamePlacement::Left) < positionOf(NamePlacement::Center));
+    EXPECT(positionOf(NamePlacement::Center) <
+           positionOf(NamePlacement::Right));
+    EXPECT(parseNamePlacement("center") == NamePlacement::Center);
+    EXPECT(parseNamePlacement("left") == NamePlacement::Left);
+    EXPECT(parseNamePlacement("right") == NamePlacement::Right);
+    EXPECT(parseNamePlacement("middle") ==
+           NamePlacement::Center); // Unknown: the default.
 }
 
 TEST_CASE("Widths of characters") {

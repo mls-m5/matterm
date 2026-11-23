@@ -96,3 +96,36 @@ verification recipe, rules). The owner speaks Swedish (answer him in Swedish); t
   and the message points at it. Never claim something was verified that was only built.
 - The integrator merges `main` state back to you via your own `git merge main`; tell it if a merge needed fixes.
 - Findings in code you do not own: a failing test or a precise note to the integrator, not a rewrite.
+
+## Status at the pause (2026-11-23, branch `agent2`, everything committed; written for after the pause)
+
+Everything below is merged into main or ready on branch `agent2` (see `git log`), except the two items under "Not started".
+Build green; ctest green except that `matmux_pty` needs ~40 s and times out (60 s) when run in parallel with the whole suite
+(`ctest -j6`): run it alone. `fakeos` is stale until `make` after adding files.
+
+**Done and tested since the last note** (each has a file in `docs/handover/features/agent2-*.md`): the shared tty layer (`src/tty`, snapshot,
+Session), daemon versions / several daemons / `matmux` (renamed from matterm-attach) / list and stop / install names and cleanup,
+`CreateTerminal`, `MATTERM_SESSION`, `EndSession`, replay performance (the daemon sent 16 KiB per 10 ms; now the window's worth;
+flood drawing at most 10x/s in the window and matmux; `docs/CPU.md`), the passthrough snapshot (`src/tty/matterm/snapshot.*`),
+settings (`jsonvalue.h`, `settings.h`, `settingsfile.h`, `settingswatch.h`, `themes.h`, window wiring, `computerNamePlacement`
+centre/left/right, name in the strip's gap via `placeComputerName`), and the JSON readers requirements test + table
+(`test/jsonreaders_test.cpp`, `agent2-json-readers.md`; jsonvalue passes all 28, sessionsnapshot's reader 17/23, fast-json 15/28).
+
+**Not started** (owner decisions already given in `docs/tasks/settings.md` Addendum 2 and `docs/tasks/json-readers.md` Addendum 2, and `docs/tasks/perf-log.md`):
+1. *Settings file formatting*: `Settings::toText()`/`SettingsWatcher::save` must write the file whole and always formatted, every known setting with its
+   value (defaults included), unknown members after the known ones, no comments; a second save changes nothing (tests first).
+   Today toText() writes the loaded document with only the keys that were set; see `src/frontend/settings.h`.
+2. *Daemon side of the performance log* (`docs/tasks/perf-log.md`): pump rounds, bytes, clients, backpressure, CPU, ping, plus the shared log writer
+   and verdict. agent3 (xmnca) proposed the header: `perf::Log` (env `MATTERM_PERF_LOG`/`--perf-log`, `line()`, summary at destruction),
+   `perf::Window` (add(ms), avg/p95/max/count per second), `perf::verdict(Numbers)` -> "network | daemon | client | host terminal"; I owe an answer
+   (accept, put it in `src/perflog.h`, namespace `perf`). Context: the owner sees heavy lag starting neovim over the LAN. The replay fix above is not about that.
+
+**Open questions for the owner**: the theme colours (RGB per theme) have never been seen on a screen (hue only, about grey's brightness);
+the settings TUI is agent3's. JSON readers: A (jsonvalue.h is the one client reader, sessionsnapshot moves to it) / B (everything on fast-json, extended
+upstream) / C (leave): my recommendation was A now, B later if one library is wanted; the owner has said writing is not centralised and fast-json gets no
+comment mode now. Checkpoint on detach (replay step 3) was left as alternatives A/B/C (recommendation: not needed now; B = checkpoint at detach only,
+memory only, if slow links matter).
+
+**Gotchas learned**: never run `git worktree` from the sandbox (it pruned my worktree metadata once; repaired by recreating
+`.git/worktrees/agent2/{HEAD,commondir,gitdir}`); `git clang-format` can reflow a whole table when a line in it changes and makes later scripted
+edits miss; fast-json's nodes are views into the input text (keep it alive) and it needs C++20.

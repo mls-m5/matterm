@@ -122,3 +122,46 @@ The parser was never the cost; the rest was waiting for the daemon and drawing e
 themselves take the time: that is what a checkpoint would save (docs/tasks/replay-performance.md step 3).
 Reproduce: `cmake -DMATTERM_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_TYPE=Release`, then `matterm-replay-bench --mib 4 --round-ms 8`
 and `bench/replay-measure.py BUILD_DIR --mib 4` (`--mib 0` gives the idle baseline).
+
+## Opt-in daemon performance log
+
+Start the daemon with `matterm-daemon --perf-log /tmp/daemon-perf.log` (or
+`MATTERM_PERF_LOG=/tmp/daemon-perf.log matterm-daemon`). Logging is off by
+default. The native client is instrumented separately by agent3; the reported
+case is **nvim in a native matterm window via --daemon-host on the LAN**, not
+matmux in a host terminal. To reproduce, enable the client log, enable the
+remote daemon log on that computer, attach the native window, then start nvim
+and type/scroll. Record both logs during the same interaction. Setting the
+client environment does not configure a daemon already running remotely;
+`--ensure` reusing an existing daemon also does not turn on its logging. Do not
+stop a daemon with valuable live sessions merely to enable a measurement.
+
+The daemon writes a line about once per second, a final partial interval, and
+a summary. Roles and PIDs distinguish processes; elapsed times are local, not
+synchronized timestamps. Lines contain counts/timings only, never terminal
+contents or keystrokes. Use a local regular file; logging itself can cost I/O.
+CPU is process milliseconds / actual elapsed interval, so may exceed 100% for
+multithreaded processes. Bytes/messages count admitted outgoing and decoded
+incoming protocol frames including the 4-byte length prefix, not SSH/TCP bytes
+or acknowledged delivery. PTY bytes count fresh reads only (not replay);
+per-pump average/max and pump execution time exclude the 10/200-ms timer wait.
+
+`window_blocked_session_ms_sampled` integrates the previously sampled number
+of Running sessions with zero output budget over the interval between pump
+starts. It can exceed wall time for multiple sessions and does **not** prove
+output was waiting in the PTY. `stalls` counts such session observations.
+`socket_write_pending_ms` sums outstanding async socket-write durations across
+clients (split at reporting boundaries), not time proven blocked in the kernel.
+
+Statistics have bounded memory for arbitrarily long runs: 155 buckets per
+sample family, eight logarithmic buckets/octave from 0.125 to 65536 ms, with
+zero and overflow. Count/average/max use the original values; `p95_approx_ms`
+is the selected bucket upper bound (<9.1% bucket width above 0.125 ms;
+overflow uses observed maximum). Summaries merge buckets, never percentiles.
+The exit verdict is only a hint, and often `unknown`: RTT alone cannot
+separate network latency from daemon scheduling. Existing Ping/Pong is used
+without changing protocol versions; client RTT must remain asynchronous.
+
+Verified with a real local daemon/PTY and editor-like output, existing ping,
+partial-interval flushing, and registry replay/window regression tests. No
+real LAN/SSH/neovim or display measurements have been performed here.

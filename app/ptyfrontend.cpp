@@ -956,6 +956,8 @@ int runPtyFrontend(const char *font,
             themes::theme(themes::themeIdFor(current, computerName));
         wv.setStripPalette(themes::stripPalette(theme));
         wv.setHostLabel(computerName);
+        wv.setNamePlacement(
+            parseNamePlacement(current.choice("computerNamePlacement")));
         themeBackground = themes::terminalBackground(theme);
         // The command line wins over the file where it was given (the default
         // is "icon").

@@ -13,7 +13,23 @@ Uppgift: `docs/tasks/settings.md`, delen agent2. Texten och tabellerna: `docs/TA
   nyanser med avstånd, läsbar text (kontrast) och mörk ram.
 - **Tema per dator**: lokalt = användarens tema; `--daemon-host NAMN` = override i `computers`, annars automatiskt av namnet (samma namn ger alltid
   samma tema, aldrig det lokala). **Datorns namn skrivs som dämpad text i tabbradens lucka** (mellan sista fliken och Dela-knappen), inte i flikens namn; placeringen är en liten
-  funktion (`placeComputerName`).
+  funktion (`placeComputerName`) och ett val i filen, `computerNamePlacement`: `center` (standard, mitt i luckan), `left` (intill flikarna) eller `right` (intill knapparna), live som temat.
+
+## Canonical save format (2026-11-23 follow-up)
+
+`Settings::toText()` now writes every known setting with its effective value
+(defaults included), in definition order, indented by two spaces and ending
+with a newline. Unknown top-level members follow the known settings in their
+original order; their nested values and number spelling are retained. Invalid
+known scalar values become their defaults; invalid per-computer themes become
+`auto`. The loaded document is not mutated by serialization. Saving twice
+produces identical bytes. The existing watcher still uses its atomic writer
+and still refuses to overwrite broken JSON; no separate writer/API was added.
+Strict JSON remains required (no comment mode, no reader migration).
+
+Tests-first commit adds exact default-layout, effective-value normalization,
+unknown-member order/nesting and watcher save-idempotence regressions. Both
+settings test suites pass. No display or remote SSH verification was performed.
 
 ## Så provar du
 1. Skriv `{"theme":"blue"}` i `~/.config/matterm/settings.json`, starta matterm: blå ram. Ändra filen medan fönstret kör: ändras inom ca 1 s.

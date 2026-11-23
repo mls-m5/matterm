@@ -169,11 +169,12 @@ future goals, not implementation in the current parser slice.
 - [x] Record XDG text configuration, benchmark completion semantics, and deferred pipeline design in docs/SETTINGS_AND_PERFORMANCE.md.
 - [x] Implement approved 12-byte color-reference layout and dark palette before parallel color consumers (docs/COLORS.md).
 - [x] Allow a startup font-size override in the terminal application (`--font-size PIXELS`, default 18).
-- [ ] Select a text configuration parser/schema and implement typed settings, validation, and atomic saving.
+- [x] Typed JSON settings with validation and atomic saving; saves rewrite all known effective/default values in stable definition order, preserving unknown members afterwards. Settings TUI is a separate task.
 - [x] Add shared deterministic workloads and first internal parser/model Release measurements (docs/BENCHMARKS.md).
 - [x] Add POSIX stdout benchmark with separate write/DSR timings, bounded reply handling, and termios restoration tests.
 - [ ] Collect comparable external samples in matterm and other emulators on a real display before optimizing.
 - [ ] Review matperf concurrency before enabling optional coarse tracing.
+- [x] Opt-in shared bounded performance statistics/writer and daemon pump, PTY, wire-frame, sampled window-pressure and CPU logging (`--perf-log` / `MATTERM_PERF_LOG`); existing Ping/Pong retained. Client instrumentation is separate; LAN/native neovim diagnosis still requires real measurements. See docs/CPU.md.
 - [ ] Trial one isolated parallel task after agreeing on a base commit/API.
 
 ## Bundled Font

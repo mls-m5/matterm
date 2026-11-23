@@ -111,7 +111,13 @@ TEST_CASE("A theme colours the strip, and the other computer's name is in the "
     red.frame = Rgb8{94, 33, 37};
     r.view.setStripPalette(red);
     r.view.setHostLabel("server");
+    r.view.setNamePlacement(NamePlacement::Right);
     const auto after = r.view.plan();
+    const auto rightAt = text(after).find("server");
+    r.view.setNamePlacement(NamePlacement::Left);
+    EXPECT(text(r.view.plan()).find("server") <
+           rightAt); // The setting moves it.
+    r.view.setNamePlacement(NamePlacement::Right);
     EXPECT(text(after).find("server") !=
            std::string::npos); // Written as text...
     EXPECT(text(after).find("server: t1") ==

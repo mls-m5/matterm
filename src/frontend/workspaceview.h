@@ -74,6 +74,9 @@ struct ViewConfig {
     // when it is not this one: the colour of a theme is not the only sign of
     // where a window is connected (placeComputerName, tabstrip.h).
     std::string hostLabel;
+    NamePlacement namePlacement =
+        NamePlacement::Center; // Where in the gap (settings.json
+                               // computerNamePlacement).
 };
 
 // One pane as it should be drawn.
@@ -204,7 +207,10 @@ public:
                 ShareButton{config_.shareButton && probeShared_,
                             sharedInActiveTab()},
                 WindowButtons{config_.windowButtons, windowMaximized_});
-            placeComputerName(out.strip, config_.hostLabel, config_.palette);
+            placeComputerName(out.strip,
+                              config_.hostLabel,
+                              config_.palette,
+                              config_.namePlacement);
         }
         const Layout layout = activeLayout();
         out.dividers = layout.dividers;
@@ -547,6 +553,9 @@ public:
     bool prefixWaiting() const { return prefix_.waiting(); }
     void setStripPalette(const Palette &palette) {
         config_.palette = palette;
+    }
+    void setNamePlacement(NamePlacement placement) {
+        config_.namePlacement = placement;
     }
     void setHostLabel(std::string label) {
         config_.hostLabel = std::move(label);

@@ -1,4 +1,5 @@
 #include "daemon.h"
+#include "../perflog.h"
 
 #include "control.h"
 #include "framing.h"
@@ -66,6 +67,15 @@ struct Daemon::Impl : std::enable_shared_from_this<Impl> {
     std::unique_ptr<server::SessionRegistry> registry;
     std::vector<std::weak_ptr<Connection>> connections;
     unsigned clients = 0;
+    std::optional<perf::Writer> perfLog;
+    perf::Second perfSecond;
+    Clock::time_point perfSince{}, perfPumpAt{};
+    double perfCpu = 0;
+    std::uint64_t previousBlockedSessions = 0;
+    bool measuring() const {
+        return perfLog && perfLog->enabled();
+    }
+    void flushPerf(Clock::time_point now);
     int lockFd = -1;
     bool socketBound = false;
     bool stopping = false;
@@ -145,6 +155,8 @@ private:
         });
     }
     void onFrame(std::string_view frame) {
+        if (d_.measuring())
+            d_.perfSecond.counters.in(frame.size() + 4);
         if (mode_ == Mode::Terminal) {
             d_.registry->onMessage(*attachment_, frame, timeNow());
             return;
@@ -407,6 +419,8 @@ private:
         }
         std::string framed;
         if (!encodeFrame(payload, framed)) return kill();
+        if (d_.measuring())
+            d_.perfSecond.counters.out(framed.size());
         queuedBytes_ += framed.size();
         queue_.push_back(std::move(framed));
         if (!writing_) write();
@@ -418,10 +432,19 @@ private:
             return;
         }
         writing_ = true;
+        if (d_.measuring())
+            writeStarted_ = Clock::now();
         net::async_write(socket_, net::buffer(queue_.front()), [self = shared_from_this()](auto ec, std::size_t) {
             if (ec) {
                 self->disconnected();
                 return;
+            }
+            if (self->d_.measuring() && self->writeStarted_) {
+                self->d_.perfSecond.counters.backpressureMs +=
+                    std::chrono::duration<double, std::milli>(
+                        Clock::now() - *self->writeStarted_)
+                        .count();
+                self->writeStarted_.reset();
             }
             self->queuedBytes_ -= self->queue_.front().size();
             self->queue_.pop_front();
@@ -481,6 +504,7 @@ private:
     stream::socket socket_;
     net::steady_timer timer_;
     FrameDecoder decoder_;
+    std::optional<Clock::time_point> writeStarted_;
     std::array<char, 8192> chunk_{};
     std::deque<std::string> queue_;
     std::size_t queuedBytes_ = 0;
@@ -571,6 +595,15 @@ bool Daemon::Impl::start(std::string &error) {
         return false;
     }
     registry = std::make_unique<server::SessionRegistry>(config.registry, config.process, protocol::SessionConfig{});
+    perfLog.emplace(config.perfLogPath, "daemon");
+    if (!perfLog->error().empty())
+        (void)std::fprintf(stderr,
+                           "matterm-daemon: performance log: %s\n",
+                           perfLog->error().c_str());
+    if (measuring()) {
+        perfSince = perfPumpAt = Clock::now();
+        perfCpu = perf::processCpuMs();
+    }
     pump.emplace(ioc);
     (void)::signal(SIGPIPE, SIG_IGN);
     signals.emplace(ioc, SIGINT, SIGTERM);
@@ -610,10 +643,30 @@ void Daemon::Impl::schedulePump() {
     pump->expires_after(std::chrono::milliseconds(busy ? 10 : 200));
     pump->async_wait([this](const boost::system::error_code &ec) {
         if (ec || stopping) return;
+        const bool measure = measuring();
+        const auto begin = measure ? Clock::now() : Clock::time_point{};
+        server::SessionRegistry::TickMetrics metrics;
         try {
-            registry->tick(timeNow());
+            registry->tick(timeNow(), measure ? &metrics : nullptr);
         }
         catch (const std::exception &) {
+        }
+        if (measure) {
+            const auto end = Clock::now();
+            perfSecond.pump.add(
+                std::chrono::duration<double, std::milli>(end - begin).count());
+            perfSecond.counters.ptyBytes += metrics.ptyBytes;
+            perfSecond.counters.largestPtyRound =
+                std::max(perfSecond.counters.largestPtyRound, metrics.ptyBytes);
+            perfSecond.counters.windowBlockedSessionMs +=
+                double(previousBlockedSessions) *
+                std::chrono::duration<double, std::milli>(begin - perfPumpAt)
+                    .count();
+            perfSecond.counters.stalls += metrics.windowBlockedSessions;
+            previousBlockedSessions = metrics.windowBlockedSessions;
+            perfPumpAt = begin;
+            if (end - perfSince >= std::chrono::seconds(1))
+                flushPerf(end);
         }
         if (registry->size() == 0 && clients == 0) {
             if (!idleSince) idleSince = Clock::now();
@@ -630,6 +683,38 @@ void Daemon::Impl::schedulePump() {
     });
 }
 
+void Daemon::Impl::flushPerf(Clock::time_point now) {
+    if (!measuring())
+        return;
+    const double elapsed =
+        std::chrono::duration<double>(now - perfSince).count();
+    if (elapsed <= 0)
+        return;
+    perfSecond.counters.windowBlockedSessionMs +=
+        double(previousBlockedSessions) *
+        std::chrono::duration<double, std::milli>(now - perfPumpAt).count();
+    perfPumpAt = now;
+    // Split outstanding asynchronous writes at the reporting boundary; these
+    // are socket-write pending durations, not proof of kernel backpressure.
+    for (auto &weak : connections) {
+        if (const auto c = weak.lock(); c && c->writeStarted_) {
+            perfSecond.counters.backpressureMs +=
+                std::chrono::duration<double, std::milli>(now -
+                                                          *c->writeStarted_)
+                    .count();
+            c->writeStarted_ = now;
+        }
+    }
+    const double cpu = perf::processCpuMs();
+    perfSecond.cpuMs = std::max(0.0, cpu - perfCpu);
+    perfSecond.sessions = registry->size();
+    perfSecond.clients = clients;
+    perfLog->add(perfSecond, elapsed);
+    perfSecond = {};
+    perfSince = now;
+    perfCpu = cpu;
+}
+
 void Daemon::Impl::cutExposed(const std::string &id) {
     for (auto &w : connections) {
         if (const auto c = w.lock()) {
@@ -642,6 +727,10 @@ void Daemon::Impl::cutExposed(const std::string &id) {
 void Daemon::Impl::finish(ExitReason why) {
     if (stopping) return;
     stopping = true;
+    if (measuring()) {
+        flushPerf(Clock::now());
+        perfLog->finish();
+    }
     exitReason = why;
     boost::system::error_code ignored;
     acceptor->close(ignored);

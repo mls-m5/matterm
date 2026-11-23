@@ -290,15 +290,25 @@ struct WindowButtons {
     bool maximized = false; // The middle button then restores (kRestoreIcon).
 };
 
+enum class NamePlacement { Center, Left, Right };
+// "center", "left" or "right"; anything else: Center.
+inline NamePlacement parseNamePlacement(const std::string &text) {
+    return text == "left"    ? NamePlacement::Left
+           : text == "right" ? NamePlacement::Right
+                             : NamePlacement::Center;
+}
+
 // Where the name of the computer goes (and the one place to change when it
 // moves): the gap of the strip, between the last tab (or its new-tab button)
-// and the share, palette and window buttons, right-aligned so that it sits next
-// to the buttons. In a muted colour of the theme; shortened with an ellipsis to
-// fit; nothing when there is no room for at least three characters. No click
-// region is added: the gap is where the window is dragged.
+// and the share, palette and window buttons: in the middle, at the left (next
+// to the tabs) or at the right (against the buttons), as `placement` says (the
+// setting computerNamePlacement). In a muted colour of the theme; shortened
+// with an ellipsis to fit; nothing when there is no room for at least three
+// characters. No click region is added: the gap is where the window is dragged.
 inline void placeComputerName(TabStrip &strip,
                               const std::string &name,
-                              const Palette &palette) {
+                              const Palette &palette,
+                              NamePlacement placement) {
     if (name.empty() || strip.cells.empty()) {
         return;
     }
@@ -331,7 +341,12 @@ inline void placeComputerName(TabStrip &strip,
         palette.frame
             ? tabstrip_detail::mix(*palette.frame, palette.foreground, 55)
             : colours.dim;
-    int at = end - kMargin - int(text.size());
+    const int leftmost = begin + kMargin,
+              rightmost = end - kMargin - int(text.size());
+    int at = placement == NamePlacement::Left ? leftmost
+             : placement == NamePlacement::Right
+                 ? rightmost
+                 : leftmost + (rightmost - leftmost) / 2;
     for (const char32_t c : text) {
         strip.cells[std::size_t(at++)] = FChar{c, muted, colours.stripBg};
     }

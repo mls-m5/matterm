@@ -17,6 +17,8 @@ namespace mtd {
 
 struct DaemonConfig {
     std::string socketPath;
+    std::string perfLogPath; // Empty uses MATTERM_PERF_LOG, otherwise explicit
+                             // --perf-log.
     // True for the default location: the parent directory must be ours and 0700 (created if
     // missing). A --daemon-socket path may live anywhere, its directory is left alone.
     bool privateDirectory = true;

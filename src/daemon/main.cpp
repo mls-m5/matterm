@@ -15,7 +15,9 @@
 namespace {
 void usage() {
     (void)std::fputs("usage: matterm-daemon [--daemon-socket PATH] "
-                     "[--idle-seconds N] [--daemonize]\n"
+                     "[--idle-seconds N] [--daemonize] [--perf-log FILE]\n"
+                     "  --perf-log FILE       append diagnostic metrics (or "
+                     "MATTERM_PERF_LOG)\n"
                      "  --daemon-socket PATH  use PATH instead of "
                      "$XDG_RUNTIME_DIR/matterm/daemon-<version>.sock\n"
                      "  --idle-seconds N      exit after N seconds with no "
@@ -87,6 +89,9 @@ int main(int argc, char **argv) {
                 return 2;
             }
             config.idleExitSeconds = unsigned(v);
+        }
+        else if (a == "--perf-log" && i + 1 < argc) {
+            config.perfLogPath = argv[++i];
         }
         else if (a == "--daemonize") {
             detach = true;

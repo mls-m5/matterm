@@ -22,7 +22,8 @@ TEST_CASE("The definitions: unique keys, a default that is allowed, a text for "
     }
     EXPECT(keys.count("theme") && keys.count("computers") &&
            keys.count("tabActivity") && keys.count("windowFrame") &&
-           keys.count("scrollbackRows") && keys.count("confirmClose"));
+           keys.count("scrollbackRows") && keys.count("confirmClose") &&
+           keys.count("computerNamePlacement"));
 }
 
 TEST_CASE("No file: the defaults") {
@@ -32,6 +33,7 @@ TEST_CASE("No file: the defaults") {
     EXPECT_EQ(s.choice("windowFrame"), std::string("own"));
     EXPECT_EQ(s.integer("scrollbackRows"), 1000);
     EXPECT(s.flag("confirmClose"));
+    EXPECT_EQ(s.choice("computerNamePlacement"), std::string("center"));
     EXPECT_EQ(s.computerChoice("server"), std::string("auto"));
 }
 
@@ -88,7 +90,7 @@ TEST_CASE("A broken file is an error, there are no settings from it") {
     }
 }
 
-TEST_CASE("Unknown keys and values are written back as they were, in place") {
+TEST_CASE("Unknown keys and values follow all known settings when saved") {
     const std::string text =
         R"({"future":{"a":[1,2.5,null]},"theme":"red","note":"keep me"})";
     auto loaded = Settings::fromText(text);
@@ -104,9 +106,58 @@ TEST_CASE("Unknown keys and values are written back as they were, in place") {
     EXPECT(out.find("\"future\"") != std::string::npos &&
            out.find("2.5") != std::string::npos);
     EXPECT(out.find("keep me") != std::string::npos);
-    EXPECT(out.find("\"future\"") <
-           out.find("\"theme\"")); // Order kept; new keys at the end.
+    EXPECT(out.find("\"confirmClose\"") < out.find("\"future\""));
+    EXPECT(out.find("\"future\"") < out.find("\"note\""));
     EXPECT(out.find("\"theme\"") < out.find("\"tabActivity\""));
+}
+
+TEST_CASE(
+    "Saving writes every default with stable formatting in definition order") {
+    const std::string expected = "{\n"
+                                 "  \"theme\": \"grey\",\n"
+                                 "  \"computers\": {},\n"
+                                 "  \"tabActivity\": \"icon\",\n"
+                                 "  \"windowFrame\": \"own\",\n"
+                                 "  \"scrollbackRows\": 1000,\n"
+                                 "  \"computerNamePlacement\": \"center\",\n"
+                                 "  \"confirmClose\": true\n"
+                                 "}\n";
+    EXPECT_EQ(Settings().toText(), expected);
+    EXPECT_EQ(Settings::fromText(expected).settings.toText(), expected);
+    EXPECT_EQ(Settings::fromText(R"({"confirmClose":true,"theme":"grey"})")
+                  .settings.toText(),
+              expected);
+}
+
+TEST_CASE("Saving writes effective values and retains nested unknown values "
+          "after known ones") {
+    auto loaded = Settings::fromText(
+        R"({"future":{"nested":[null,1.20,"x"]},"theme":"invalid","scrollbackRows":5,"confirmClose":"yes","computers":{"srv":"invalid","box":"green"}})");
+    EXPECT(loaded.ok());
+    const auto text = loaded.settings.toText();
+    const auto again = Settings::fromText(text);
+    EXPECT(again.ok());
+    EXPECT(again.warnings.empty());
+    EXPECT(loaded.settings.sameValues(again.settings));
+    EXPECT_EQ(text, again.settings.toText());
+    EXPECT(text.find("1.20") != std::string::npos);
+    EXPECT(text.find("\"confirmClose\"") < text.find("\"future\""));
+    EXPECT(text.find("\"srv\": \"auto\"") != std::string::npos);
+}
+
+TEST_CASE(
+    "The place of the computer's name is a choice: centre, left or right") {
+    Settings s;
+    std::string error;
+    EXPECT(s.set("computerNamePlacement", "left", error));
+    EXPECT_EQ(s.choice("computerNamePlacement"), std::string("left"));
+    EXPECT(!s.set("computerNamePlacement", "top", error));
+    EXPECT(error.find("center, left, right") != std::string::npos);
+    const auto loaded =
+        Settings::fromText(R"({"computerNamePlacement":"middle"})");
+    EXPECT_EQ(loaded.warnings.size(), std::size_t(1));
+    EXPECT_EQ(loaded.settings.choice("computerNamePlacement"),
+              std::string("center"));
 }
 
 TEST_CASE("set checks the value against the definition") {
