@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <limits>
 #include <string>
 #include <sys/resource.h>
 #include <unistd.h>
@@ -184,8 +185,11 @@ private:
     std::size_t intervals_ = 0;
 };
 inline std::string number(double value, int decimals = 1) {
-    char buffer[64];
-    (void)std::snprintf(buffer, sizeof buffer, "%.*f", decimals, value);
+    // Enough for any finite double in fixed notation, including sign, decimal
+    // point and six fractional digits. Bound precision to keep logging cheap.
+    char buffer[std::numeric_limits<double>::max_exponent10 + 32];
+    const int precision = decimals < 0 ? 0 : decimals > 6 ? 6 : decimals;
+    (void)std::snprintf(buffer, sizeof buffer, "%.*f", precision, value);
     return buffer;
 }
 inline std::string formatSamples(const char *name, const Samples &samples) {
