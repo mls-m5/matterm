@@ -62,7 +62,10 @@ TEST_SUIT_BEGIN(CliOptions)
 
 TEST_CASE("The tables are the options the programs parse") {
     const std::pair<const char *, const char *> sources[] = {
-        {"matterm", "app/main.cpp"}, {"matterm-server", "src/server/config.cpp"}, {"matterm-daemon", "src/daemon/main.cpp"}};
+        {"matterm", "app/main.cpp"},
+        {"matterm-server", "src/server/config.cpp"},
+        {"matterm-daemon", "src/daemon/main.cpp"},
+        {"matmux", "app/matmux/main.cpp"}};
     for (const auto &[name, file] : sources) {
         const auto parsed = parsedFlags(slurp(file));
         const auto table = tableFlags(program(name));
@@ -75,7 +78,10 @@ TEST_CASE("The tables are the options the programs parse") {
 TEST_CASE("Every completed option is in the program's help text") {
     // matterm and the daemon print their usage from their main file; the server from its main.cpp.
     const std::pair<const char *, const char *> helps[] = {
-        {"matterm", "app/main.cpp"}, {"matterm-server", "src/server/main.cpp"}, {"matterm-daemon", "src/daemon/main.cpp"}};
+        {"matterm", "app/main.cpp"},
+        {"matterm-server", "src/server/main.cpp"},
+        {"matterm-daemon", "src/daemon/main.cpp"},
+        {"matmux", "app/matmux/main.cpp"}};
     for (const auto &[name, file] : helps) {
         const auto mentioned = mentionedFlags(slurp(file));
         std::set<std::string> shown;
@@ -116,7 +122,8 @@ TEST_CASE("The scripts complete values by kind: choices, files, folders, hosts")
     EXPECT(bash.find("complete -o filenames -F _matterm matterm") != std::string::npos);
     EXPECT(bash.find("complete -o filenames -F _matterm_server matterm-server") != std::string::npos);
     const auto zsh = completionScript("zsh");
-    EXPECT(zsh.rfind("#compdef matterm matterm-server matterm-daemon", 0) == 0);
+    EXPECT(zsh.rfind("#compdef matterm matterm-server matterm-daemon matmux",
+                     0) == 0);
     EXPECT(zsh.find("--completion[") != std::string::npos);
     EXPECT(zsh.find(":value:(bash zsh fish)") != std::string::npos);
     const auto fish = completionScript("fish");

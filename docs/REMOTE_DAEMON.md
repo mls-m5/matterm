@@ -202,7 +202,9 @@ ssh -t you@your-computer matterm --attach-tty --new     # a new terminal at once
 ssh -t you@your-computer matterm --attach-tty --new --name work -- htop
 ```
 
-(`matmux` is the same without the window libraries; `-t` is needed so that a terminal is
+(`matmux` is the same without the window libraries: `matmux` alone starts a new terminal with your
+shell (and first says "N terminals run: matmux --attach" when some already do), `matmux --attach` is
+the list, `matmux --new [--name N] [-- COMMAND]` as above; `-t` is needed so that a terminal is
 allocated.) Together with the daemon this is a small tmux: start a terminal, leave it running, come
 back to it later.
 

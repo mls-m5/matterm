@@ -120,7 +120,10 @@ private Unix socket, so they survive closing the window or a crash of the GUI.
   took it again. `web/tools/e2e-local.js` checks the whole path with a real daemon.
 - **Without a window, from a phone**: `ssh -t you@computer matterm --attach-tty` lists the terminals
   of the daemon, takes the one you choose over and shows it full screen in that terminal (`--new` starts a terminal
-  first, a small tmux); Ctrl+B d leaves it running, Ctrl+B l goes back to the list. See [docs/REMOTE_DAEMON.md](docs/REMOTE_DAEMON.md) section d.
+  first, a small tmux); Ctrl+B d leaves it running, Ctrl+B l goes back to the list. `matmux` is the same without the
+  window libraries, one static file (`--daemon-install` copies it to the other computer): `matmux` starts a new
+  terminal with your shell, `matmux --attach` lists and chooses, `matmux --new --name work -- htop`. See
+  [docs/REMOTE_DAEMON.md](docs/REMOTE_DAEMON.md) section d.
 - Details: [docs/tasks/daemon.md](docs/tasks/daemon.md), [docs/PROTOCOL.md](docs/PROTOCOL.md)
   section 12, [docs/TABS_PLAN.md](docs/TABS_PLAN.md) sections 10-11.
 
