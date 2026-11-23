@@ -27,6 +27,8 @@ set(sdl_flags -sUSE_SDL=2 -sUSE_SDL_TTF=2)
 
 file(GLOB fakeos_sources CONFIGURE_DEPENDS ${root}/src/fakeos/*.cpp)
 file(GLOB chat_sources CONFIGURE_DEPENDS ${root}/src/chat/*.cpp)
+# The demo's canvas lives in the shared tty layer (the POSIX end, src/tty/posix, is not needed here).
+file(GLOB tty_sources CONFIGURE_DEPENDS ${root}/src/tty/*.cpp)
 add_library(matterm-web-core STATIC
     ${root}/src/core/palette.cpp
     ${root}/src/core/cellbuffer.cpp
@@ -42,6 +44,7 @@ add_library(matterm-web-core STATIC
     ${root}/src/transport/clientsession.cpp
     ${root}/src/transport/scriptedlink.cpp
     ${fakeos_sources}
+    ${tty_sources}
     ${chat_sources}
 )
 # Numbers for the demo's `about` command, counted from the repository by a build
