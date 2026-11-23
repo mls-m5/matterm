@@ -18,14 +18,16 @@ Owner's wishes (2026-11-23) and decisions (do not reopen; ask with alternatives 
 - **Themes**: only dark ones for now: Grey (today's look), Blue, Green, Red (and maybe Amber).
   A theme colours the frame: the tab strip, marks, borders and edges, plus a slight tint of the
   terminal's default background (text contrast kept; programs' own colours are not touched).
-  The owner has reduced colour vision: colour is never the only sign. The computer's name is written
-  in the tab as text for terminals on another computer, and the themes differ in brightness as
-  well as hue. The look stays calm.
+  The owner has reduced colour vision, so colour is not the only sign: for terminals on another
+  computer the **computer's name is written in the draggable gap of the tab strip** (between the last
+  tab and the share button), in a muted colour of the theme, **not in the tab's name**.
+  The themes differ in hue only (no variation of brightness for now): stylish and simple first.
+  The look stays calm.
 - **Theme per computer**: the window picks the theme from the computer it is connected to:
   `--daemon-host` name -> a theme, **automatic** by default (the name picks a theme in a fixed
   order, so the same computer always gets the same one) with a per-computer override in the
   settings ("server -> Green", or back to automatic). The local computer keeps the Grey theme
-  (or the user's default theme). Detecting a plain `ssh host` typed inside a shell is later, not now.
+  (or the user's default theme). Keep the implementation simple. Detecting a plain `ssh host` typed inside a shell is later, not now.
 - First settings in the list: Theme (default), Theme per computer, and the existing flags worth
   turning into settings (tab activity icon/pulse/off, share symbol is fixed, window frame
   own/system, scrollback rows if it is cheap, confirm before closing a busy pane). Keep it small.
@@ -36,7 +38,7 @@ Owner's wishes (2026-11-23) and decisions (do not reopen; ask with alternatives 
   (mtime poll, pure and testable with a fake clock/filesystem), the theme data (palette + accent +
   tint, derived `Colors` for the strip and the border colour), the per-computer rule (automatic
   choice, overrides), and wiring the window to it (reload, theme per daemon host, the host name
-  as text in the tab). Tests first. Palette entry "Reload settings".
+  as muted text in the strip's draggable gap). Tests first. Palette entry "Reload settings".
 - agent3 (after the mockup is approved): the settings TUI (screens as in the mockup, search,
   editing values, live theme preview), `--settings` for `matterm` and `matmux`, the palette
   entry "Settings" opening the tab, completion, README.
