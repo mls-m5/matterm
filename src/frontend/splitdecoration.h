@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace frontend {
@@ -36,7 +37,70 @@ inline PixelRect intersection(const PixelRect &a, const PixelRect &b) {
         return {};
     return {int(x), int(y), int(right - x), int(bottom - y)};
 }
+inline void subtract(std::vector<PixelRect> &rects, PixelRect mask) {
+    std::vector<PixelRect> result;
+    for (const auto &r : rects) {
+        const auto i = intersection(r, mask);
+        if (i.w <= 0 || i.h <= 0) {
+            result.push_back(r);
+            continue;
+        }
+        if (i.y > r.y)
+            result.push_back({r.x, r.y, r.w, i.y - r.y});
+        if (i.y + i.h < r.y + r.h)
+            result.push_back({r.x, i.y + i.h, r.w, r.y + r.h - i.y - i.h});
+        if (i.x > r.x)
+            result.push_back({r.x, i.y, i.x - r.x, i.h});
+        if (i.x + i.w < r.x + r.w)
+            result.push_back({i.x + i.w, i.y, r.x + r.w - i.x - i.w, i.h});
+    }
+    rects = std::move(result);
+}
 } // namespace splitdecoration_detail
+
+// Only the innermost existing own-frame pixel, NEVER a terminal viewport pixel.
+inline std::vector<PixelRect> ownFrameDarkEdges(
+    PixelRect content,
+    const std::vector<DividerBox> &dividers,
+    const std::vector<PixelRect> &scrollbars,
+    bool ownFrame,
+    bool maximized,
+    bool fullscreen) {
+    if (!ownFrame || maximized || fullscreen || content.x < 0 ||
+        content.y < 0 || content.w <= 0 || content.h <= 0 ||
+        std::int64_t(content.x) + content.w >=
+            std::numeric_limits<int>::max() ||
+        std::int64_t(content.y) + content.h >= std::numeric_limits<int>::max())
+        return {};
+    const int right = content.x + content.w, bottom = content.y + content.h;
+    std::vector<PixelRect> edges{{content.x - 1, content.y, 1, content.h + 1},
+                                 {right, content.y, 1, content.h + 1},
+                                 {content.x, bottom, content.w, 1}};
+    if (content.y > 0)
+        edges.push_back({content.x, content.y - 1, content.w, 1});
+    for (const auto &d : dividers) {
+        if (d.direction == SplitDirection::SideBySide &&
+            d.rect.y <= content.y &&
+            std::int64_t(d.rect.y) + d.rect.h > content.y && d.rect.w > 2 &&
+            content.y > 0)
+            splitdecoration_detail::subtract(
+                edges, {d.rect.x + 1, content.y - 1, d.rect.w - 2, 1});
+    }
+    for (const auto &track : scrollbars) {
+        const auto s = splitdecoration_detail::intersection(track, content);
+        if (s.w <= 0 || s.h <= 0)
+            continue;
+        if (s.x + s.w == right)
+            splitdecoration_detail::subtract(
+                edges, {right, s.y, 1, s.h + int(s.y + s.h == bottom)});
+        if (s.y + s.h == bottom)
+            splitdecoration_detail::subtract(edges, {s.x, bottom, s.w, 1});
+        if (s.y == content.y && content.y > 0)
+            splitdecoration_detail::subtract(edges,
+                                             {s.x, content.y - 1, s.w, 1});
+    }
+    return edges;
+}
 
 inline SplitDecoration splitDecoration(const std::vector<DividerBox> &dividers,
                                        PixelRect content,

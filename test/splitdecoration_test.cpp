@@ -65,6 +65,31 @@ TEST_CASE(
                         false);
     EXPECT(pixel(below, 12, 25) == 1);
 }
+TEST_CASE("Own-frame dark pixels use existing frame and skip scrollbar edges") {
+    const PixelRect content{0, 5, 40, 25};
+    const std::vector<DividerBox> dividers{
+        {{10, 5, 12, 25}, SplitDirection::SideBySide}};
+    SplitDecoration plan;
+    plan.outer = ownFrameDarkEdges(content, dividers, {}, true, false, false);
+    EXPECT(pixel(plan, -1, 12) == 0 && pixel(plan, 40, 12) == 0);
+    EXPECT(pixel(plan, 20, 30) == 0);
+    EXPECT(pixel(plan, 0, 12) == -1 && pixel(plan, 39, 12) == -1);
+    EXPECT(pixel(plan, 15, 4) == -1 && pixel(plan, 5, 4) == 0);
+    plan.outer = ownFrameDarkEdges(
+        content, dividers, {{28, 5, 12, 25}}, true, false, false);
+    EXPECT(pixel(plan, 40, 12) == -1 && pixel(plan, 35, 30) == -1);
+    for (int state : {0, 1, 2}) {
+        EXPECT(ownFrameDarkEdges(
+                   content, dividers, {}, false, state == 1, state == 2)
+                   .empty());
+        if (state) {
+            plan.outer = ownFrameDarkEdges(
+                content, dividers, {}, true, state == 1, state == 2);
+            EXPECT(pixel(plan, -1, 12) == -1 && pixel(plan, 20, 30) == -1);
+            EXPECT(pixel(plan, 15, 4) == -1);
+        }
+    }
+}
 TEST_CASE("Gutter decoration never overlays terminal-area boundaries") {
     for (bool own : {false, true})
         for (int state : {0, 1, 2}) {

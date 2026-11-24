@@ -27,15 +27,23 @@ was reproduced; a user report of a wider rectangle needs separate evidence.
 The fix removes ALL terminal-boundary overlays and their gutter clipping.
 Only existing gutter pixels are decorated; their middle now naturally reaches
 the themed tab strip without a dark top seam. No renderer, cells, layout,
-scrollbar or hitbox changes. This deliberately leaves the requested additional
-own-frame dark border pending: it must later use the EXISTING frame's innermost
-pixel OUTSIDE the viewport, omit scrollbar edges and remain absent at screen
-edges when maximized/fullscreen. System-frame windows must have no extra app
-outline at all. The older outer-ring description below is superseded. Warning-free full build
+scrollbar or hitbox changes. The own-frame-only follow-up (`38898f3` tests, `1660703` implementation)
+uses the EXISTING frame's innermost pixel OUTSIDE the viewport: left x=-1,
+right x=viewWidth, bottom y=viewHeight, relative to the view. The other three
+existing frame pixels retain the theme color. No new inset or cell loss.
+Visible right scrollbar spans suppress the neighboring right edge and the
+corresponding bottom/top edge segment; marker and thumb pixels stay untouched.
+The normal own-frame top seam uses the last STRIP pixel (terminalTop-1), never
+the terminal's first row; divider-middle gaps preserve the theme connection.
+System-frame, maximized and fullscreen windows receive NONE of these edges.
+No fallback overlays or reserved pixels are used. The older outer-ring description below is superseded. Warning-free full build
 and 151/151 tests pass in 129.32 seconds after this follow-up. The SDL readback
 matrix passes, including original strip RGB, actual thumb/marker pixels and
 full-block edge glyph preservation. Physical desktop/GPU appearance remains
-unverified.
+unverified. After the own-frame follow-up, five targeted suites (SDL pixels,
+pure split geometry, window hit/inset, workspace layout, native Settings)
+pass in 49.14 seconds with warning-free matterm/SDL test builds. No further
+feature work is included.
 
 ## Geometry and paint order
 

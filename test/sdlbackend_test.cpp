@@ -160,6 +160,8 @@ TEST_CASE("Split decoration must not replace terminal right-strip background "
                                  {}});
                         };
                         fixture.backend->beginFrame(palette.background);
+                        fixture.backend->drawRect({ox, 0, width, 20},
+                                                  splitMiddleColor(palette));
                         renderPanes();
                         for (const auto &d : dividers)
                             fixture.backend->drawRect(
@@ -173,6 +175,8 @@ TEST_CASE("Split decoration must not replace terminal right-strip background "
                                 ox + x,
                                 20 + fixture.backend->cellHeight() + 5));
                         fixture.backend->beginFrame(palette.background);
+                        fixture.backend->drawRect({ox, 0, width, 20},
+                                                  splitMiddleColor(palette));
                         const auto plan =
                             splitDecoration(dividers,
                                             {0, 20, width, height - 20},
@@ -187,6 +191,42 @@ TEST_CASE("Split decoration must not replace terminal right-strip background "
                         renderPanes();
                         for (const auto &r : plan.outer)
                             paint(r, splitEdgeColor(palette));
+                        if (own) {
+                            for (const auto &r : borderRects(320, 160, false))
+                                fixture.backend->drawRect(
+                                    {r.x, r.y, r.w, r.h},
+                                    splitMiddleColor(palette));
+                            const std::vector<PixelRect> scrollbars =
+                                frame.scrollbar.visible
+                                    ? std::vector<PixelRect>{{width - 12,
+                                                              20,
+                                                              12,
+                                                              height - 20}}
+                                    : std::vector<PixelRect>{};
+                            for (const auto &r :
+                                 ownFrameDarkEdges({0, 20, width, height - 20},
+                                                   dividers,
+                                                   scrollbars,
+                                                   true,
+                                                   false,
+                                                   false))
+                                paint(r, splitEdgeColor(palette));
+                            const auto color = [](Rgb8 c) {
+                                return (Uint32(c.r) << 16) |
+                                       (Uint32(c.g) << 8) | c.b;
+                            };
+                            EXPECT_EQ(fixture.pixel(ox - 1, 40),
+                                      color(splitEdgeColor(palette)));
+                            EXPECT_EQ(fixture.pixel(ox - 2, 40),
+                                      color(splitMiddleColor(palette)));
+                            EXPECT_EQ(fixture.pixel(ox + width, 40),
+                                      color(frame.scrollbar.visible
+                                                ? splitMiddleColor(palette)
+                                                : splitEdgeColor(palette)));
+                            if (gutters)
+                                EXPECT_EQ(fixture.pixel(ox + 109, 19),
+                                          color(splitMiddleColor(palette)));
+                        }
                         EXPECT_EQ(fixture.pixel(
                                       ox + width - 10,
                                       20 + fixture.backend->cellHeight() / 2),

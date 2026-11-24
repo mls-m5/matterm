@@ -3867,6 +3867,31 @@ int runPtyFrontend(const char *font,
                          w, h, maximized, frontend::kBorderWidth, fullscreen)) {
                     backend.drawRect({edge.x, edge.y, edge.w, edge.h}, frontend::borderColor(stripPalette));
                 }
+                std::vector<PixelRect> scrollbars;
+                for (const auto &d : drawn) {
+                    if (!d.frame.scrollbar.visible)
+                        continue;
+                    const auto &pp = *d.plan;
+                    if (pp.rect.x + pp.rect.w == wv.window().width) {
+                        const int width =
+                            std::min(pp.rect.w, SdlBackend::scrollbarStrip());
+                        scrollbars.push_back({pp.rect.x + pp.rect.w - width,
+                                              pp.rect.y,
+                                              width,
+                                              pp.rect.h});
+                    }
+                }
+                for (const auto &edge : ownFrameDarkEdges(
+                         {0,
+                          stripHeight,
+                          wv.window().width,
+                          std::max(0, wv.window().height - stripHeight)},
+                         plan.dividers,
+                         scrollbars,
+                         ownFrame,
+                         maximized,
+                         fullscreen))
+                    paintDecoration(edge, splitEdgeColor(stripPalette));
             }
             backend.present();
             if (perfLog.enabled()) {
