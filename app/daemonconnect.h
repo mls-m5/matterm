@@ -5,6 +5,7 @@
 // ask and report the same way.
 #include "daemonadmin.h"
 #include "daemonchoice.h"
+#include "perflog.h"
 #include "ptyfrontend.h"
 #include "sshtunnel.h"
 
@@ -26,6 +27,25 @@ inline bool askOnTerminal(const std::string &question) {
     return answer == "y" || answer == "Y" || answer == "yes";
 }
 
+// Keep the writer alive in the tunnel's copied options for reconnect workers.
+// Static phase names only: never log SSH arguments, hosts or authentication
+// text.
+inline frontend::SshPhaseCallback sshStartupTiming(const std::string &path) {
+    auto log = std::make_shared<perf::Writer>(path, "matterm-ssh-startup");
+    if (!log->enabled()) {
+        if (!log->error().empty())
+            std::cerr << "matterm: startup performance log: " << log->error()
+                      << '\n';
+        return {};
+    }
+    return [log](const frontend::SshPhaseEvent &event) {
+        const auto name = frontend::sshPhaseName(event.phase);
+        log->phase(name, event.elapsedMs, event.success, event.begin);
+        if (event.begin)
+            std::cerr << "matterm: startup phase " << name << " ...\n";
+    };
+}
+
 // Opens the tunnel for `options.host` and points `options.socketPath` at its
 // end. Progress and questions go to stderr and stdin. Throws std::runtime_error
 // with the reason.
@@ -34,6 +54,7 @@ inline std::unique_ptr<frontend::SshTunnel> openDaemonTunnel(
     std::cerr << "matterm: connecting to " << options.host << " ...\n";
     frontend::SshTunnelOptions tunnelOptions;
     tunnelOptions.host = options.host;
+    tunnelOptions.timing = sshStartupTiming(options.perfLog);
     tunnelOptions.sshArguments = options.sshArguments;
     tunnelOptions.install = options.installAlways
                                 ? frontend::DaemonInstall::Always
@@ -76,9 +97,15 @@ inline std::string selectDaemon(DaemonOptions &options,
     tools.newSocket =
         mtd::versionedSocketPath(own.format, own.breaking, own.additive);
     tools.list = [] { return mtd::daemonSocketsIn(mtd::socketDirectory()); };
-    tools.probe = [](const std::string &socket) {
+    const auto timing = remote ? sshStartupTiming(options.perfLog)
+                               : frontend::SshPhaseCallback{};
+    tools.probe = [timing](const std::string &socket) {
+        frontend::SshPhaseScope phase(timing, frontend::SshPhase::ControlProbe);
         std::string error;
-        return frontend::probeDaemon(socket, error);
+        auto info = frontend::probeDaemon(socket, error);
+        if (info)
+            phase.succeeded();
+        return info;
     };
     // The default socket is the daemon's own default (its folder is made
     // private); any other path is given as it is.

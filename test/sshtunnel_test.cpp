@@ -6,6 +6,7 @@
 #include "daemonlink.h"
 #include "mls-unit-test/unittest.h"
 #include "sshtunnel.h"
+#include "sshphase.h"
 
 #include <algorithm>
 #include <chrono>
@@ -109,6 +110,8 @@ struct Fake {
         ::unsetenv("FAKE_SSH_FAIL");
         ::unsetenv("FAKE_SSH_NOFORWARD");
         ::unsetenv("FAKE_SSH_DELAY");
+        ::unsetenv("FAKE_SSH_DELAY_ENSURE");
+        ::unsetenv("FAKE_SSH_DELAY_FORWARD");
         ::setenv("SHELL", "/bin/sh", 1);
         ::setenv("PS1", "$ ", 1);
     }
@@ -118,6 +121,8 @@ struct Fake {
         ::unsetenv("FAKE_SSH_NOFORWARD");
         ::unsetenv("FAKE_SSH_DELAY");
         ::unsetenv("FAKE_SSH_UNAME");
+        ::unsetenv("FAKE_SSH_DELAY_ENSURE");
+        ::unsetenv("FAKE_SSH_DELAY_FORWARD");
         ::unsetenv("FAKE_SSH_DAEMON_ON_PATH");
         ::unsetenv("FAKE_SSH_HOME");
     }
@@ -371,6 +376,69 @@ TEST_CASE("isStaticElf tells a static binary from a dynamic one and from other f
     if (const char *other = std::getenv("MATTERM_TEST_DAEMON"); other && *other) EXPECT(isStaticElf(other));
 }
 
+TEST_CASE("Opt-in startup phases distinguish remote ensure from local "
+          "forwarding without payloads") {
+    Fake fake;
+    ::setenv("FAKE_SSH_DELAY_ENSURE", "0.2", 1);
+    ::setenv("FAKE_SSH_DELAY_FORWARD", "0.4", 1);
+    auto options = fake.options();
+    std::vector<SshPhaseEvent> events;
+    options.timing = [&](const SshPhaseEvent &event) {
+        events.push_back(event);
+    };
+    std::string error;
+    auto tunnel = SshTunnel::open(options, error);
+    const bool ready = tunnel && statusOf(tunnel->socketPath()).has_value();
+    tunnel.reset();
+    stopRemote(options.remoteSocket);
+    EXPECT(ready && error.empty());
+    EXPECT(events.size() == 6);
+    EXPECT(events[0].phase == SshPhase::Startup && events[0].begin);
+    EXPECT(events[1].phase == SshPhase::RemoteEnsure && events[1].begin);
+    EXPECT(events[2].phase == SshPhase::RemoteEnsure && !events[2].begin &&
+           events[2].success);
+    EXPECT(events[2].elapsedMs >= 180);
+    EXPECT(events[3].phase == SshPhase::ForwardSocket && events[3].begin);
+    EXPECT(events[4].phase == SshPhase::ForwardSocket && !events[4].begin &&
+           events[4].success);
+    EXPECT(events[4].elapsedMs >= 380);
+    EXPECT(events[5].phase == SshPhase::Startup && !events[5].begin &&
+           events[5].success);
+    EXPECT(events[5].elapsedMs >= events[2].elapsedMs + events[4].elapsedMs);
+    // The ordinary no-install path uses precisely one ensure ssh and one
+    // forwarding ssh, not an extra remote version subprocess.
+    const auto calls = fileText(fake.log);
+    EXPECT(std::count(calls.begin(), calls.end(), '\n') == 2);
+}
+
+TEST_CASE("Failed startup phases are paired and a logging callback cannot "
+          "break startup") {
+    Fake fake;
+    auto options = fake.options();
+    std::vector<SshPhaseEvent> events;
+    options.timing = [&](const SshPhaseEvent &event) {
+        events.push_back(event);
+    };
+    ::setenv("FAKE_SSH_FAIL", "opaque failure", 1);
+    std::string error;
+    EXPECT(!SshTunnel::open(options, error));
+    EXPECT(events.size() == 4);
+    EXPECT(!events[2].begin && !events[2].success &&
+           events[2].phase == SshPhase::RemoteEnsure);
+    EXPECT(!events[3].begin && !events[3].success &&
+           events[3].phase == SshPhase::Startup);
+    ::unsetenv("FAKE_SSH_FAIL");
+    options.timing = [](const SshPhaseEvent &) {
+        throw std::runtime_error("logger failed");
+    };
+    error.clear();
+    auto tunnel = SshTunnel::open(options, error);
+    const bool ready = bool(tunnel);
+    tunnel.reset();
+    stopRemote(options.remoteSocket);
+    EXPECT(ready);
+}
+
 TEST_CASE("First install gets a fresh readiness budget after a slow successful "
           "upload") {
     for (const auto policy : {DaemonInstall::Always, DaemonInstall::Auto}) {
@@ -386,6 +454,8 @@ TEST_CASE("First install gets a fresh readiness budget after a slow successful "
         options.timeoutMs = 1000;
         options.installTimeoutMs = 20000;
         options.confirm = [](const std::string &) { return true; };
+        std::vector<SshPhaseEvent> phases;
+        options.timing = [&](const SshPhaseEvent &event) { phases.push_back(event); };
         std::string error;
         const auto began = std::chrono::steady_clock::now();
         auto tunnel = SshTunnel::open(options, error);
@@ -397,6 +467,21 @@ TEST_CASE("First install gets a fresh readiness budget after a slow successful "
         EXPECT(installed(fake).size() == 1); // Upload itself really succeeded.
         EXPECT(error.empty());
         EXPECT(ready);
+        for (const auto phase : {SshPhase::Installation,
+                                 SshPhase::LocalIdentity,
+                                 SshPhase::RemoteInspection,
+                                 SshPhase::Upload,
+                                 SshPhase::Confirmation,
+                                 SshPhase::InstallLinks,
+                                 SshPhase::InstallCleanup,
+                                 SshPhase::RemoteEnsure,
+                                 SshPhase::ForwardSocket}) {
+            EXPECT(std::any_of(
+                phases.begin(), phases.end(), [&](const SshPhaseEvent &event) {
+                    return event.phase == phase && !event.begin &&
+                           event.success;
+                }));
+        }
     }
 }
 

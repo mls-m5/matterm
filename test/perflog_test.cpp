@@ -51,19 +51,30 @@ TEST_CASE("Totals weight CPU by actual partial interval and merge samples") {
            std::string::npos);
     EXPECT(perf::verdict({}) == "unknown");
 }
-TEST_CASE("GUI loop and per-pane pump histograms are bounded and merged without terminal data") {
+TEST_CASE("GUI loop and per-pane pump histograms are bounded and merged "
+          "without terminal data") {
     perf::Second a, b;
-    a.guiLoopGap.add(40); b.guiLoopGap.add(80);
-    a.guiPumpRound.add(30); b.guiPumpRound.add(60);
-    a.guiPumpFocused.add(3); b.guiPumpFocused.add(6);
-    a.guiPumpVisible.add(4); b.guiPumpVisible.add(8);
-    a.guiPumpHidden.add(20); b.guiPumpHidden.add(40);
+    a.guiLoopGap.add(40);
+    b.guiLoopGap.add(80);
+    a.guiPumpRound.add(30);
+    b.guiPumpRound.add(60);
+    a.guiPumpFocused.add(3);
+    b.guiPumpFocused.add(6);
+    a.guiPumpVisible.add(4);
+    b.guiPumpVisible.add(8);
+    a.guiPumpHidden.add(20);
+    b.guiPumpHidden.add(40);
     perf::Totals totals;
-    totals.add(a, 1); totals.add(b, 1);
+    totals.add(a, 1);
+    totals.add(b, 1);
     EXPECT(totals.total().guiLoopGap.summary().avg == 60);
     EXPECT(totals.total().guiPumpHidden.summary().count == 2);
     const auto line = perf::formatSecond("test", 2, totals.total(), 2);
-    for (const auto *field : {"gui_loop_gap_n=2", "gui_pump_round_n=2", "gui_pump_focused_n=2", "gui_pump_visible_n=2", "gui_pump_hidden_n=2"})
+    for (const auto *field : {"gui_loop_gap_n=2",
+                              "gui_pump_round_n=2",
+                              "gui_pump_focused_n=2",
+                              "gui_pump_visible_n=2",
+                              "gui_pump_hidden_n=2"})
         EXPECT(line.find(field) != std::string::npos);
     EXPECT(sizeof(perf::Second) < 20000u);
 }
@@ -96,4 +107,42 @@ TEST_CASE("Writer flushes partial intervals and finishes exactly once") {
     ::unlink(path.c_str());
 }
 
+TEST_CASE("Opt-in phase records accept only static payload-free names and "
+          "finite elapsed time") {
+    for (const std::string name : {"ssh_startup",
+                                   "ssh_remote_ensure",
+                                   "ssh_forward_socket",
+                                   "ssh_control_probe",
+                                   "ssh_installation",
+                                   "ssh_local_identity",
+                                   "ssh_remote_inspection",
+                                   "ssh_upload",
+                                   "ssh_confirmation",
+                                   "ssh_install_links",
+                                   "ssh_install_cleanup",
+                                   "settings_factory",
+                                   "settings_first_parsed_output",
+                                   "settings_first_present"}) {
+        const auto line = perf::formatPhase("client", name, 12.5, true, false);
+        EXPECT(line &&
+               line->find(" event=phase phase=" + name) != std::string::npos);
+        EXPECT(line->find("phase_ms=12.5") != std::string::npos);
+        EXPECT(line->find("status=ok") != std::string::npos);
+    }
+    EXPECT(!perf::formatPhase("client", "user@secret-server", 1, true, false));
+    EXPECT(!perf::formatPhase(
+        "client", "ssh_startup\noutput=secret", 1, true, false));
+    EXPECT(!perf::formatPhase("client", "ssh_startup", -1, true, false));
+    EXPECT(!perf::formatPhase("client",
+                              "ssh_startup",
+                              std::numeric_limits<double>::infinity(),
+                              true,
+                              false));
+    const auto begin =
+        perf::formatPhase("client", "ssh_startup", 0, false, true);
+    EXPECT(begin && begin->find("status=begin") != std::string::npos);
+    const auto failed =
+        perf::formatPhase("client", "ssh_startup", 1, false, false);
+    EXPECT(failed && failed->find("status=failed") != std::string::npos);
+}
 TEST_SUIT_END

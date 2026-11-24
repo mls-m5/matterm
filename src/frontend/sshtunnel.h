@@ -20,6 +20,7 @@
 #include "daemonclient.h"
 #include "daemoninstall.h"
 #include "sha256.h"
+#include "sshphase.h"
 
 #include <algorithm>
 #include <atomic>
@@ -62,11 +63,16 @@ struct SshTunnelOptions {
     std::string remoteSocket;            // Empty: the remote default ($XDG_RUNTIME_DIR/matterm/daemon.sock).
     int timeoutMs = 20000;               // Remote startup + forwarding readiness, excluding installation.
     DaemonInstall install = DaemonInstall::Never;
-    bool assumeYes = false;              // --yes: copy without asking.
-    // Asked before the first copy (nothing is copied when it says no or is not set and assumeYes is not).
+    bool assumeYes = false; // --yes: copy without asking.
+    // Asked before the first copy (nothing is copied when it says no or is not
+    // set and assumeYes is not).
     std::function<bool(const std::string &question)> confirm;
-    std::function<void(const std::string &line)> progress; // Messages while copying.
-    std::string localDaemon;             // The file to copy; empty: the daemon beside this program.
+    std::function<void(const std::string &line)>
+        progress; // Messages while copying.
+    SshPhaseCallback
+        timing; // Optional static phase IDs only; no SSH/auth/output data.
+    std::string
+        localDaemon; // The file to copy; empty: the daemon beside this program.
     std::string localAttach; // matmux to copy with it; empty: the one
                              // beside the daemon file.
     std::string installDirectory;        // On the other computer, absolute; empty: $HOME/.local/share/matterm/bin.
@@ -232,14 +238,19 @@ public:
     }
 
     // Null with `error` set when the tunnel could not be made.
-    static std::unique_ptr<SshTunnel> open(const SshTunnelOptions &options, std::string &error) {
+    static std::unique_ptr<SshTunnel> open(const SshTunnelOptions &options,
+                                           std::string &error) {
+        SshPhaseScope startup(options.timing, SshPhase::Startup);
         if (!safeSshWord(options.host, false)) {
             error = "--daemon-host: not a host name ssh can be given safely";
             return nullptr;
         }
         if (!safeSshWord(options.remoteDaemon, true) ||
-            (!options.remoteSocket.empty() && (!safeSshWord(options.remoteSocket, true) || options.remoteSocket.front() != '/'))) {
-            error = "--daemon-host: the remote daemon or socket name has characters the remote shell would read";
+            (!options.remoteSocket.empty() &&
+             (!safeSshWord(options.remoteSocket, true) ||
+              options.remoteSocket.front() != '/'))) {
+            error = "--daemon-host: the remote daemon or socket name has "
+                    "characters the remote shell would read";
             return nullptr;
         }
         auto deadline = std::chrono::steady_clock::now() +
@@ -261,8 +272,15 @@ public:
                        std::chrono::milliseconds(options.timeoutMs);
         }
         ask = commandArguments(options, daemonPath);
-        if (!runCapture(
-                options.ssh, ask, deadline, output, error, {}, &status)) {
+        if (!runPhaseCapture(options,
+                             SshPhase::RemoteEnsure,
+                             options.ssh,
+                             ask,
+                             deadline,
+                             output,
+                             error,
+                             {},
+                             &status)) {
             const bool missing =
                 status == 127 || error.find("not found") != std::string::npos ||
                 error.find("No such file") != std::string::npos;
@@ -276,26 +294,33 @@ public:
                 ask = commandArguments(options, daemonPath);
                 error.clear();
                 output.clear();
-                if (!runCapture(options.ssh,
-                                ask,
-                                deadline,
-                                output,
-                                error,
-                                {},
-                                &status)) {
+                if (!runPhaseCapture(options,
+                                     SshPhase::RemoteEnsure,
+                                     options.ssh,
+                                     ask,
+                                     deadline,
+                                     output,
+                                     error,
+                                     {},
+                                     &status)) {
                     error = "ssh " + options.host + ": " + error;
                     return nullptr;
                 }
             }
             else {
                 error = "ssh " + options.host + ": " + error +
-                        (missing ? " (matterm-daemon is not on its PATH: --daemon-install copies one there)" : "");
+                        (missing ? " (matterm-daemon is not on its PATH: "
+                                   "--daemon-install copies one there)"
+                                 : "");
                 return nullptr;
             }
         }
         const auto remote = lastLine(output);
-        if (remote.empty() || remote.front() != '/' || !safeSshWord(remote, true)) {
-            error = "ssh " + options.host + ": the remote matterm-daemon did not say where its socket is (is "
+        if (remote.empty() || remote.front() != '/' ||
+            !safeSshWord(remote, true)) {
+            error = "ssh " + options.host +
+                    ": the remote matterm-daemon did not say where its socket "
+                    "is (is "
                     "matterm-daemon installed there and on PATH?)";
             return nullptr;
         }
@@ -308,6 +333,7 @@ public:
         if (!tunnel->startForward(deadline, nullptr, error)) {
             return nullptr;
         }
+        startup.succeeded();
         return tunnel;
     }
 
@@ -421,6 +447,7 @@ private:
     bool startForward(std::chrono::steady_clock::time_point deadline,
                       const std::atomic<bool> *cancel,
                       std::string &error) {
+        SshPhaseScope phase(options_.timing, SshPhase::ForwardSocket);
         std::vector<std::string> forward = baseArguments(options_);
         forward.insert(forward.end(),
                        {"-N",
@@ -441,6 +468,7 @@ private:
         }
         while (true) {
             if (daemonRunning(socket_)) {
+                phase.succeeded();
                 return true;
             }
             if (!alive()) {
@@ -486,7 +514,10 @@ private:
     // (matterm-daemon-<format>.<breaking>.<additive>-<hash8>): a new version is
     // a new file, one that runs is never replaced, and a copy that is there is
     // the right one.
-    static bool installRemote(const SshTunnelOptions &options, std::string &path, std::string &error) {
+    static bool installRemote(const SshTunnelOptions &options,
+                              std::string &path,
+                              std::string &error) {
+        SshPhaseScope phase(options.timing, SshPhase::Installation);
         std::string daemonName;
         if (!installRemoteProgram(options,
                                   "matterm-daemon",
@@ -538,6 +569,7 @@ private:
             cleanupRemote(
                 options, path.substr(0, path.rfind('/')), {daemonName});
         }
+        phase.succeeded();
         return true;
     }
 
@@ -562,7 +594,9 @@ private:
         arguments.insert(arguments.end(),
                          {"--", options.host, "sh -c '" + command + "'"});
         std::string output, error;
-        (void)runCapture(
+        (void)runPhaseCapture(
+            options,
+            SshPhase::InstallLinks,
             options.ssh,
             arguments,
             std::chrono::steady_clock::now() +
@@ -600,7 +634,13 @@ private:
         arguments.insert(arguments.end(),
                          {"--", options.host, "sh -c '" + list + "'"});
         std::string output, error;
-        if (!runCapture(options.ssh, arguments, deadline, output, error)) {
+        if (!runPhaseCapture(options,
+                             SshPhase::InstallCleanup,
+                             options.ssh,
+                             arguments,
+                             deadline,
+                             output,
+                             error)) {
             return; // Cleaning up is a courtesy; the install worked.
         }
         const auto remove =
@@ -617,7 +657,13 @@ private:
         arguments.insert(arguments.end(),
                          {"--", options.host, "sh -c '" + command + "'"});
         output.clear();
-        if (runCapture(options.ssh, arguments, deadline, output, error)) {
+        if (runPhaseCapture(options,
+                            SshPhase::InstallCleanup,
+                            options.ssh,
+                            arguments,
+                            deadline,
+                            output,
+                            error)) {
             for (const auto &name : remove) {
                 say("removed the old " + name + " from " + options.host);
             }
@@ -699,11 +745,13 @@ private:
             std::string versionText, versionError;
             const auto versionDeadline = std::chrono::steady_clock::now() +
                                          std::chrono::milliseconds(5000);
-            if (runCapture(local,
-                           {"--version"},
-                           versionDeadline,
-                           versionText,
-                           versionError)) {
+            if (runPhaseCapture(options,
+                                SshPhase::LocalIdentity,
+                                local,
+                                {"--version"},
+                                versionDeadline,
+                                versionText,
+                                versionError)) {
                 if (auto version = mtd::findVersionInText(versionText)) {
                     if (version->hash.size() < 8 ||
                         version->hash == "unknown" ||
@@ -734,7 +782,8 @@ private:
         std::vector<std::string> arguments = baseArguments(options);
         arguments.insert(arguments.end(), {"--", options.host, "sh -c '" + probe + "'"});
         std::string output;
-        if (!runCapture(options.ssh, arguments, deadline, output, error)) {
+        if (!runPhaseCapture(options, SshPhase::RemoteInspection, options.ssh,
+                             arguments, deadline, output, error)) {
             error = "ssh " + options.host + ": " + error;
             return false;
         }
@@ -788,16 +837,19 @@ private:
                 std::to_string((size + 1023) / 1024) + " KiB, " +
                 remoteDirectory + "/" + name +
                 ") and start it there? (matmux is copied with it.)";
+            SshPhaseScope confirmation(options.timing, SshPhase::Confirmation);
             if (!options.confirm || !options.confirm(question)) {
                 error = program + " is not installed on " + options.host +
                         " and the copy was not confirmed (--yes copies without "
                         "asking)";
                 return false;
             }
+            confirmation.succeeded();
         }
         say("copying " + program + " to " + options.host + ":" + path + " ...");
-        // Temporary file in the same folder, checked (size, SHA-256 when sha256sum exists, and that it runs
-        // at all), then renamed: nobody ever sees half a file under the final name.
+        // Temporary file in the same folder, checked (size, SHA-256 when
+        // sha256sum exists, and that it runs at all), then renamed: nobody ever
+        // sees half a file under the final name.
         const std::string copy =
             "umask 077; d=\"" + remoteDirectory + "\"; t=\"$d/." + program +
             ".$$\"; "
@@ -815,7 +867,8 @@ private:
         arguments.insert(arguments.end(), {"--", options.host, "sh -c '" + copy + "'"});
         output.clear();
         std::string copyError;
-        if (!runCapture(options.ssh, arguments, deadline, output, copyError, local)) {
+        if (!runPhaseCapture(options, SshPhase::Upload, options.ssh,
+                             arguments, deadline, output, copyError, local)) {
             std::string hint;
             if (copyError.find("Exec format error") != std::string::npos) {
                 hint = " (wrong architecture or format for " + options.host + ")";
@@ -823,9 +876,12 @@ private:
             else if (copyError.find("Permission denied") != std::string::npos) {
                 hint = " (is " + remoteDirectory + " mounted noexec, or not writable?)";
             }
-            else if (copyError.find("No such file") != std::string::npos || copyError.find("not found") != std::string::npos ||
-                     copyError.find("cannot open shared object") != std::string::npos) {
-                hint = " (a dynamically linked daemon needs its libraries there: build with -DMATTERM_STATIC_DAEMON=ON)";
+            else if (copyError.find("No such file") != std::string::npos ||
+                     copyError.find("not found") != std::string::npos ||
+                     copyError.find("cannot open shared object") !=
+                         std::string::npos) {
+                hint = " (a dynamically linked daemon needs its libraries "
+                       "there: build with -DMATTERM_STATIC_DAEMON=ON)";
             }
             error = "copying " + program + " to " + options.host +
                     " failed: " + copyError + hint;
@@ -865,7 +921,28 @@ private:
         return argv;
     }
 
-    // Runs `program arguments`, collects stdout (stderr is kept for the error text).
+    static bool runPhaseCapture(const SshTunnelOptions &options, SshPhase phase,
+                                const std::string &program,
+                                std::vector<std::string> arguments,
+                                std::chrono::steady_clock::time_point deadline,
+                                std::string &out, std::string &error,
+                                const std::string &stdinFile = {},
+                                int *exitStatus = nullptr) {
+        SshPhaseScope timing(options.timing, phase);
+        const bool ok = runCapture(program,
+                                   std::move(arguments),
+                                   deadline,
+                                   out,
+                                   error,
+                                   stdinFile,
+                                   exitStatus);
+        if (ok)
+            timing.succeeded();
+        return ok;
+    }
+
+    // Runs `program arguments`, collects stdout (stderr is kept for the error
+    // text).
     static bool runCapture(const std::string &program,
                            std::vector<std::string> arguments,
                            std::chrono::steady_clock::time_point deadline,

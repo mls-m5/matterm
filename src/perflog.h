@@ -17,7 +17,9 @@
 #include <cstring>
 #include <fcntl.h>
 #include <limits>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <sys/resource.h>
 #include <unistd.h>
 #include <utility>
@@ -261,6 +263,35 @@ inline std::string verdict(const Numbers &n) {
         return "daemon";
     return "unknown";
 }
+// Only audited static names: never accept hosts, command lines, terminal
+// contents or authentication diagnostics as phase payloads.
+inline std::optional<std::string> formatPhase(const std::string &who,
+                                              std::string_view phase,
+                                              double elapsedMs,
+                                              bool success = true,
+                                              bool begin = false) {
+    constexpr std::array<std::string_view, 14> names = {
+        "ssh_startup",
+        "ssh_installation",
+        "ssh_local_identity",
+        "ssh_remote_inspection",
+        "ssh_upload",
+        "ssh_confirmation",
+        "ssh_install_links",
+        "ssh_install_cleanup",
+        "ssh_remote_ensure",
+        "ssh_forward_socket",
+        "ssh_control_probe",
+        "settings_factory",
+        "settings_first_parsed_output",
+        "settings_first_present"};
+    if (std::find(names.begin(), names.end(), phase) == names.end() ||
+        !std::isfinite(elapsedMs) || elapsedMs < 0)
+        return std::nullopt;
+    return who + " event=phase phase=" + std::string(phase) +
+           " phase_ms=" + number(elapsedMs) +
+           " status=" + (begin ? "begin" : (success ? "ok" : "failed"));
+}
 inline double processCpuMs() {
     rusage r{};
     if (::getrusage(RUSAGE_SELF, &r) != 0)
@@ -297,6 +328,13 @@ public:
     }
     const std::string &error() const {
         return error_;
+    }
+    void phase(std::string_view name, double elapsedMs, bool success = true,
+               bool begin = false) {
+        if (!enabled())
+            return;
+        if (const auto record = formatPhase(who_, name, elapsedMs, success, begin))
+            line(*record);
     }
     void add(const Second &s, double intervalSeconds) {
         if (!enabled() || !(intervalSeconds > 0) ||

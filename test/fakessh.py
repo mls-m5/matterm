@@ -9,6 +9,8 @@
 Every call appends its arguments (one line, JSON) to $FAKE_SSH_LOG. $FAKE_SSH_FAIL makes the command form
 fail with that message; $FAKE_SSH_NOFORWARD makes the forward form exit at once with that message;
 $FAKE_SSH_DELAY (seconds) makes the command form wait before it does anything (a slow link).
+$FAKE_SSH_DELAY_ENSURE and $FAKE_SSH_DELAY_FORWARD isolate the remote ensure-command
+and local forwarding-setup boundaries (not real DNS/authentication substages).
 """
 import json, os, signal, socket, sys, threading, select, time
 
@@ -36,6 +38,8 @@ while i < len(args):
     i += 1
 
 if forward is None:
+    if "--ensure" in command and os.environ.get("FAKE_SSH_DELAY_ENSURE"):
+        time.sleep(float(os.environ["FAKE_SSH_DELAY_ENSURE"]))
     if os.environ.get("FAKE_SSH_DELAY"):
         time.sleep(float(os.environ["FAKE_SSH_DELAY"]))
     if os.environ.get("FAKE_SSH_FAIL"):
@@ -57,6 +61,8 @@ if os.environ.get("FAKE_SSH_NOFORWARD"):
     sys.stderr.write(os.environ["FAKE_SSH_NOFORWARD"] + "\n")
     sys.exit(255)
 
+if os.environ.get("FAKE_SSH_DELAY_FORWARD"):
+    time.sleep(float(os.environ["FAKE_SSH_DELAY_FORWARD"]))
 local, remote = forward.split(":", 1)
 try:
     os.unlink(local)
