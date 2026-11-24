@@ -1,10 +1,11 @@
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT TARGET matterm-server-core)
     message(FATAL_ERROR "matterm-daemon needs Linux and the server core (MATTERM_BUILD_SERVER=ON)")
 endif()
-add_library(matterm-daemon-core daemon.cpp)
+add_library(matterm-daemon-core daemon.cpp previewcache.cpp)
 target_compile_features(matterm-daemon-core PUBLIC cxx_std_20)
 target_include_directories(matterm-daemon-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(matterm-daemon-core PUBLIC matterm-daemon-wire matterm-server-core sessionfiles)
+# Request-time preview decoding is daemon-only; tty supplies its existing UTF-8 encoder.
+target_link_libraries(matterm-daemon-core PUBLIC matterm-daemon-wire matterm-server-core sessionfiles matterm::vt matterm::tty)
 add_executable(matterm-daemon main.cpp)
 target_link_libraries(matterm-daemon PRIVATE matterm-daemon-core matterm::unixchannel matterm::transport)
 target_include_directories(matterm-daemon PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)

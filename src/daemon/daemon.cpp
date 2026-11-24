@@ -5,6 +5,7 @@
 #include "framing.h"
 #include "message.h"
 #include "paneprobe.h"
+#include "previewcache.h"
 #include "procinfo.h"
 
 #include <utility>
@@ -64,6 +65,9 @@ struct Daemon::Impl : std::enable_shared_from_this<Impl> {
     net::io_context ioc;
     std::optional<stream::acceptor> acceptor;
     std::optional<net::steady_timer> pump;
+    PreviewCache previews;
+    std::optional<net::steady_timer> previewTimer;
+    std::optional<protocol::Time> previewDue;
     std::optional<net::signal_set> signals;
     std::unique_ptr<server::SessionRegistry> registry;
     std::vector<std::weak_ptr<Connection>> connections;
@@ -98,6 +102,7 @@ struct Daemon::Impl : std::enable_shared_from_this<Impl> {
     bool start(std::string &error);
     void accept();
     void schedulePump();
+    void schedulePreviewExpiry();
     void finish(ExitReason why);
     // A session stopped being shared: whoever the web server attached to it is dropped.
     void cutExposed(const std::string &id);
@@ -334,6 +339,8 @@ private:
             controlError(ControlErrorCode::UnknownSession, "no such session");
             return;
         }
+        d_.previews.erase(m.id);
+        d_.schedulePreviewExpiry();
         reply(SessionEnded{m.id});
     }
     void handle(const GetSessionDetails &m) {
@@ -346,48 +353,75 @@ private:
             return;
         }
         SessionDetails details;
+        // Off applies to ALL requested IDs, including a suffix which may not
+        // fit this reply. It cannot refill/bypass the shared decoding budget.
+        if (!m.includePreview)
+            for (const auto &id : m.ids)
+                d_.previews.erase(id);
         const auto now = timeNow();
         const frontend::LinuxProcSource source;
-        for (const auto &id : m.ids) {
-            const auto output = d_.registry->outputState(id);
-            if (!output) {
+        try {
+            for (const auto &id : m.ids) {
+                const auto output = d_.registry->outputState(id);
+                if (!output) {
+                    d_.previews.erase(id);
+                    ++details.processedCount;
+                    continue;
+                }
+                SessionDetail row;
+                row.id = id;
+                row.name = output->info.name;
+                if (const auto ids = d_.registry->processIds(id)) {
+                    const auto state = frontend::probePane(
+                        source, ids->shell, ids->foreground);
+                    row.foregroundBusy = state.foregroundBusy;
+                    if (protocol::validUtf8(state.cwd))
+                        row.cwd = state.cwd;
+                    if (std::all_of(state.command.begin(),
+                                    state.command.end(),
+                                    [](const auto &arg) {
+                                        return protocol::validUtf8(arg);
+                                    }))
+                        row.command = state.command;
+                }
+                if (output->newestOutput) {
+                    const auto then = *output->newestOutput;
+                    row.outputAgeMs = now <= then
+                                          ? 0
+                                          : std::uint64_t(now.count()) -
+                                                std::uint64_t(then.count());
+                }
+                if (m.includePreview) {
+                    row.preview = d_.previews.get(
+                        id,
+                        output->oldest,
+                        output->info.outputEnd,
+                        [&](std::uint64_t offset, std::size_t count) {
+                            return d_.registry->readOutput(id, offset, count);
+                        },
+                        now,
+                        true);
+                }
+                details.rows.push_back(std::move(row));
                 ++details.processedCount;
-                continue;
+                std::string encoded;
+                if (!encode(ControlReply(details), encoded)) {
+                    details.rows.pop_back();
+                    --details.processedCount;
+                    break; // This ID is not consumed; retain the 16-KiB frame
+                           // cap.
+                }
             }
-            SessionDetail row;
-            row.id = id;
-            row.name = output->info.name;
-            if (const auto ids = d_.registry->processIds(id)) {
-                const auto state =
-                    frontend::probePane(source, ids->shell, ids->foreground);
-                row.foregroundBusy = state.foregroundBusy;
-                if (protocol::validUtf8(state.cwd))
-                    row.cwd = state.cwd;
-                if (std::all_of(state.command.begin(),
-                                state.command.end(),
-                                [](const auto &arg) {
-                                    return protocol::validUtf8(arg);
-                                }))
-                    row.command = state.command;
-            }
-            if (output->newestOutput) {
-                const auto then = *output->newestOutput;
-                row.outputAgeMs = now <= then ? 0
-                                              : std::uint64_t(now.count()) -
-                                                    std::uint64_t(then.count());
-            }
-            // Preview remains unavailable until the separately tested bounded
-            // daemon-only cache is wired; no decoding on this metadata path.
-            details.rows.push_back(std::move(row));
-            ++details.processedCount;
-            std::string encoded;
-            if (!encode(ControlReply(details), encoded)) {
-                details.rows.pop_back();
-                --details.processedCount;
-                break; // This ID is not consumed; retain the 16-KiB frame cap.
-            }
+            d_.schedulePreviewExpiry();
+            reply(details);
         }
-        reply(details);
+        catch (...) {
+            // A failed allocation/transport must not leave fresh sensitive
+            // fragments retained without an expiry timer.
+            d_.previews.clear();
+            d_.schedulePreviewExpiry();
+            throw;
+        }
     }
     void handle(const GetSessionInfo &m) {
         const auto ids = d_.registry->processIds(m.id);
@@ -691,6 +725,38 @@ void Daemon::Impl::accept() {
     });
 }
 
+void Daemon::Impl::schedulePreviewExpiry() {
+    const auto next = previews.nextExpiry();
+    if (!next || stopping) {
+        previewDue.reset();
+        if (previewTimer) {
+            boost::system::error_code ignored;
+            previewTimer->cancel(ignored);
+            previewTimer.reset();
+        }
+        return;
+    }
+    if (next == previewDue)
+        return;
+    if (!previewTimer)
+        previewTimer.emplace(ioc);
+    previewDue = next;
+    const auto maxTime = std::chrono::duration_cast<protocol::Time>(
+        Clock::time_point::max().time_since_epoch());
+    previewTimer->expires_at(
+        *next >= maxTime
+            ? Clock::time_point::max()
+            : Clock::time_point(
+                  std::chrono::duration_cast<Clock::duration>(*next)));
+    previewTimer->async_wait([this](const boost::system::error_code &ec) {
+        if (ec || stopping)
+            return;
+        previewDue.reset();
+        previews.expire(timeNow());
+        schedulePreviewExpiry();
+    });
+}
+
 void Daemon::Impl::schedulePump() {
     // 10 ms while sessions exist (PTY output), slow when there is nothing to do.
     const bool busy = registry->size() > 0;
@@ -781,6 +847,8 @@ void Daemon::Impl::cutExposed(const std::string &id) {
 void Daemon::Impl::finish(ExitReason why) {
     if (stopping) return;
     stopping = true;
+    previews.clear();
+    schedulePreviewExpiry();
     if (measuring()) {
         flushPerf(Clock::now());
         perfLog->finish();

@@ -16,12 +16,20 @@ def check(ok, what):
         failures.append(what)
 
 
+def full_list_frame(raw):
+    """One complete full repaint, excluding any following delta updates."""
+    clear = raw.rfind(b"\x1b[2J")
+    end = raw.find(b"\x1b[?2026l", clear) if clear >= 0 else -1
+    return raw[clear:end + len(b"\x1b[?2026l")] if end >= 0 else b""
+
+
 class Tty:
     def __init__(self, socket, args=(), rows=24, cols=80, cwd=None, env=None):
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             if cwd:
                 os.chdir(cwd)
+            os.environ["XDG_CONFIG_HOME"] = tmp + "/client-config"
             if env:
                 os.environ.update(env)
             os.execv(matmux, [matmux, "--daemon-socket", socket, *args])
@@ -64,12 +72,21 @@ class Tty:
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
             fresh = self.raw[begin:]
-            clear = fresh.rfind(b"\x1b[2J")
-            if clear >= 0 and b"\x1b[?2026l" in fresh[clear:]:
-                return fresh[clear:]
+            snapshot = full_list_frame(fresh)
+            if snapshot:
+                return snapshot
             if not self.pump(0.05):
                 break
         raise AssertionError("no completed full list repaint after PTY resize")
+
+    def wait_list_snapshot(self, needle, seconds=3):
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            snapshot = self.list_snapshot()
+            if needle.replace(" ", "") in self.text(snapshot):
+                return snapshot
+            self.pump(0.1)
+        return b""
 
     def send(self, data):
         os.write(self.fd, data)
@@ -117,9 +134,15 @@ def open_marked(client, marker, seconds=2.0):
         client.raw = b""
         client.send(bytes([digit]))
         client.pump(0.1)
+        client.raw = b""
         client.send(b"\r")
-        if client.wait_for(marker, seconds):
-            return True
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            left_list = client.raw.find(b"\x1b[?1049l")
+            if left_list >= 0 and marker.replace(" ", "") in client.text(client.raw[left_list + len(b"\x1b[?1049l"):]):
+                return True  # A list preview is not evidence of an opened pane.
+            if not client.pump(0.05):
+                break
         client.raw = b""
         client.send(b"\x02l")
         if not client.wait_for("running terminals", 3):
@@ -168,6 +191,9 @@ helper = subprocess.Popen([helper_path, "--socket", socket, "--sessions", "1", "
 ttys = []
 RESTORE_CURSOR = b"\x1b[?25h"
 try:
+    full = b"\x1b[2Jold preview\x1b[?2026l"
+    delta = b"\x1b[?2026hnew preview\x1b[?2026l"
+    check(full_list_frame(full + delta) == full, "snapshot framing excludes following partial redraws")
     started = json.loads(helper.stdout.readline())
     first_id = started["sessions"][0]["id"]
 
@@ -256,7 +282,7 @@ try:
     # The list: the first column is the name of the top folder, an explicit name wins; the default of matmux is
     # the list with New terminal chosen.
     os.makedirs(tmp + "/projects/matterm-demo")
-    m1 = Tty(socket, ("--new", "--", "sh", "-c", "echo m1-up; sleep 60"), cwd=tmp + "/projects/matterm-demo")
+    m1 = Tty(socket, ("--new", "--", "sh", "-c", "printf '\\033]52;c;PRIVATE-PREVIEW-OSC\\007m1-up\\n'; sleep 60"), cwd=tmp + "/projects/matterm-demo")
     ttys.append(m1)
     m1.wait_for("m1-up")
     m1.send(b"\x02d")
@@ -271,10 +297,28 @@ try:
     check(find_text(lst, "matterm-demo") and find_text(lst, "Namedone"), "the list names a terminal by its top folder, an explicit name wins")
     check(lst.wait_for("shell") and lst.wait_for(tmp[:16]) and lst.wait_for("foreground"),
           "a terminal block shows program, width-clipped folder and foreground status")
-    check(lst.wait_for("preview unavailable"), "an older daemon has an explicit unknown preview row")
+    check(find_text(lst, "m1-up"), "recent decoded output is shown as a preview without attaching")
+    check("PRIVATE-PREVIEW-OSC" not in lst.text(), "OSC payload is absent from the list preview")
     sgr = re.findall(rb"\x1b\[([0-9;]*)m", lst.raw)
     check(any(b"7" in params.split(b";") for params in sgr) and ">" in lst.text(),
           "the selected block emits reverse video and a persistent marker")
+    settings_dir = tmp + "/client-config/matterm"
+    os.makedirs(settings_dir, exist_ok=True)
+    def set_preview(enabled):
+        path = settings_dir + "/settings.json"
+        with open(path + ".tmp", "w") as stream:
+            json.dump({"terminalListPreview": enabled}, stream)
+        os.replace(path + ".tmp", path)
+    set_preview(False)
+    off = lst.wait_list_snapshot("preview disabled")
+    check(bool(off) and "m1-up" not in lst.text(off), "local privacy reload clears displayed preview text")
+    lst.send(b"r")  # The daemon receives includePreview=false too.
+    check(bool(lst.wait_list_snapshot("preview disabled")), "refresh while disabled keeps previews off")
+    set_preview(True)
+    on = lst.wait_list_snapshot("preview unavailable")
+    check(bool(on) and "m1-up" not in lst.text(on), "reenabling does not resurrect cached preview text")
+    lst.send(b"r")
+    check(find_text(lst, "m1-up"), "manual refresh collects a new preview after reenable")
     lst.send(b"q")
     lst.wait_exit()
     # A program started with -- COMMAND shows in the list when it is not a shell (sh -c looks like a shell to the
