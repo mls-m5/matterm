@@ -14,9 +14,9 @@ namespace frontend {
 
 enum class CloseScope { Pane, Tab, Window };
 
-// Close or cancel. A third answer, "run in background" (keep the program alive in a
-// local session daemon, docs/TABS_PLAN.md section 9 point 5), is future work: add it
-// here and offer it where CloseRequest::backgroundAvailable is true.
+// Workspace close answers remain destructive close/cancel. Window detach uses
+// the existing application's keep-terminals shutdown path, not a workspace
+// close.
 enum class CloseAnswer { Close, Cancel };
 
 struct RunningProgram {
@@ -24,12 +24,44 @@ struct RunningProgram {
     std::string text; // Command line as shown to the owner, already sanitized.
 };
 
+struct ClosePaneState {
+    bool ended = false;
+    bool daemonCanSurvive = false;
+};
+
+inline bool windowDetachAvailable(const std::vector<ClosePaneState> &panes) {
+    bool live = false;
+    for (const auto &pane : panes) {
+        if (pane.ended)
+            continue;
+        live = true;
+        if (!pane.daemonCanSurvive)
+            return false;
+    }
+    return live;
+}
+
 struct CloseRequest {
     CloseScope scope = CloseScope::Pane;
     TabId tab = 0;   // Scope Tab: the tab; Scope Pane: the active tab at the time.
     PaneId pane = 0; // Scope Pane: the pane.
     std::vector<RunningProgram> running;
-    bool backgroundAvailable = false; // Hook for the future third answer; always false now.
+    bool backgroundAvailable =
+        false; // Window only: all live panes can survive detach.
+
+    struct Button {
+        std::string label, action;
+    };
+    std::vector<Button> buttons() const {
+        std::vector<Button> result = {{"Close", "close.confirm"}};
+        if (scope == CloseScope::Window && backgroundAvailable)
+            result.push_back({"Detach", "close.detach"});
+        result.push_back({"Cancel", "close.cancel"});
+        return result;
+    }
+    std::size_t cancelIndex() const {
+        return scope == CloseScope::Window && backgroundAvailable ? 2 : 1;
+    }
 
     static constexpr std::size_t kMaxShown = 3;       // Programs named in the question.
     static constexpr std::size_t kMaxShownLength = 60; // Characters of one command line.

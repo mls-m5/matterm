@@ -1108,10 +1108,26 @@ int runPtyFrontend(const char *font,
         });
         return ids;
     };
-    const auto showCloseDialog = [&](const CloseRequest &request) {
-        std::vector<ui::ConfirmDialog::Button> buttons = {{"Close", "close.confirm"}, {"Cancel", "close.cancel"}};
-        // Hook: when request.backgroundAvailable, a third button "Run in background" goes here.
-        wv.pushLayer(std::make_unique<ui::ConfirmDialog>(request.question(), std::move(buttons), 1, 1));
+    const auto canDetachWindow = [&] {
+        std::vector<ClosePaneState> panes;
+        workspace.forEachPane([&](PaneId, NativePane &pane, bool) {
+            panes.push_back({pane.v.ended(),
+                             pane.daemon && !pane.link &&
+                                 !pane.daemon->sessionId().empty()});
+        });
+        return windowDetachAvailable(panes);
+    };
+    const auto showCloseDialog = [&](CloseRequest request) {
+        request.backgroundAvailable =
+            request.scope == CloseScope::Window && canDetachWindow();
+        std::vector<ui::ConfirmDialog::Button> buttons;
+        for (const auto &button : request.buttons())
+            buttons.push_back({button.label, button.action});
+        wv.pushLayer(
+            std::make_unique<ui::ConfirmDialog>(request.question(),
+                                                std::move(buttons),
+                                                request.cancelIndex(),
+                                                request.cancelIndex()));
     };
     const auto requestQuit = [&] {
         if (auto request = wv.windowClose()) {
@@ -1428,6 +1444,18 @@ int runPtyFrontend(const char *font,
         }
         else if (id == "window.maximize") {
             borderless::toggleMaximize(window.get());
+        }
+        else if (id == "close.detach") {
+            const auto pending = wv.pendingClose();
+            // Recheck at activation: local panes may have been opened since the
+            // dialog was painted. Never turn a mixed window into silent kills.
+            wv.answerClose(CloseAnswer::Cancel);
+            if (pending && pending->scope == CloseScope::Window &&
+                canDetachWindow()) {
+                keepTerminals =
+                    true; // Same shutdown policy as daemonaction::quitKeep.
+                running = false;
+            }
         }
         else if (id == "close.confirm" || id == "close.cancel") {
             const auto pending = wv.pendingClose();
@@ -1963,7 +1991,26 @@ int runPtyFrontend(const char *font,
             break;
         case 1:
             expectThat(connected(workspace.focusedPane()), "the first terminal is attached to the daemon");
-            if (variant == "settings") {
+            if (variant == "window-detach") {
+                expectThat(workspace.apply(Command::NewTab) != Outcome::Ignored,
+                           "a second daemon tab opens for window detach");
+                scriptStep = 120;
+                later(2000);
+            }
+            else if (variant == "window-reattach") {
+                const char *text = std::getenv("MATTERM_DETACH_IDS");
+                std::string ids = text ? text : "";
+                const auto comma = ids.find(',');
+                expectThat(comma != std::string::npos,
+                           "the earlier window supplied both terminal IDs");
+                expectThat(attachSession(ids.substr(0, comma)),
+                           "reattach the first retained terminal");
+                expectThat(attachSession(ids.substr(comma + 1)),
+                           "reattach the second retained terminal");
+                scriptStep = 122;
+                later(2000);
+            }
+            else if (variant == "settings") {
                 expectThat(paletteEntryNamed(paletteExtra(), "Settings"),
                            "the palette offers Settings");
                 std::string error;
@@ -2029,6 +2076,72 @@ int runPtyFrontend(const char *font,
                 later(2000);
             }
             break;
+        case 120: {
+            std::string ids;
+            workspace.forEachPane([&](PaneId, NativePane &pane, bool) {
+                expectThat(connected(&pane),
+                           "every window pane has a daemon terminal");
+                if (!ids.empty())
+                    ids += ',';
+                ids += pane.daemon->sessionId();
+                expectThat(
+                    pane.v.sendInput("echo WINDOW-DETACH-ALIVE; sleep 60\n"),
+                    "start a long running program in each tab");
+            });
+            std::printf("window-detach-ids:%s\n", ids.c_str());
+            scriptStep = 121;
+            later(2000);
+            break;
+        }
+        case 121: {
+            const auto before = daemonSessions();
+            requestQuit();
+            const auto pending = wv.pendingClose();
+            expectThat(pending && pending->scope == CloseScope::Window &&
+                           canDetachWindow(),
+                       "a busy daemon window asks and permits detach");
+            handleAction("close.cancel");
+            expectThat(running && !wv.pendingClose(),
+                       "Cancel keeps the whole window alive");
+            const auto after = daemonSessions();
+            expectThat(before.size() == 2 && after.size() == before.size() &&
+                           std::all_of(before.begin(),
+                                       before.end(),
+                                       [&](const auto &entry) {
+                                           return std::any_of(
+                                               after.begin(),
+                                               after.end(),
+                                               [&](const auto &row) {
+                                                   return row.id == entry.id;
+                                               });
+                                       }),
+                       "Cancel leaves both daemon session IDs untouched");
+            requestQuit();
+            handleAction("close.detach");
+            expectThat(!running && keepTerminals,
+                       "Window Detach selects the existing keep-terminals "
+                       "shutdown policy");
+            scriptDone = true;
+            break;
+        }
+        case 122: {
+            int retained = 0;
+            workspace.forEachPane([&](PaneId, NativePane &pane, bool) {
+                if (visibleText(pane.v.model()).find("WINDOW-DETACH-ALIVE") !=
+                    std::string::npos) {
+                    ++retained;
+                    expectThat(!pane.v.ended() && paneState(pane).busy,
+                               "the retained program is still live in the "
+                               "daemon, not just stale replay");
+                }
+            });
+            expectThat(retained == 2,
+                       "both programs survived window detach and replay after "
+                       "reattachment");
+            scriptDone = true;
+            running = false;
+            break;
+        }
         case 110: {
             NativePane *pane = workspace.focusedPane();
             const bool local = pane && pane->link && !pane->daemon;
@@ -2042,6 +2155,16 @@ int runPtyFrontend(const char *font,
             expectThat(visibleText(pane->v.model()).find("Settings") !=
                            std::string::npos,
                        "the local TUI has drawn");
+            expectThat(
+                !canDetachWindow(),
+                "a live local Settings PTY prevents whole-window detach");
+            requestQuit();
+            expectThat(wv.pendingClose().has_value(),
+                       "the mixed window asks before closing");
+            handleAction("close.detach");
+            expectThat(running && !keepTerminals && !pane->v.ended(),
+                       "even a stale detach action cannot kill a mixed "
+                       "local/daemon window");
             expectThat(pane->v.sendInput("theme\r\x1b[B\r"),
                        "choose Blue in the local settings program");
             later(2000);

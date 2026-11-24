@@ -561,6 +561,11 @@ if(BUILD_TESTING)
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/settings_native.py"
                     "$<TARGET_FILE:matterm>" "$<TARGET_FILE:matterm-daemon>")
             set_tests_properties(settings_native PROPERTIES TIMEOUT 100)
+
+            add_test(NAME window_detach_native
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/window_detach_native.py"
+                    $<TARGET_FILE:matterm> $<TARGET_FILE:matterm-daemon>)
+            set_tests_properties(window_detach_native PROPERTIES TIMEOUT 100)
         endif()
 
         # Detach tab, then Attach tab... is offered: local daemon, and --daemon-host through the fake ssh.

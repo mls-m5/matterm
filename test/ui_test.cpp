@@ -1,4 +1,5 @@
 #include "mls-unit-test/unittest.h"
+#include "closeprompt.h"
 #include "ui/commandpalette.h"
 #include "ui/dialogs.h"
 #include "ui/shortcuts.h"
@@ -280,6 +281,35 @@ TEST_CASE("The wheel scrolls the list") {
         out = d.click(closeColumn, size.rows - 2);
         EXPECT(out.close && out.action == "close.confirm");
         EXPECT(!d.click(1, 1).close);
+    }
+
+    TEST_CASE("Window detach requires every live pane to survive; cancel stays default") {
+        EXPECT(!windowDetachAvailable({}));
+        EXPECT(windowDetachAvailable({{false, true}, {true, false}, {true, true}}));
+        EXPECT(!windowDetachAvailable({{false, true}, {false, false}}));
+        EXPECT(!windowDetachAvailable({{true, true}}));
+        CloseRequest request;
+        request.scope = CloseScope::Window;
+        request.backgroundAvailable = true;
+        auto choices = request.buttons();
+        EXPECT(choices.size() == 3);
+        EXPECT(choices[1].label == "Detach");
+        EXPECT(choices[1].action == "close.detach");
+        std::vector<ConfirmDialog::Button> buttons;
+        for (const auto &b : choices) buttons.push_back({b.label, b.action});
+        ConfirmDialog dialog("Busy window", buttons, request.cancelIndex(), request.cancelIndex());
+        EXPECT(dialog.key({keys::Enter, false, false, false}).action == "close.cancel");
+        dialog.key({keys::Left, false, false, false});
+        EXPECT(dialog.key({keys::Enter, false, false, false}).action == "close.detach");
+        EXPECT(dialog.key({keys::Escape, false, false, false}).action == "close.cancel");
+        request.scope = CloseScope::Tab;
+        EXPECT(request.buttons().size() == 2);
+        request.scope = CloseScope::Pane;
+        EXPECT(request.buttons().size() == 2);
+        request.scope = CloseScope::Window;
+        request.backgroundAvailable = false;
+        EXPECT(request.buttons().size() == 2);
+        EXPECT(request.cancelIndex() == 1);
     }
 
     TEST_CASE("ConfirmDialog: long and hostile text is wrapped and shown printable") {
