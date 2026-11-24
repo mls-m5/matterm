@@ -20,7 +20,12 @@ constexpr std::size_t maxString = 2048;
 
 } // namespace
 
-struct VtParser::Impl {
+namespace {
+// One VT/UTF-8 state machine, specialized only at semantic dispatch sites.
+// Model mode keeps its original per-byte path; choosing the optional text
+// implementation costs one branch per feed(), not one per model operation.
+template <bool TextMode>
+struct ParserState {
     enum class State {
         Ground,
         Escape,
@@ -49,8 +54,10 @@ struct VtParser::Impl {
         bool savedUseG1 = false;
     };
 
-    TerminalModel &model;
+    TerminalModel *model;
     VtEvents events;
+    std::function<void(std::u32string_view)> textSink;
+    bool textKnown = false;
     const Rendition defaults;
     Context primary;
     Context alternate;
@@ -68,24 +75,37 @@ struct VtParser::Impl {
     std::string controlString;
     char32_t lastPainted = 0;
 
-    Impl(TerminalModel &terminal,
-         VtEvents handlers,
-         ColorReference foreground,
-         ColorReference background)
-        : model(terminal)
+    ParserState(TerminalModel &terminal,
+                VtEvents handlers,
+                ColorReference foreground,
+                ColorReference background)
+        : model(&terminal)
         , events(std::move(handlers))
         , defaults{foreground, background}
         , primary{defaults, defaults, false}
         , alternate{defaults, defaults, false} {
+        static_assert(!TextMode);
         applyColors();
     }
 
+    explicit ParserState(VtParser::TextOnly options)
+        : model(nullptr)
+        , textSink(std::move(options.text))
+        , textKnown(options.startAtKnownBoundary)
+        , defaults{ColorReference::defaultColor(),
+                   ColorReference::defaultColor()}
+        , primary{defaults, defaults, false}
+        , alternate{defaults, defaults, false} {
+        static_assert(TextMode);
+        if (!textKnown)
+            enterUnsynchronized();
+    }
     Context &context() {
-        return model.alternateScreen() ? alternate : primary;
+        return model->alternateScreen() ? alternate : primary;
     }
     void applyColors() {
         const auto &style = context().style;
-        model.setColorReferences(style.foreground, style.background);
+        model->setColorReferences(style.foreground, style.background);
         auto attributes = style.attributes;
         if (style.inverse) {
             attributes = attributes | CellAttribute::Inverse;
@@ -93,10 +113,10 @@ struct VtParser::Impl {
         if (style.conceal) {
             attributes = attributes | CellAttribute::Conceal;
         }
-        model.setAttributes(attributes);
+        model->setAttributes(attributes);
     }
     void save() {
-        model.saveCursor();
+        model->saveCursor();
         context().saved = context().style;
         context().hasSaved = true;
         context().savedG0 = context().g0Graphics;
@@ -107,7 +127,7 @@ struct VtParser::Impl {
         if (!context().hasSaved) {
             return;
         }
-        model.restoreCursor();
+        model->restoreCursor();
         context().style = context().saved;
         context().g0Graphics = context().savedG0;
         context().g1Graphics = context().savedG1;
@@ -115,11 +135,11 @@ struct VtParser::Impl {
         applyColors();
     }
     void alternateMode(bool enabled) {
-        if (model.alternateScreen() == enabled) {
+        if (model->alternateScreen() == enabled) {
             return;
         }
         const auto inherited = context();
-        model.setAlternateScreen(enabled);
+        model->setAlternateScreen(enabled);
         if (enabled) {
             alternate = Context{inherited.style, inherited.style, false};
             alternate.g0Graphics = inherited.g0Graphics;
@@ -138,6 +158,78 @@ struct VtParser::Impl {
         osc = false;
         discardString = false;
     }
+    void enterUnsynchronized() noexcept {
+        resetInput();
+        textKnown = false;
+        // DCS-style discard: BEL/LF cannot establish a ground boundary.
+        state = State::String;
+        osc = false;
+        discardString = true;
+    }
+    void textPoint(char32_t cp) {
+        if (cp == U'\ufffd') {
+            // Invalid UTF-8 may have been a raw 8-bit string introducer.
+            // Fail closed, including literal replacement characters.
+            enterUnsynchronized();
+            return;
+        }
+        if (cp >= 0x80 && cp <= 0x9f) {
+            // Map UTF-8 encoded C1 controls into the SAME VT state machine.
+            // Normal model-mode behavior is deliberately unchanged.
+            unsigned char final = 0;
+            switch (cp) {
+            case 0x90:
+                final = 'P';
+                break; // DCS
+            case 0x98:
+                final = 'X';
+                break; // SOS
+            case 0x9b:
+                final = '[';
+                break; // CSI
+            case 0x9c:
+                final = '\\';
+                break; // ST
+            case 0x9d:
+                final = ']';
+                break; // OSC
+            case 0x9e:
+                final = '^';
+                break; // PM
+            case 0x9f:
+                final = '_';
+                break; // APC
+            default:
+                break;
+            }
+            if (final) {
+                byte(escape);
+                byte(final);
+            }
+            else if (state == State::StringEscape) {
+                // An ignored C1 still separates ESC from a later backslash.
+                // Consume the same discard transition as other payload, so
+                // ESC + C1 + backslash can NEVER manufacture an ST.
+                byte(0x7f);
+            }
+            return;
+        }
+        if (state == State::Ground && cp >= 0x20 && cp != 0x7f) {
+            if (textKnown && textSink)
+                textSink(std::u32string_view(&cp, 1));
+        }
+        else if (cp < 0x80) {
+            byte(static_cast<unsigned char>(cp));
+        }
+        else if (state == State::String || state == State::StringEscape) {
+            // Non-ASCII payload stays discarded, and cancels a pending ESC
+            // which was not followed by a literal string terminator.
+            byte(0x7f);
+        }
+        else {
+            enterUnsynchronized(); // Malformed non-ASCII escape/CSI suffix.
+        }
+    }
     void paint(std::u32string text) {
         const auto &ctx = context();
         if (ctx.useG1 ? ctx.g1Graphics : ctx.g0Graphics) {
@@ -153,18 +245,26 @@ struct VtParser::Impl {
         if (!text.empty()) {
             lastPainted = text.back();
         }
-        model.write(text);
+        model->write(text);
     }
     void resetTerminal() {
         lastPainted = 0;
-        model.reset();
+        model->reset();
         primary = Context{defaults, defaults, false};
         alternate = Context{defaults, defaults, false};
         modes = {};
         applyColors();
-        model.eraseDisplay(TerminalModel::EraseMode::All);
+        model->eraseDisplay(TerminalModel::EraseMode::All);
     }
     void control(unsigned char byte) {
+        if constexpr (TextMode) {
+            if (textKnown && textSink &&
+                (byte == '\r' || byte == '\n' || byte == '\t')) {
+                const char32_t cp = byte;
+                textSink(std::u32string_view(&cp, 1));
+            }
+            return;
+        }
         if (byte == 0x0e) {
             context().useG1 = true;
             return;
@@ -177,7 +277,7 @@ struct VtParser::Impl {
         // effect.
         if (byte == '\r' || byte == '\n' || byte == '\b' || byte == '\t') {
             const char32_t ch = byte;
-            model.write(std::u32string_view(&ch, 1));
+            model->write(std::u32string_view(&ch, 1));
         }
     }
     void beginCsi() {
@@ -191,7 +291,7 @@ struct VtParser::Impl {
     void beginString(bool isOsc) {
         state = State::String;
         osc = isOsc;
-        discardString = !isOsc;
+        discardString = !isOsc || TextMode;
         controlString.clear();
     }
     void reportColor(std::string_view request) {
@@ -361,6 +461,8 @@ struct VtParser::Impl {
         }
         controlString.clear();
         state = State::Ground;
+        if constexpr (TextMode)
+            textKnown = true;
     }
     void escapeByte(unsigned char byte) {
         if (byte == '[') {
@@ -378,6 +480,8 @@ struct VtParser::Impl {
         }
         else {
             state = State::Ground;
+            if constexpr (TextMode)
+                return; // Lexical transitions above still run; no ESC actions.
             if (byte == '7') {
                 save();
             }
@@ -391,10 +495,10 @@ struct VtParser::Impl {
                 modes.applicationKeypad = byte == '=';
             }
             else if (byte == 'M') {
-                model.reverseIndex();
+                model->reverseIndex();
             }
             else if (byte == 'H') {
-                model.setTabStop();
+                model->setTabStop();
             }
             else if (byte == 'Z') {
                 if (events.reply) {
@@ -402,11 +506,11 @@ struct VtParser::Impl {
                 }
             }
             else if (byte == 'D') {
-                model.lineFeed();
+                model->lineFeed();
             }
             else if (byte == 'E') {
-                model.carriageReturn();
-                model.lineFeed();
+                model->carriageReturn();
+                model->lineFeed();
             }
         }
     }
@@ -420,17 +524,17 @@ struct VtParser::Impl {
         return parameters[index];
     }
     void relative(int dx, int dy) {
-        const auto cursor = model.cursor();
+        const auto cursor = model->cursor();
         const auto x = std::clamp(std::int64_t(cursor.column) + dx,
                                   std::int64_t(0),
-                                  std::int64_t(model.columns() - 1));
-        const auto top = model.originMode() ? model.scrollTop() : 0;
-        const auto bottom =
-            model.originMode() ? model.scrollBottom() : int(model.rows()) - 1;
+                                  std::int64_t(model->columns() - 1));
+        const auto top = model->originMode() ? model->scrollTop() : 0;
+        const auto bottom = model->originMode() ? model->scrollBottom()
+                                                : int(model->rows()) - 1;
         const auto y = std::clamp(std::int64_t(cursor.row) + dy,
                                   std::int64_t(top),
                                   std::int64_t(bottom));
-        model.moveCursor(int(x), int(y));
+        model->moveCursor(int(x), int(y));
     }
     void sgr() {
         auto &style = context().style;
@@ -580,12 +684,12 @@ struct VtParser::Impl {
             context->g0Graphics = context->g1Graphics = context->useG1 = false;
         }
         modes = {};
-        model.setInsertMode(false);
-        model.setOriginMode(false);
-        model.setAutoWrap(true);
-        model.setScrollRegion(0, int(model.rows()) - 1);
-        model.setCursorVisible(true);
-        model.setCursorAppearance(model.cursor().shape, true);
+        model->setInsertMode(false);
+        model->setOriginMode(false);
+        model->setAutoWrap(true);
+        model->setScrollRegion(0, int(model->rows()) - 1);
+        model->setCursorVisible(true);
+        model->setCursorAppearance(model->cursor().shape, true);
         applyColors();
     }
     void dispatch(unsigned char final) {
@@ -602,8 +706,8 @@ struct VtParser::Impl {
                                        : style <= 4
                                            ? CursorState::Shape::Underline
                                            : CursorState::Shape::Bar;
-                    model.setCursorAppearance(shape,
-                                              style == 0 || style % 2 == 1);
+                    model->setCursorAppearance(shape,
+                                               style == 0 || style % 2 == 1);
                 }
             }
             return;
@@ -620,17 +724,17 @@ struct VtParser::Impl {
                     modes.bracketedPaste = final == 'h';
                 }
                 else if (parameters[i] == 6) {
-                    model.setOriginMode(final == 'h');
+                    model->setOriginMode(final == 'h');
                 }
                 else if (parameters[i] == 7) {
-                    model.setAutoWrap(final == 'h');
+                    model->setAutoWrap(final == 'h');
                 }
                 else if (parameters[i] == 12) {
-                    model.setCursorAppearance(model.cursor().shape,
-                                              final == 'h');
+                    model->setCursorAppearance(model->cursor().shape,
+                                               final == 'h');
                 }
                 else if (parameters[i] == 25) {
-                    model.setCursorVisible(final == 'h');
+                    model->setCursorVisible(final == 'h');
                 }
                 else if (parameters[i] == 1049 || parameters[i] == 47 ||
                          parameters[i] == 1047) {
@@ -674,7 +778,7 @@ struct VtParser::Impl {
         if (final == 'h' || final == 'l') {
             for (std::size_t i = 0; i < parameterCount; ++i) {
                 if (parameters[i] == 4) {
-                    model.setInsertMode(final == 'h');
+                    model->setInsertMode(final == 'h');
                 }
             }
             return;
@@ -697,27 +801,27 @@ struct VtParser::Impl {
             break;
         case 'E':
             relative(0, count);
-            model.carriageReturn();
+            model->carriageReturn();
             break;
         case 'F':
             relative(0, -count);
-            model.carriageReturn();
+            model->carriageReturn();
             break;
         case 'G':
-            model.moveCursor(count - 1, model.cursor().row);
+            model->moveCursor(count - 1, model->cursor().row);
             break;
         case 'd':
-            model.addressCursor(model.cursor().column, count - 1);
+            model->addressCursor(model->cursor().column, count - 1);
             break;
         case 'H':
         case 'f':
-            model.addressCursor(value(1, 1) - 1, count - 1);
+            model->addressCursor(value(1, 1) - 1, count - 1);
             break;
         case 'J':
         case 'K': {
             const int mode = value(0, 0, false);
             if (mode == 3 && final == 'J') {
-                model.eraseScrollback();
+                model->eraseScrollback();
             }
             else if (mode <= 2) {
                 const auto erase = mode == 0 ? TerminalModel::EraseMode::ToEnd
@@ -725,50 +829,50 @@ struct VtParser::Impl {
                                        ? TerminalModel::EraseMode::ToStart
                                        : TerminalModel::EraseMode::All;
                 if (final == 'J') {
-                    model.eraseDisplay(erase);
+                    model->eraseDisplay(erase);
                 }
                 else {
-                    model.eraseLine(erase);
+                    model->eraseLine(erase);
                 }
             }
             break;
         }
         case 'I':
-            model.tabForward(count);
+            model->tabForward(count);
             break;
         case 'Z':
-            model.tabBackward(count);
+            model->tabBackward(count);
             break;
         case 'g': {
             const int mode = value(0, 0, false);
             if (mode == 0 || mode == 3) {
-                model.clearTabStops(mode == 3);
+                model->clearTabStops(mode == 3);
             }
             break;
         }
         case '@':
-            model.insertCharacters(count);
+            model->insertCharacters(count);
             break;
         case 'P':
-            model.deleteCharacters(count);
+            model->deleteCharacters(count);
             break;
         case 'X':
-            model.eraseCharacters(count);
+            model->eraseCharacters(count);
             break;
         case 'L':
-            model.insertLines(count);
+            model->insertLines(count);
             break;
         case 'M':
-            model.deleteLines(count);
+            model->deleteLines(count);
             break;
         case 'S':
-            model.scrollUp(count);
+            model->scrollUp(count);
             break;
         case 'T':
-            model.scrollDown(count);
+            model->scrollDown(count);
             break;
         case 'r':
-            model.setScrollRegion(count - 1, value(1, int(model.rows())) - 1);
+            model->setScrollRegion(count - 1, value(1, int(model->rows())) - 1);
             break;
         case 'c':
             if (parameterCount == 1 && value(0, 0, false) == 0 &&
@@ -781,8 +885,8 @@ struct VtParser::Impl {
             break;
         case 'b':
             if (lastPainted) {
-                model.write(std::u32string(
-                    std::size_t(std::min(count, 65535)), lastPainted));
+                model->write(std::u32string(std::size_t(std::min(count, 65535)),
+                                            lastPainted));
             }
             break;
         case 's':
@@ -797,12 +901,12 @@ struct VtParser::Impl {
                     events.reply("\x1b[0n");
                 }
                 else if (parameters[0] == 6) {
-                    const auto cursor = model.cursor();
+                    const auto cursor = model->cursor();
                     const auto reply =
                         "\x1b[" +
                         std::to_string(
                             cursor.row + 1 -
-                            (model.originMode() ? model.scrollTop() : 0)) +
+                            (model->originMode() ? model->scrollTop() : 0)) +
                         ";" + std::to_string(cursor.column + 1) + "R";
                     events.reply(reply);
                 }
@@ -815,7 +919,8 @@ struct VtParser::Impl {
     void csiByte(unsigned char byte) {
         if (byte >= 0x40 && byte <= 0x7e) {
             if (state == State::Csi) {
-                dispatch(byte);
+                if constexpr (!TextMode)
+                    dispatch(byte);
             }
             state = State::Ground;
             return;
@@ -864,6 +969,8 @@ struct VtParser::Impl {
     void byte(unsigned char byte) {
         if (byte == 0x18 || byte == 0x1a) {
             resetInput();
+            if constexpr (TextMode)
+                textKnown = true;
             return;
         } // CAN/SUB
         if (state == State::String || state == State::StringEscape) {
@@ -914,7 +1021,7 @@ struct VtParser::Impl {
         }
         else if (state == State::EscapeIntermediate) {
             if (byte >= 0x30) {
-                if (byte == '0' || byte == 'B') {
+                if (!TextMode && (byte == '0' || byte == 'B')) {
                     if (charsetSelector == '(') {
                         context().g0Graphics = byte == '0';
                     }
@@ -933,6 +1040,16 @@ struct VtParser::Impl {
         }
     }
     void feed(std::string_view bytes) {
+        if constexpr (TextMode) {
+            // One incremental decoder step per byte keeps cancellation and
+            // synchronization independent of feed() chunk boundaries. In
+            // particular CAN must not erase UTF-8 pending AFTER it in a batch.
+            for (std::size_t i = 0; i < bytes.size(); ++i) {
+                for (const auto cp : utf8.feed(bytes.substr(i, 1)))
+                    textPoint(cp);
+            }
+            return;
+        }
         for (std::size_t i = 0; i < bytes.size();) {
             const auto next = static_cast<unsigned char>(bytes[i]);
             if (state == State::Ground && next >= 0x20 && next != 0x7f) {
@@ -946,13 +1063,21 @@ struct VtParser::Impl {
             }
             else {
                 if (state == State::Ground) {
-                    model.write(utf8.finish());
+                    model->write(utf8.finish());
                 }
                 byte(next);
                 ++i;
             }
         }
     }
+};
+} // namespace
+
+struct VtParser::Impl final : ParserState<false> {
+    using ParserState<false>::ParserState;
+};
+struct VtParser::TextImpl final : ParserState<true> {
+    using ParserState<true>::ParserState;
 };
 
 VtParser::VtParser(TerminalModel &model,
@@ -968,19 +1093,38 @@ VtParser::VtParser(TerminalModel &model, VtEvents events)
                                    std::move(events),
                                    ColorReference::defaultColor(),
                                    ColorReference::defaultColor())) {}
+VtParser::VtParser(TextOnly options)
+    : textImpl_(std::make_unique<TextImpl>(std::move(options))) {}
+bool VtParser::textSynchronized() const noexcept {
+    return textImpl_ && textImpl_->textKnown;
+}
 VtParser::~VtParser() = default;
 void VtParser::feed(std::string_view bytes) {
-    impl_->feed(bytes);
+    if (textImpl_)
+        textImpl_->feed(bytes);
+    else
+        impl_->feed(bytes);
 }
 void VtParser::finish() {
+    if (textImpl_) {
+        if (textImpl_->state == TextImpl::State::Ground &&
+            textImpl_->textKnown) {
+            for (const auto cp : textImpl_->utf8.finish())
+                textImpl_->textPoint(cp);
+        }
+        return; // Never turn an unfinished/cold control payload into ground.
+    }
     if (impl_->state == Impl::State::Ground) {
-        impl_->model.write(impl_->utf8.finish());
+        impl_->model->write(impl_->utf8.finish());
     }
     impl_->resetInput();
 }
 const TerminalModes &VtParser::modes() const noexcept {
-    return impl_->modes;
+    return textImpl_ ? textImpl_->modes : impl_->modes;
 }
 void VtParser::resetInput() noexcept {
-    impl_->resetInput();
+    if (textImpl_)
+        textImpl_->enterUnsynchronized();
+    else
+        impl_->resetInput();
 }

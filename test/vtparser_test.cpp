@@ -378,4 +378,157 @@ TEST_CASE("OSC length boundary is exact and excessive parameters never apply "
     EXPECT_EQ(model.cell(1, 0).foregroundColor().value.r, 1);
 }
 
+TEST_CASE("Text-only mode reuses VT string handling at every byte split "
+          "without a model") {
+    const std::string bytes = "aå服务器\r\n"
+                              "\x1b[31mred\x1b[0m\t"
+                              "\x1b]52;c;SECRET\nPAYLOAD\a"
+                              "\x1bPDCS\x1b\\"
+                              "\x1b_APC\x1b\\"
+                              "\x1b^PM\x1b\\"
+                              "\x1b[6nend";
+    const auto run = [&](std::size_t split) {
+        std::u32string out;
+        VtParser parser(VtParser::TextOnly{
+            [&](std::u32string_view text) { out.append(text); }, true});
+        parser.feed(std::string_view(bytes).substr(0, split));
+        parser.feed(std::string_view(bytes).substr(split));
+        parser.finish();
+        return out;
+    };
+    const std::u32string expected = U"aå服务器\r\nred\tend";
+    for (std::size_t split = 0; split <= bytes.size(); ++split)
+        EXPECT(run(split) == expected);
+}
+
+TEST_CASE(
+    "Cold text tails never synchronize at LF BEL or nested string openers") {
+    std::u32string out;
+    VtParser parser(VtParser::TextOnly{
+        [&](std::u32string_view text) { out.append(text); }, false});
+    parser.feed("secret\nmore\a\x1b]0;still secret\a");
+    EXPECT(out.empty());
+    EXPECT(!parser.textSynchronized());
+    parser.finish();
+    parser.feed("still hidden");
+    EXPECT(out.empty());
+    EXPECT(!parser.textSynchronized());
+    parser.feed("\x1b");
+    parser.feed("\\safe");
+    EXPECT(parser.textSynchronized());
+    EXPECT(out == U"safe");
+    parser.resetInput();
+    parser.feed("hidden\n\a");
+    EXPECT(out == U"safe");
+    parser.feed("\x18"
+                "yes");
+    EXPECT(parser.textSynchronized());
+    EXPECT(out == U"safeyes");
+}
+
+TEST_CASE("Text mode suppresses encoded C1 strings and fails closed on invalid "
+          "UTF-8") {
+    const std::string bytes = "A\xc2\x9d"
+                              "52;c;hidden\n\aB\xc2\x90"
+                              "DCS\xc2\x9c"
+                              "C";
+    for (std::size_t split = 0; split <= bytes.size(); ++split) {
+        std::u32string out;
+        VtParser parser(VtParser::TextOnly{
+            [&](std::u32string_view text) { out.append(text); }, true});
+        parser.feed(std::string_view(bytes).substr(0, split));
+        parser.feed(std::string_view(bytes).substr(split));
+        EXPECT(out == U"ABC");
+        EXPECT(parser.textSynchronized());
+    }
+    std::u32string out;
+    VtParser parser(VtParser::TextOnly{
+        [&](std::u32string_view text) { out.append(text); }, true});
+    parser.feed("A\x9d"
+                "hidden\aB\x9c"
+                "hidden");
+    EXPECT(out == U"A");
+    EXPECT(!parser.textSynchronized());
+    parser.feed("\x1b\\C");
+    EXPECT(out == U"AC");
+    EXPECT(parser.textSynchronized());
+    parser.feed("\xc3");
+    parser.finish();
+    EXPECT(!parser.textSynchronized());
+}
+
+TEST_CASE("Text mode has no CSI REP expansion or string payload emission") {
+    std::u32string out;
+    VtParser parser(VtParser::TextOnly{
+        [&](std::u32string_view text) { out.append(text); }, true});
+    std::string bytes = "A";
+    for (int i = 0; i < 2000; ++i)
+        bytes += "\x1b[999999b\x1b[999999S\x1b[?1049h\x1b[?1049l";
+    parser.feed(bytes);
+    parser.feed("\x1b]52;c;" + std::string(2u << 20, 's') + "\x1b\\B");
+    EXPECT(out == U"AB");
+    EXPECT(parser.textSynchronized());
+}
+
+TEST_CASE("Text-only arbitrary input stays split invariant including "
+          "cancellation and pending UTF-8") {
+    std::uint32_t random = 123;
+    for (int trial = 0; trial < 20; ++trial) {
+        std::string bytes = "\x18"
+                            "å";
+        for (int i = 0; i < 128; ++i) {
+            random = random * 1664525u + 1013904223u;
+            bytes += char(random >> 24);
+        }
+        bytes += "\x1b\\\x18"
+                 "服务器\xc3";
+        const auto run = [&](std::size_t split) {
+            std::u32string out;
+            VtParser parser(VtParser::TextOnly{
+                [&](std::u32string_view text) { out.append(text); }, false});
+            parser.feed(std::string_view(bytes).substr(0, split));
+            parser.feed(std::string_view(bytes).substr(split));
+            parser.finish();
+            return out;
+        };
+        const auto expected = run(bytes.size());
+        for (std::size_t split = 0; split <= bytes.size(); ++split)
+            EXPECT(run(split) == expected);
+    }
+}
+
+TEST_CASE("Ignored C1 cannot join a separated ESC and backslash into a false "
+          "terminator") {
+    for (unsigned cp = 0x80; cp <= 0x9f; ++cp) {
+        if (cp == 0x90 || cp == 0x98 || cp >= 0x9b)
+            continue;
+        const std::string c1 = std::string("\xc2") + char(cp);
+        for (const std::string &prefix :
+             {std::string(), std::string("\x1bP"), std::string("\x1b]52;")}) {
+            const bool known = !prefix.empty();
+            const std::string bytes = prefix + "\x1b" + c1 + "\\SECRET";
+            for (std::size_t split = 0; split <= bytes.size(); ++split) {
+                std::u32string out;
+                VtParser parser(VtParser::TextOnly{
+                    [&](std::u32string_view text) { out.append(text); },
+                    known});
+                parser.feed(std::string_view(bytes).substr(0, split));
+                parser.feed(std::string_view(bytes).substr(split));
+                EXPECT(out.empty());
+                if (!known)
+                    EXPECT(!parser.textSynchronized());
+                parser.feed("\x1b\\safe");
+                EXPECT(out == U"safe");
+                EXPECT(parser.textSynchronized());
+            }
+            std::u32string out;
+            VtParser parser(VtParser::TextOnly{
+                [&](std::u32string_view text) { out.append(text); }, known});
+            for (std::size_t i = 0; i < bytes.size(); ++i)
+                parser.feed(std::string_view(bytes).substr(i, 1));
+            EXPECT(out.empty());
+        }
+    }
+}
+
 TEST_SUIT_END
