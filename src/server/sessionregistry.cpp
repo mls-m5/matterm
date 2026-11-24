@@ -448,6 +448,25 @@ std::vector<SessionRegistry::Info> SessionRegistry::list() const {
     }
     return out;
 }
+std::optional<SessionRegistry::OutputState> SessionRegistry::outputState(
+    const std::string &id) const {
+    const auto found = impl_->entries.find(id);
+    if (found == impl_->entries.end() || found->second->closing ||
+        found->second->ended)
+        return std::nullopt;
+    const auto &e = *found->second;
+    return OutputState{{id, e.attached, e.shared, e.ring.end(), e.name},
+                       e.ring.oldest(),
+                       e.ring.newestTime()};
+}
+std::optional<std::string> SessionRegistry::readOutput(
+    const std::string &id, std::uint64_t offset, std::size_t limit) const {
+    const auto found = impl_->entries.find(id);
+    if (found == impl_->entries.end() || found->second->closing ||
+        found->second->ended)
+        return std::nullopt;
+    return found->second->ring.read(offset, std::min(limit, kMaxOutputRead));
+}
 bool SessionRegistry::setShared(const std::string &id, bool shared) {
     const auto found = impl_->entries.find(id);
     if (found == impl_->entries.end() || found->second->closing ||

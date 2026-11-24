@@ -136,6 +136,19 @@ struct FakeSource : SessionSource {
     int openedRows = 0;
     std::vector<NewTerminal> created;
     std::string createError;
+    bool previewOn = true, previewChanged = false;
+    int previewWake = -1;
+    bool previewEnabled() const override {
+        return previewOn;
+    }
+    bool pollPreviewSettings() override {
+        const bool changed = previewChanged;
+        previewChanged = false;
+        return changed;
+    }
+    int previewPollMs() const override {
+        return previewWake;
+    }
     std::vector<ListEntry> list(std::string &error) override {
         ++lists;
         error = listError;
@@ -879,6 +892,48 @@ TEST_CASE("Rich-list preview refresh and paging never attach a terminal") {
     EXPECT_EQ(rig.source.opened, 0);
     rig.type("\r");
     EXPECT_EQ(rig.source.openedId, std::string("id2"));
+}
+
+TEST_CASE("A local preview privacy change clears displayed cache without "
+          "metadata requests or attachment") {
+    auto e = entry("a", "work");
+    e.preview = "private recent output";
+    Rig rig({e});
+    EXPECT(rig.host.shows("private recent output"));
+    const int before = rig.source.lists;
+    rig.source.previewWake = 1000;
+    EXPECT(rig.mode->timeoutMs(rig.now) >= 0 &&
+           rig.mode->timeoutMs(rig.now) <= 1000);
+    rig.source.previewOn = false;
+    rig.source.previewChanged = true;
+    rig.mode->tick(rig.now + 1000);
+    EXPECT(rig.host.shows("preview disabled"));
+    EXPECT(!rig.host.shows("private recent output"));
+    EXPECT_EQ(rig.source.lists, before);
+    EXPECT_EQ(rig.source.opened, 0);
+    rig.source.previewOn = true;
+    rig.source.previewChanged = true;
+    rig.mode->tick(rig.now + 2000);
+    EXPECT(rig.host.shows(
+        "preview unavailable")); // Old text was erased, not just hidden.
+    EXPECT(!rig.host.shows("private recent output"));
+    EXPECT_EQ(rig.source.lists, before);
+    EXPECT_EQ(rig.source.opened, 0);
+}
+
+TEST_CASE("Open-list output sample age advances with fake time but does not "
+          "refetch or attach") {
+    auto e = entry("a", "work");
+    e.outputAgeMs = 2000;
+    Rig rig({e});
+    EXPECT(rig.host.shows("known output 2s ago"));
+    const int before = rig.source.lists;
+    EXPECT(rig.mode->timeoutMs(rig.now) >= 0 &&
+           rig.mode->timeoutMs(rig.now) <= 1000);
+    rig.mode->tick(rig.now + 30000);
+    EXPECT(rig.host.shows("known output 32s ago"));
+    EXPECT_EQ(rig.source.lists, before);
+    EXPECT_EQ(rig.source.opened, 0);
 }
 
 TEST_SUIT_END

@@ -120,7 +120,8 @@ TEST_CASE(
                                  "  \"windowFrame\": \"own\",\n"
                                  "  \"scrollbackRows\": 1000,\n"
                                  "  \"computerNamePlacement\": \"center\",\n"
-                                 "  \"confirmClose\": true\n"
+                                 "  \"confirmClose\": true,\n"
+                                 "  \"terminalListPreview\": true\n"
                                  "}\n";
     EXPECT_EQ(Settings().toText(), expected);
     EXPECT_EQ(Settings::fromText(expected).settings.toText(), expected);
@@ -207,4 +208,14 @@ TEST_CASE("Equal settings compare equal, whatever else is in the file") {
     EXPECT(Settings().sameValues(Settings::fromText("{}").settings));
 }
 
+TEST_CASE(
+    "Terminal list preview uses the existing bool model and defaults on") {
+    Settings settings;
+    EXPECT(settings.flag("terminalListPreview"));
+    std::string error;
+    EXPECT(settings.set("terminalListPreview", "false", error));
+    const auto again = Settings::fromText(settings.toText());
+    EXPECT(again.ok() && !again.settings.flag("terminalListPreview"));
+    EXPECT(again.settings.toText() == settings.toText());
+}
 TEST_SUIT_END

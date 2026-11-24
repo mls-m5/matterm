@@ -71,7 +71,16 @@ std::optional<std::string> ReplayRing::read(std::uint64_t offset,
     if (offset < oldest() || offset > end_)
         return {};
     std::string result;
-    for (const auto &chunk : chunks_) {
+    if (offset == end_ || limit == 0)
+        return result;
+    // deque has random-access iterators: locate a recent offset in O(log N)
+    // rather than walking the entire retained history for every list preview.
+    const auto first = std::partition_point(
+        chunks_.begin(), chunks_.end(), [offset](const Chunk &chunk) {
+            return chunk.offset + chunk.bytes.size() <= offset;
+        });
+    for (auto it = first; it != chunks_.end(); ++it) {
+        const auto &chunk = *it;
         const auto finish = chunk.offset + chunk.bytes.size();
         if (offset >= finish)
             continue;

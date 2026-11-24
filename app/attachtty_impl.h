@@ -9,12 +9,15 @@
 #include "control.h"
 #include "daemonclient.h"
 #include "daemonlink.h"
+#include "listmetadata.h"
+#include "settingswatch.h"
 #include "tty/posix/session.h"
 #include "tty/posix/terminal.h"
 #include "ttyattach.h"
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -208,41 +211,47 @@ public:
         , own_(std::move(ownSession))
         , cwd_(std::move(cwd)) {}
 
+    bool previewEnabled() const override {
+        return previewEnabled_;
+    }
+    int previewPollMs() const override {
+        return int(settings::SettingsWatcher::kPollMs);
+    }
+    bool pollPreviewSettings() override {
+        settingsWatch_.poll();
+        const bool enabled =
+            settingsWatch_.settings().flag("terminalListPreview");
+        const bool changed = enabled != previewEnabled_;
+        previewEnabled_ = enabled;
+        return changed;
+    }
+
     std::vector<ListEntry> list(std::string &error) override {
+        pollPreviewSettings();
         std::vector<ListEntry> entries;
         std::string why;
-        const auto reply = askDaemon(socket_, mtd::ListSessions{}, why);
+        mtd::ControlWelcome welcome;
+        welcome.version = 0;
+        const auto reply =
+            askDaemon(socket_, mtd::ListSessions{}, why, 2000, &welcome);
         const auto *listed =
             reply ? std::get_if<mtd::SessionList>(&*reply) : nullptr;
         if (!listed) {
             error = daemonProblem(why);
             return entries;
         }
-        // What runs there needs one more question per terminal; a few hundred
-        // ms in all at most.
-        const auto deadline =
-            std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
-        bool asking = true;
-        for (const mtd::SessionEntry &entry : listed->sessions) {
-            std::optional<mtd::SessionInfo> info;
-            if (asking && std::chrono::steady_clock::now() < deadline) {
-                std::string ignored;
-                const auto answer = askDaemon(
-                    socket_, mtd::GetSessionInfo{entry.id}, ignored, 500);
-                if (const auto *got =
-                        answer ? std::get_if<mtd::SessionInfo>(&*answer)
-                               : nullptr) {
-                    info = *got;
-                }
-                else {
-                    asking = false; // The daemon is slow or gone: show what the
-                                    // list already says.
-                }
-            }
-            entries.push_back(
-                makeListEntry(entry, info ? &*info : nullptr, own_));
-        }
-        return entries;
+        ListMetadataTools tools;
+        tools.nowMs = steadyMs;
+        tools.ask = [&](const mtd::ControlRequest &request, int timeout) {
+            std::string ignored;
+            return askDaemon(socket_, request, ignored, timeout);
+        };
+        return readListMetadata(
+            listed->sessions,
+            mtd::versionFromWelcome(welcome.build, welcome.version),
+            previewEnabled_,
+            own_,
+            tools);
     }
 
     std::unique_ptr<AttachedPane> open(const std::string &id,
@@ -320,6 +329,15 @@ private:
     std::string socket_;
     std::string own_;
     std::string cwd_;
+    // This is the local client's file, also when socket_ is an SSH tunnel.
+    settings::RealFileSystem settingsFs_;
+    settings::SettingsWatcher settingsWatch_{
+        settingsFs_,
+        settings::settingsPath(std::getenv("XDG_CONFIG_HOME"),
+                               std::getenv("HOME")),
+        steadyMs};
+    bool previewEnabled_ =
+        settingsWatch_.settings().flag("terminalListPreview");
 };
 
 } // namespace attachimpl

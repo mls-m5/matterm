@@ -697,6 +697,7 @@ does not know are written back as they were. The definitions (key, text, type, d
 | `scrollbackRows` | 100..100000 | 1000 (terminals made afterwards) |
 | `computerNamePlacement` | center, left, right | center |
 | `confirmClose` | true, false | true |
+| `terminalListPreview` | true, false (client requests decoded list previews; potentially sensitive) | true |
 
 A value that does not fit is a warning and its default is used; a file that is not JSON is reported (in the window title) and the
 values from before stay; saving over a broken file is refused.

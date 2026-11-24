@@ -32,6 +32,11 @@ public:
     }
     std::uint64_t safeStart() const;
     protocol::Time oldestTime() const;
+    std::optional<protocol::Time> newestTime() const {
+        return chunks_.empty()
+                   ? std::nullopt
+                   : std::optional<protocol::Time>(chunks_.back().timestamp);
+    }
     std::uint64_t oldestSerial() const;
     std::optional<std::string> read(std::uint64_t offset,
                                     std::size_t limit) const;

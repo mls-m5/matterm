@@ -1,3 +1,4 @@
+#include "listmetadata.h"
 #include "mls-unit-test/unittest.h"
 #include "palette.h"
 #include "terminalmodel.h"
@@ -5,6 +6,7 @@
 #include "ttylist.h"
 #include "vtparser.h"
 
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -569,6 +571,197 @@ TEST_CASE("A scroll delta may omit title characters; a resized full snapshot "
     canvas.resize(81, 8);
     renderList(list, canvas);
     EXPECT(canvas.flush().find("Namedone") != std::string::npos);
+}
+
+TEST_CASE(
+    "Details batches advance by processed prefix including vanished IDs") {
+    std::vector<mtd::SessionEntry> fixtures;
+    for (int i = 0; i < 20; ++i)
+        fixtures.push_back(entry(std::string(30, 'a') + char('a' + i / 16) +
+                                 "0123456789abcdef"[i % 16]));
+    ListMetadataTools tools;
+    tools.nowMs = [] { return std::int64_t(0); };
+    int calls = 0;
+    bool validRequests = true;
+    tools.ask = [&](const mtd::ControlRequest &request,
+                    int timeout) -> std::optional<mtd::ControlReply> {
+        validRequests = validRequests && timeout == 500;
+        const auto &q = std::get<mtd::GetSessionDetails>(request);
+        validRequests = validRequests && q.includePreview;
+        mtd::SessionDetails reply;
+        if (++calls == 1) {
+            validRequests = validRequests && q.ids.size() == 16;
+            reply.processedCount = 3;
+            for (const auto index : {0u, 2u}) {
+                mtd::SessionDetail d;
+                d.id = q.ids[index];
+                d.cwd = "/tmp/work";
+                d.foregroundBusy = false;
+                d.outputAgeMs = 123;
+                d.preview = "ready";
+                reply.rows.push_back(d);
+            }
+        }
+        else {
+            validRequests = validRequests &&
+                            q.ids.front() == fixtures[calls == 2 ? 3 : 19].id;
+            reply.processedCount = std::uint16_t(q.ids.size());
+        }
+        return reply;
+    };
+    const auto result =
+        readListMetadata(fixtures, {1, 3, 5, {}}, true, {}, tools);
+    EXPECT_EQ(calls, 3);
+    EXPECT(validRequests);
+    EXPECT_EQ(result.size(), fixtures.size());
+    EXPECT(result[0].foregroundBusy.has_value() && !*result[0].foregroundBusy);
+    EXPECT_EQ(*result[0].preview, std::string("ready"));
+    EXPECT_EQ(*result[0].outputAgeMs, std::uint64_t(123));
+    EXPECT(!result[1].preview && !result[1].foregroundBusy); // Vanished.
+}
+
+TEST_CASE(
+    "Details reject zero progress, foreign prefix IDs and duplicate rows") {
+    const std::vector<mtd::SessionEntry> fixtures = {
+        entry(std::string(32, 'a')), entry(std::string(32, 'b'))};
+    for (int mode = 0; mode < 3; ++mode) {
+        ListMetadataTools tools;
+        tools.nowMs = [] { return std::int64_t(0); };
+        int calls = 0;
+        tools.ask = [&](const mtd::ControlRequest &,
+                        int) -> std::optional<mtd::ControlReply> {
+            ++calls;
+            mtd::SessionDetails reply;
+            reply.processedCount = mode == 0 ? 0 : 1;
+            mtd::SessionDetail d;
+            d.id = fixtures[mode == 1 ? 1 : 0].id;
+            d.preview = "must not leak";
+            if (mode)
+                reply.rows.push_back(d);
+            if (mode == 2)
+                reply.rows.push_back(d);
+            return reply;
+        };
+        const auto result =
+            readListMetadata(fixtures, {1, 3, 5, {}}, true, {}, tools);
+        EXPECT_EQ(calls, 1);
+        EXPECT(!result[0].preview && !result[1].preview);
+    }
+}
+
+TEST_CASE(
+    "Legacy details are version gated and share one bounded request budget") {
+    const std::vector<mtd::SessionEntry> fixtures = {
+        entry(std::string(32, 'a')), entry(std::string(32, 'b'))};
+    ListMetadataTools tools;
+    std::int64_t now = 0;
+    tools.nowMs = [&] { return now; };
+    int calls = 0;
+    bool bounded = true;
+    tools.ask = [&](const mtd::ControlRequest &request,
+                    int timeout) -> std::optional<mtd::ControlReply> {
+        bounded = bounded && timeout <= 500;
+        ++calls;
+        const auto &q =
+            std::get<mtd::GetSessionInfo>(request); // Never details on 1.3.4.
+        now += 1500;
+        mtd::SessionInfo reply;
+        reply.id = q.id;
+        reply.cwd = "/tmp/legacy";
+        reply.busy = false;
+        return reply;
+    };
+    const auto result =
+        readListMetadata(fixtures, {1, 3, 4, {}}, true, {}, tools);
+    EXPECT_EQ(calls, 1);
+    EXPECT(bounded);
+    EXPECT_EQ(result[0].title, std::string("legacy"));
+    EXPECT(!result[0].foregroundBusy && !result[0].preview &&
+           !result[0].outputAgeMs);
+    EXPECT(result[1].folder.empty());
+}
+
+TEST_CASE(
+    "Disabled or invalid preview metadata is never retained by the client") {
+    const std::vector<mtd::SessionEntry> fixtures = {
+        entry(std::string(32, 'a'))};
+    for (const bool enabled : {true, false}) {
+        ListMetadataTools tools;
+        tools.nowMs = [] { return std::int64_t(0); };
+        bool requestedCorrectly = false;
+        tools.ask = [&](const mtd::ControlRequest &request,
+                        int) -> std::optional<mtd::ControlReply> {
+            requestedCorrectly =
+                std::get<mtd::GetSessionDetails>(request).includePreview ==
+                enabled;
+            mtd::SessionDetail d;
+            d.id = fixtures[0].id;
+            d.preview = enabled ? "\x1b]52;c;secret\x07" : "not requested";
+            return mtd::SessionDetails{1, {d}};
+        };
+        const auto result =
+            readListMetadata(fixtures, {1, 3, 5, {}}, enabled, {}, tools);
+        EXPECT(requestedCorrectly);
+        EXPECT(!result[0].preview);
+    }
+}
+
+TEST_CASE("Disabling previews clears cached text and filters later stale "
+          "refresh data") {
+    auto e = makeListEntry(entry("a"), nullptr);
+    e.preview = "private";
+    ListModel model;
+    model.setEntries({e});
+    model.setPreviewEnabled(false);
+    EXPECT(!model.entries()[0].preview);
+    model.setEntries(
+        {e}); // Defense in depth even if a source returns stale text.
+    EXPECT(!model.entries()[0].preview);
+    model.setPreviewEnabled(true);
+    EXPECT(!model.entries()[0].preview);
+}
+
+TEST_CASE("A standard-width metadata row reserves space for explicit unknown "
+          "output age") {
+    const auto legacy = info("/home/user/projects/a-long-folder-tree", false);
+    ListModel model;
+    model.setEntries({makeListEntry(entry("a", false, "work"), &legacy)});
+    const auto image = drawn(model, 80, 10);
+    EXPECT(rowText(image, 6).find("foreground unknown") != std::string::npos);
+    EXPECT(rowText(image, 6).find("not attached") != std::string::npos);
+    EXPECT(rowText(image, 6).find("output unknown") != std::string::npos);
+}
+
+TEST_CASE("Known output samples age on the local monotonic clock without "
+          "claiming live inactivity") {
+    auto e = makeListEntry(entry("a", false, "work"), nullptr);
+    e.outputAgeMs = 2000;
+    ListModel model;
+    model.setNowMs(1000);
+    model.setEntries({e});
+    EXPECT(rowText(drawn(model, 100, 10), 6).find("known output 2s ago") !=
+           std::string::npos);
+    model.setNowMs(31000);
+    const auto later = rowText(drawn(model, 100, 10), 6);
+    EXPECT(later.find("known output 32s ago") != std::string::npos);
+    EXPECT(later.find("output 2s ago") == std::string::npos);
+    e.outputAgeMs.reset();
+    model.setEntries({e});
+    model.setNowMs(61000);
+    EXPECT(rowText(drawn(model, 100, 10), 6).find("output unknown") !=
+           std::string::npos);
+}
+
+TEST_CASE("Local output sample age saturates instead of wrapping and clamps a "
+          "backward clock") {
+    ListEntry e;
+    e.outputAgeMs = std::numeric_limits<std::uint64_t>::max() - 1000;
+    e.outputAgeMeasuredAtMs = 1000;
+    EXPECT_EQ(*knownOutputAgeMs(e, 31000),
+              std::numeric_limits<std::uint64_t>::max());
+    EXPECT_EQ(*knownOutputAgeMs(e, 500), *e.outputAgeMs);
+    e.outputAgeMs.reset();
+    EXPECT(!knownOutputAgeMs(e, 31000));
 }
 
 TEST_SUIT_END

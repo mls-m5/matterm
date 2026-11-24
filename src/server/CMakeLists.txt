@@ -20,7 +20,8 @@ endif()
 add_library(matterm-daemon-wire ${PROJECT_SOURCE_DIR}/src/daemon/control.cpp ${PROJECT_SOURCE_DIR}/src/daemon/socketpath.cpp ${PROJECT_SOURCE_DIR}/src/daemon/buildhash.cpp)
 target_compile_features(matterm-daemon-wire PUBLIC cxx_std_17)
 target_include_directories(matterm-daemon-wire PUBLIC ${PROJECT_SOURCE_DIR}/src/daemon)
-target_link_libraries(matterm-daemon-wire PUBLIC matterm::protocol)
+# The metadata codec reuses the small existing UTF-8 decoder (no terminal model/VT).
+target_link_libraries(matterm-daemon-wire PUBLIC matterm::protocol matterm::utf8)
 add_library(matterm-server-core auth.cpp config.cpp ratelimiter.cpp proxysource.cpp replayring.cpp sessionregistry.cpp ptysessionhost.cpp server.cpp localsessions.cpp)
 # fast-json defines non-inline specializations: include it from config.cpp only.
 target_include_directories(matterm-server-core PRIVATE ${PROJECT_SOURCE_DIR}/lib/fast-json/include)

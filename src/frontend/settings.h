@@ -97,6 +97,13 @@ inline const std::vector<Definition> &definitions() {
          Type::Bool,
          {},
          "true"},
+        {"terminalListPreview",
+         "Terminal list output preview",
+         "Show a recent decoded output fragment in the terminal list. May "
+         "contain sensitive text; off prevents requesting previews.",
+         Type::Bool,
+         {},
+         "true"},
     };
     return all;
 }

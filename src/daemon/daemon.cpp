@@ -11,18 +11,19 @@
 
 #include <boost/asio.hpp>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <cstring>
-#include <thread>
-#include <sys/un.h>
-#include <chrono>
 #include <deque>
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
+#include <thread>
 #include <unistd.h>
 
 namespace mtd {
@@ -334,6 +335,59 @@ private:
             return;
         }
         reply(SessionEnded{m.id});
+    }
+    void handle(const GetSessionDetails &m) {
+        if (mode_ != Mode::Control || d_.config.version.format != 1 ||
+            d_.config.version.breaking != 3 || d_.config.version.additive < 5) {
+            controlError(
+                ControlErrorCode::BadMessage,
+                "session details require owner control protocol 1.3.5");
+            closeAfterFlush();
+            return;
+        }
+        SessionDetails details;
+        const auto now = timeNow();
+        const frontend::LinuxProcSource source;
+        for (const auto &id : m.ids) {
+            const auto output = d_.registry->outputState(id);
+            if (!output) {
+                ++details.processedCount;
+                continue;
+            }
+            SessionDetail row;
+            row.id = id;
+            row.name = output->info.name;
+            if (const auto ids = d_.registry->processIds(id)) {
+                const auto state =
+                    frontend::probePane(source, ids->shell, ids->foreground);
+                row.foregroundBusy = state.foregroundBusy;
+                if (protocol::validUtf8(state.cwd))
+                    row.cwd = state.cwd;
+                if (std::all_of(state.command.begin(),
+                                state.command.end(),
+                                [](const auto &arg) {
+                                    return protocol::validUtf8(arg);
+                                }))
+                    row.command = state.command;
+            }
+            if (output->newestOutput) {
+                const auto then = *output->newestOutput;
+                row.outputAgeMs = now <= then ? 0
+                                              : std::uint64_t(now.count()) -
+                                                    std::uint64_t(then.count());
+            }
+            // Preview remains unavailable until the separately tested bounded
+            // daemon-only cache is wired; no decoding on this metadata path.
+            details.rows.push_back(std::move(row));
+            ++details.processedCount;
+            std::string encoded;
+            if (!encode(ControlReply(details), encoded)) {
+                details.rows.pop_back();
+                --details.processedCount;
+                break; // This ID is not consumed; retain the 16-KiB frame cap.
+            }
+        }
+        reply(details);
     }
     void handle(const GetSessionInfo &m) {
         const auto ids = d_.registry->processIds(m.id);

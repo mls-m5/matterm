@@ -81,6 +81,17 @@ struct NewTerminal {
 class SessionSource {
 public:
     virtual ~SessionSource() = default;
+    // Local client privacy settings only. Polling must be cheap/bounded and
+    // never attach or fetch daemon metadata merely to toggle presentation.
+    virtual bool previewEnabled() const {
+        return true;
+    }
+    virtual bool pollPreviewSettings() {
+        return false;
+    }
+    virtual int previewPollMs() const {
+        return -1;
+    }
     // The running terminals; on failure an empty list and `error` set.
     virtual std::vector<ListEntry> list(std::string &error) = 0;
     // Takes the terminal over, sized `columns` x `rows`. Null with `error` when
@@ -180,6 +191,15 @@ public:
     // Serve the connection and show what changed.
     void tick(std::int64_t now) {
         now_ = now;
+        const auto previousSecond = list_.nowMs() / 1000;
+        list_.setNowMs(now_);
+        if (!pane_ && list_.hasKnownOutputAge() &&
+            previousSecond != now_ / 1000)
+            dirty_ = true;
+        if (source_.pollPreviewSettings()) {
+            list_.setPreviewEnabled(source_.previewEnabled());
+            dirty_ = true;
+        }
         if (pane_) {
             if (options_.metrics) {
                 observePane();
@@ -252,6 +272,10 @@ public:
             const std::int64_t left = std::max<std::int64_t>(0, at - now);
             wait = wait < 0 ? left : std::min(wait, left);
         };
+        if (source_.previewPollMs() > 0)
+            soonest(now + source_.previewPollMs());
+        if (!pane_ && list_.hasKnownOutputAge())
+            soonest(now + 1000);
         if (decoder_.pending()) {
             soonest(now + options_.escapeMs);
         }
@@ -292,6 +316,7 @@ private:
     // `gone`: a terminal that was just ended; the daemon may still list it for
     // a moment.
     void refresh(const std::string &gone = {}) {
+        list_.setNowMs(now_);
         std::string error;
         auto entries = source_.list(error);
         if (!gone.empty()) {
@@ -301,6 +326,7 @@ private:
                               [&](const ListEntry &e) { return e.id == gone; }),
                           entries.end());
         }
+        list_.setPreviewEnabled(source_.previewEnabled());
         list_.setEntries(std::move(entries));
         list_.setMessage(error);
         dirty_ = true;
@@ -719,6 +745,7 @@ private:
     }
 
     void draw() {
+        list_.setNowMs(now_);
         if (!dirty_) {
             return;
         }

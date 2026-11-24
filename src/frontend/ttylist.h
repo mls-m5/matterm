@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -26,6 +27,8 @@ struct ListEntry {
         foregroundBusy; // false means shell foreground, NOT idle prompt.
     std::optional<std::uint64_t>
         outputAgeMs; // Snapshot age; not a local wall-clock timestamp.
+    std::optional<std::int64_t>
+        outputAgeMeasuredAtMs; // Client monotonic receipt time.
     std::optional<std::string>
         preview;        // Recent output, not a last-command/screen-row claim.
     bool inUse = false; // Another client has it: opening it takes it over.
@@ -145,6 +148,14 @@ public:
     void setEntries(std::vector<ListEntry> entries) {
         const std::string chosen = selected() ? selected()->id : std::string();
         entries_ = std::move(entries);
+        for (auto &entry : entries_) {
+            if (entry.outputAgeMs && !entry.outputAgeMeasuredAtMs)
+                entry.outputAgeMeasuredAtMs = nowMs_;
+        }
+        if (!previewEnabled_) {
+            for (auto &entry : entries_)
+                entry.preview.reset();
+        }
         index_ = entries_.empty() || preferNew_ ? 0 : 1;
         for (std::size_t i = 0; i < entries_.size(); ++i) {
             if (!chosen.empty() && entries_[i].id == chosen) {
@@ -167,9 +178,25 @@ public:
     }
     void setPreviewEnabled(bool enabled) {
         previewEnabled_ = enabled;
+        if (!enabled) {
+            for (auto &entry : entries_)
+                entry.preview.reset();
+        }
     }
     bool previewEnabled() const {
         return previewEnabled_;
+    }
+    void setNowMs(std::int64_t now) {
+        nowMs_ = now;
+    }
+    std::int64_t nowMs() const {
+        return nowMs_;
+    }
+    bool hasKnownOutputAge() const {
+        return std::any_of(
+            entries_.begin(), entries_.end(), [](const ListEntry &e) {
+                return e.outputAgeMs.has_value();
+            });
     }
     const std::vector<ListEntry> &entries() const {
         return entries_;
@@ -304,6 +331,7 @@ private:
     std::size_t index_ = 0;
     bool preferNew_ = false;
     bool previewEnabled_ = true;
+    std::int64_t nowMs_ = 0;
     std::string message_;
     std::string question_;
     std::string confirming_;            // The id the question is about.
@@ -405,17 +433,32 @@ inline int listCapacity(int rows) {
     const int available = listContentEnd(rows) - listContentTop(rows);
     return available > 0 ? std::max(1, available / 3) : 0;
 }
-inline std::string outputAge(const ListEntry &entry) {
+inline std::optional<std::uint64_t> knownOutputAgeMs(const ListEntry &entry,
+                                                     std::int64_t now) {
     if (!entry.outputAgeMs)
+        return std::nullopt;
+    const std::uint64_t elapsed =
+        entry.outputAgeMeasuredAtMs && now > *entry.outputAgeMeasuredAtMs
+            ? std::uint64_t(now) - std::uint64_t(*entry.outputAgeMeasuredAtMs)
+            : 0;
+    const auto limit = std::numeric_limits<std::uint64_t>::max();
+    return elapsed > limit - *entry.outputAgeMs ? limit
+                                                : *entry.outputAgeMs + elapsed;
+}
+inline std::string outputAge(const ListEntry &entry, std::int64_t now) {
+    const auto age = knownOutputAgeMs(entry, now);
+    if (!age)
         return "output unknown";
-    const auto seconds = *entry.outputAgeMs / 1000;
+    const auto seconds = *age / 1000;
+    // This ages the latest sample, not a claim that no new output has happened
+    // since collection. Only an explicit refresh asks the daemon again.
     if (seconds == 0)
-        return "output <1s ago";
+        return "known output <1s ago";
     if (seconds < 60)
-        return "output " + std::to_string(seconds) + "s ago";
+        return "known output " + std::to_string(seconds) + "s ago";
     if (seconds < 3600)
-        return "output " + std::to_string(seconds / 60) + "m ago";
-    return "output " + std::to_string(seconds / 3600) + "h ago";
+        return "known output " + std::to_string(seconds / 60) + "m ago";
+    return "known output " + std::to_string(seconds / 3600) + "h ago";
 }
 
 // Metadata previews must already be plain text. Fail closed if the daemon
@@ -428,12 +471,9 @@ inline std::string previewText(const ListEntry &entry, bool enabled) {
         return "[preview unavailable]";
     if (entry.preview->empty())
         return "[no recent output]";
-    const std::string bounded = entry.preview->substr(0, 4096);
-    for (const auto cp : ::tty::decodeUtf8(bounded)) {
-        if (unsafeScreenCodePoint(cp))
-            return "[unsafe preview omitted]";
-    }
-    return bounded;
+    if (!mtd::validPreviewText(*entry.preview))
+        return "[unsafe preview omitted]";
+    return *entry.preview;
 }
 
 // Draws the list over the whole canvas.
@@ -490,6 +530,16 @@ inline void renderList(const ListModel &model, ::tty::Canvas &canvas) {
                 y,
                 "  " + (entry.what.empty() ? "program unknown" : entry.what));
             if (height > 1) {
+                const std::string foreground =
+                    !entry.foregroundBusy   ? "foreground unknown"
+                    : *entry.foregroundBusy ? "foreground program"
+                                            : "shell foreground";
+                const std::string metadata =
+                    " | " + foreground + " | " +
+                    (entry.inUse ? "attached" : "not attached") + " | " +
+                    outputAge(entry, model.nowMs());
+                // Metadata is bounded ASCII. Reserve its complete width before
+                // clipping a potentially long/wide folder at standard sizes.
                 x = put(canvas,
                         4,
                         y + 1,
@@ -497,18 +547,8 @@ inline void renderList(const ListModel &model, ::tty::Canvas &canvas) {
                         kDim,
                         kScreenBg,
                         false,
-                        std::max(8, (columns - 4) / 3));
-                const std::string foreground =
-                    !entry.foregroundBusy   ? "foreground unknown"
-                    : *entry.foregroundBusy ? "foreground program"
-                                            : "shell foreground";
-                put(canvas,
-                    x,
-                    y + 1,
-                    " | " + foreground + " | " +
-                        (entry.inUse ? "attached" : "not attached") + " | " +
-                        outputAge(entry),
-                    kDim);
+                        std::max(8, columns - 4 - int(metadata.size())));
+                put(canvas, x, y + 1, metadata, kDim);
             }
             if (height > 2) {
                 put(canvas,

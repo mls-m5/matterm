@@ -46,10 +46,12 @@ public:
         for (const auto &d : definitions()) {
             if (d.type == Type::Computers)
                 continue;
-            const int section = std::string(d.key) == "scrollbackRows" ||
-                                        std::string(d.key) == "confirmClose"
-                                    ? 1
-                                    : 0;
+            const int section =
+                std::string(d.key) == "scrollbackRows" ||
+                        std::string(d.key) == "confirmClose" ||
+                        std::string(d.key) == "terminalListPreview"
+                    ? 1
+                    : 0;
             all.push_back({d.key,
                            d.label,
                            value(settings, d.key, {}),

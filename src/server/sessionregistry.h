@@ -63,6 +63,18 @@ public:
         std::string name;            // Given by the owner (daemon: SetName); empty: none.
     };
     std::vector<Info> list() const;
+    // Pure retained-output inspection. Never attaches, pumps, acknowledges,
+    // changes a generation, or performs VT work. Missing/ending IDs => null.
+    struct OutputState {
+        Info info;
+        std::uint64_t oldest = 0;
+        std::optional<protocol::Time> newestOutput;
+    };
+    static constexpr std::size_t kMaxOutputRead = 16u << 10;
+    std::optional<OutputState> outputState(const std::string &id) const;
+    std::optional<std::string> readOutput(const std::string &id,
+                                          std::uint64_t offset,
+                                          std::size_t limit) const;
     // Marks a live session shared or private. False for an unknown or ending session.
     bool setShared(const std::string &id, bool shared);
     // Names a live session (the caller validated the text). False for an unknown or ending one.

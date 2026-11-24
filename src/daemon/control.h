@@ -27,12 +27,21 @@ constexpr std::uint16_t kControlVersion = 3;
 constexpr std::uint16_t kControlFormat = 1;
 constexpr std::uint16_t kControlBreaking = kControlVersion;
 constexpr std::uint16_t kControlAdditive =
-    4; // 2: GetActivity/Activity; 3: CreateTerminal; 4: EndSession.
+    5; // 2: activity; 3: create terminal; 4: end session; 5: bounded details.
 constexpr std::size_t kMaxName = 64;
 constexpr std::size_t kMaxListed = 256;
 constexpr std::size_t kMaxPath = 4096;
 constexpr std::size_t kMaxArguments = 32;
 constexpr std::size_t kMaxArgument = 1024;
+constexpr std::size_t kMaxDetailIds = 16;
+constexpr std::size_t kMaxDetailCommand =
+    4096; // Aggregate argv bytes incl. terminators.
+constexpr std::size_t kMaxPreviewBytes = 1024;
+constexpr std::size_t kMaxPreviewScalars = 256;
+// Strict, single-line preview validation, shared with the frontend. No C0/C1
+// or bidi controls; valid printable Unicode (including CJK) is retained.
+bool validPreviewScalar(char32_t cp) noexcept;
+bool validPreviewText(std::string_view text);
 
 struct ControlHello { std::uint16_t version = kControlVersion; };
 // First frame of a connection from the web server (`matterm-server --expose-local-sessions`).
@@ -82,6 +91,12 @@ struct EndSession {
 };
 // What a session runs, for saving and for the close question (read from /proc by the daemon).
 struct GetSessionInfo { std::string id; };
+// Additive 1.3.5, socket-owner control connections only. No attach/takeover.
+// IDs are 32 lowercase hex chars, unique, 1..kMaxDetailIds per request.
+struct GetSessionDetails {
+    std::vector<std::string> ids;
+    bool includePreview = false;
+};
 // Names a terminal so that it can be told apart in the lists (a laptop window, a browser). At
 // most 64 bytes of UTF-8 without control characters; empty removes the name.
 struct SetName { std::string id; std::string name; };
@@ -127,6 +142,23 @@ struct SessionInfo {
     std::vector<std::string> command; // Its command line when busy and safe to keep.
     std::string name;                 // See SetName.
 };
+struct SessionDetail {
+    std::string id, name, cwd;
+    std::vector<std::string> command;
+    // False means identified shell foreground, NOT proof of an idle prompt.
+    std::optional<bool> foregroundBusy;
+    // Time since the daemon read the latest retained PTY output; never replay.
+    std::optional<std::uint64_t> outputAgeMs;
+    // null = unavailable, present empty = known empty. Decoded output fragment,
+    // NOT the last command, visible screen row or a secrecy filter.
+    std::optional<std::string> preview;
+};
+struct SessionDetails {
+    // Prefix of requested IDs consumed, including IDs that disappeared.
+    // Rows stop before exceeding the unchanged 16-KiB daemon frame cap.
+    std::uint16_t processedCount = 0;
+    std::vector<SessionDetail> rows;
+};
 struct ShutdownReply {
     bool done = false;           // false: refused because the count was not current
     std::uint32_t sessions = 0;  // The live sessions at that moment
@@ -154,7 +186,8 @@ using ControlRequest = std::variant<ControlHello,
                                     SetName,
                                     GetActivity,
                                     CreateTerminal,
-                                    EndSession>;
+                                    EndSession,
+                                    GetSessionDetails>;
 using ControlReply = std::variant<ControlWelcome,
                                   SessionList,
                                   Status,
@@ -163,7 +196,8 @@ using ControlReply = std::variant<ControlWelcome,
                                   SessionCreated,
                                   SessionInfo,
                                   Activity,
-                                  SessionEnded>;
+                                  SessionEnded,
+                                  SessionDetails>;
 
 // True for a first byte in the control range (either direction).
 inline bool isControlType(std::uint8_t type) { return (type & 0xf0) == 0x40 || (type & 0xf0) == 0xc0; }

@@ -33,6 +33,9 @@ struct PaneState {
     std::string cwd;                  // Absolute, empty when unknown.
     bool busy = false;                // The foreground process is not a shell.
     std::vector<std::string> command; // Its command line, empty if unknown or unsafe to keep.
+    // Rich-list classification is independent of the conservative legacy busy
+    // fallback. Shell foreground is NOT proof of an idle prompt.
+    std::optional<bool> foregroundBusy;
 };
 
 inline bool isControl(unsigned char c) {
@@ -92,6 +95,8 @@ inline PaneState probePane(const ProcSource &source, int shell, int foreground) 
     }
     const auto argv = source.cmdline(pid);
     if (argv && !argv->empty()) {
+        if (foreground > 0 && !argv->front().empty())
+            state.foregroundBusy = !isShellName(argv->front());
         if (!isShellName(argv->front())) {
             state.busy = true;
             if (plainCommand(*argv)) state.command = *argv;

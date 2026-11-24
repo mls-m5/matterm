@@ -50,4 +50,32 @@ TEST_CASE(
     EXPECT_EQ(a.cost(), std::size_t(0));
     EXPECT_EQ(a.oldest(), a.end());
 }
+TEST_CASE("Newest retained output time is O1 metadata, unknown without "
+          "retained chunks") {
+    server::ReplayRing ring(4096), disabled(0);
+    EXPECT(!ring.newestTime());
+    ring.append(protocol::Time(12), "abc", 1);
+    EXPECT(ring.newestTime() == protocol::Time(12));
+    ring.append(protocol::Time(44), "def", 2);
+    EXPECT(ring.newestTime() == protocol::Time(44));
+    EXPECT(ring.read(3, 3) == std::string("def"));
+    EXPECT(ring.newestTime() == protocol::Time(44));
+    disabled.append(protocol::Time(44), "not retained", 1);
+    EXPECT(!disabled.newestTime());
+    ring.clear();
+    EXPECT(!ring.newestTime());
+}
+TEST_CASE("Replay offset lookup preserves all boundaries while locating late "
+          "chunks efficiently") {
+    server::ReplayRing ring(2u << 20);
+    std::string all;
+    for (unsigned i = 0; i < 4000; ++i) {
+        const std::string chunk(1 + i % 4, char('a' + i % 26));
+        all += chunk;
+        ring.append(protocol::Time(i), chunk, i);
+    }
+    for (std::size_t i = 0; i <= all.size(); ++i)
+        EXPECT(ring.read(i, 19) == all.substr(i, 19));
+    EXPECT(ring.read(ring.end(), 0) == std::string());
+}
 TEST_SUIT_END
