@@ -97,6 +97,13 @@ inline const std::vector<Definition> &definitions() {
          Type::Bool,
          {},
          "true"},
+        {"drawBatching",
+         "Draw batching",
+         "Limit redraws during heavy output to ten per second. Turn off to "
+         "compare input latency; does not change transport or output parsing.",
+         Type::Bool,
+         {},
+         "true"},
         {"terminalListPreview",
          "Terminal list output preview",
          "Show a recent decoded output fragment in the terminal list. May "

@@ -137,6 +137,8 @@ struct FakeSource : SessionSource {
     std::vector<NewTerminal> created;
     std::string createError;
     bool previewOn = true, previewChanged = false;
+    bool batchingOn = true;
+    bool drawBatchingEnabled() const override { return batchingOn; }
     int previewWake = -1;
     bool previewEnabled() const override {
         return previewOn;
@@ -618,6 +620,35 @@ TEST_CASE(
     const auto shown = rig.host.shown.size();
     rig.type("a"); // A key: drawn now, not at the next hundred milliseconds.
     EXPECT(rig.host.shown.size() > shown);
+}
+
+TEST_CASE("Draw hold policy only throttles enabled floods without immediate input") {
+    EXPECT(holdFloodDraw(true, true, false, 10));
+    EXPECT(!holdFloodDraw(false, true, false, 10));
+    EXPECT(!holdFloodDraw(true, false, false, 10));
+    EXPECT(!holdFloodDraw(true, true, true, 10));
+    EXPECT(!holdFloodDraw(true, true, false, 100));
+    EXPECT(!holdFloodDraw(true, true, false, -1));
+}
+
+TEST_CASE("Disabling batching live releases a held rendered picture without changing ingestion") {
+    Rig rig;
+    rig.enterPane();
+    rig.now += 10;
+    rig.source.last->link.output(std::string(40000, 'x') + "\r\nheld\r\n");
+    rig.mode->tick(rig.now);
+    rig.source.batchingOn = false;
+    for (int i = 0; i < 3; ++i) {
+        rig.now += 10;
+        const auto before = rig.host.shown.size();
+        const auto ingested = rig.source.last->view().outputBytes();
+        const std::string output = std::string(40000, 'x') + "\r\nunbatched" + std::to_string(i) + "\r\n";
+        rig.source.last->link.output(output);
+        rig.mode->tick(rig.now);
+        EXPECT(rig.host.shown.size() > before);
+        EXPECT(rig.host.shows("unbatched" + std::to_string(i)));
+        EXPECT_EQ(rig.source.last->view().outputBytes(), ingested + output.size());
+    }
 }
 
 TEST_CASE("The mode waits for a lone Escape only briefly") {

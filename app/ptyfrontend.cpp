@@ -12,6 +12,7 @@
 #include "daemonclient.h"
 #include "daemoncommands.h"
 #include "daemonlink.h"
+#include "drawbatching.h"
 #include "framesignature.h"
 #include "inputencoder.h"
 #include "perfclient.h"
@@ -2181,6 +2182,25 @@ int runPtyFrontend(const char *font,
                 reply ? std::get_if<mtd::SessionList>(&*reply) : nullptr;
             expectThat(list && list->sessions.size() == smokeCount,
                        "Settings did not create a daemon terminal");
+            expectThat(settingsWatch.settings().flag("drawBatching"),
+                       "draw batching defaults on in the native client");
+            if (auto *pane = workspace.focusedPane())
+                pane->v.sendInput("\x1b\x1b"
+                                  "Draw batching\r\x1b[B\r");
+            later(2000);
+            scriptStep = 112;
+            break;
+        }
+        case 112: {
+            expectThat(!settingsWatch.settings().flag("drawBatching"),
+                       "the native client follows locally disabled draw "
+                       "batching live, also over SSH");
+            expectThat(
+                !holdFloodDraw(settingsWatch.settings().flag("drawBatching"),
+                               true,
+                               false,
+                               10),
+                "off bypasses only the draw hold policy during a flood");
             if (auto *pane = workspace.focusedPane())
                 pane->v.sendInput("\x11");
             scriptDone = true;
@@ -3207,8 +3227,11 @@ int runPtyFrontend(const char *font,
         const bool flooded =
             ingestNow > ingestSeen && ingestNow - ingestSeen > 32768;
         ingestSeen = ingestNow;
-        const bool hold = flooded && !eventThisRound && !forceRedraw &&
-                          now - lastDrawMs < 100;
+        const bool hold =
+            holdFloodDraw(settingsWatch.settings().flag("drawBatching"),
+                          flooded,
+                          eventThisRound || forceRedraw,
+                          std::int64_t(now - lastDrawMs));
         if (perfLog.enabled()) {
             perfLog.second.counters.layoutMs += perfClockMs() - layoutAt;
         }

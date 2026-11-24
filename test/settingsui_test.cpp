@@ -304,4 +304,18 @@ TEST_CASE("Mouse follows narrow scroll and resize layout, sections and search "
     EXPECT(ui.rows().back().value == last);
 }
 
+TEST_CASE("Draw batching is in Terminal and searchable as a live bool") {
+    MemorySettings fs;
+    frontend::settings::SettingsWatcher watch(fs, "settings.json", [] { return 0; });
+    frontend::settings::SettingsUI ui(watch);
+    ui.setQuery("Draw batching");
+    EXPECT(ui.rows().size() == 1);
+    EXPECT(ui.rows().front().key == "drawBatching");
+    EXPECT(ui.rows().front().section == 1);
+    ui.handle(key(tty::Key::Type::Enter));
+    ui.handle(key(tty::Key::Type::Down));
+    ui.handle(key(tty::Key::Type::Enter));
+    EXPECT(!watch.settings().flag("drawBatching"));
+}
+
 TEST_SUIT_END

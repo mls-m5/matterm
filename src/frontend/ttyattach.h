@@ -1,5 +1,7 @@
 #pragma once
 
+#include "drawbatching.h"
+
 // `matterm --attach-tty` (docs/tasks/attach-tty.md): the mode itself. A list of
 // the terminals that run in the daemon, one of them full screen in the host
 // terminal, the keys of the host terminal forwarded to it. This class knows
@@ -83,6 +85,9 @@ public:
     virtual ~SessionSource() = default;
     // Local client privacy settings only. Polling must be cheap/bounded and
     // never attach or fetch daemon metadata merely to toggle presentation.
+    virtual bool drawBatchingEnabled() const {
+        return true;
+    }
     virtual bool previewEnabled() const {
         return true;
     }
@@ -225,8 +230,11 @@ public:
                 programEnded();
             }
         }
-        if (dirty_ && flooded_ && lastDrawAt_ != 0 &&
-            now_ - lastDrawAt_ < kFloodDrawMs) {
+        if (dirty_ && lastDrawAt_ != 0 &&
+            holdFloodDraw(source_.drawBatchingEnabled(),
+                          flooded_,
+                          false,
+                          now_ - lastDrawAt_)) {
             held_ = true; // timeoutMs() wakes us when it may be drawn.
             return;
         }

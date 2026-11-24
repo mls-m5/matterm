@@ -211,6 +211,9 @@ public:
         , own_(std::move(ownSession))
         , cwd_(std::move(cwd)) {}
 
+    bool drawBatchingEnabled() const override {
+        return settingsWatch_.settings().flag("drawBatching");
+    }
     bool previewEnabled() const override {
         return previewEnabled_;
     }

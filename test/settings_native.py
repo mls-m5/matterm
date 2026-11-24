@@ -37,7 +37,9 @@ with tempfile.TemporaryDirectory(prefix="matterm-settings-native-") as tmp:
             if result.returncode:
                 raise RuntimeError(mode + ": " + result.stdout + result.stderr)
             with open(tmp + "/config/matterm/settings.json", encoding="utf-8") as file:
-                assert json.load(file)["theme"] == "blue", "Settings did not edit the client file"
+                saved = json.load(file)
+                assert saved["theme"] == "blue", "Settings did not edit the client file"
+                assert saved["drawBatching"] is False, "Draw batching was not disabled in the local client file"
             print("pass native local Settings tab:", mode)
     finally:
         server.terminate()

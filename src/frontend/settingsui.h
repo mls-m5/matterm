@@ -49,7 +49,8 @@ public:
             const int section =
                 std::string(d.key) == "scrollbackRows" ||
                         std::string(d.key) == "confirmClose" ||
-                        std::string(d.key) == "terminalListPreview"
+                        std::string(d.key) == "terminalListPreview" ||
+                        std::string(d.key) == "drawBatching"
                     ? 1
                     : 0;
             all.push_back({d.key,
