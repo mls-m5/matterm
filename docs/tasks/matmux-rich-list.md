@@ -40,6 +40,27 @@ Preview text is potentially sensitive. Provide a way to disable it without
 removing the three-line selection/navigation improvements. Do not add a setting
 outside the existing settings model independently of the other agent.
 
+## Approved metadata direction
+
+Integrator approved agent2 proposal `51917c9` (design document on agent2) after
+review: additive control 1.3.5 with bounded batched details and unchanged legacy
+messages; optional foreground classification, last retained PTY-read age and text
+preview. Preview extraction reuses the EXISTING VtParser lexer in an opt-in,
+model-free mode without semantic expansion/replies. Review this parser change
+separately before backend integration; ordinary parsing must remain unchanged.
+
+Decode only on request: at most 16 KiB per ID, 64 KiB/s daemon-wide, 16 LRU
+entries, five-second inactive expiry, bounded text/lexer state. Respect the
+existing 16 KiB frame limit with processed-count continuation. Cold tails with
+unknown control-string state remain unavailable until safe synchronization;
+never strip escapes from a raw tail or assume LF/BEL proves ground state.
+
+`terminalListPreview` is approved as a client setting, default true, owned by
+agent2. Disabled means no preview decoding/transmission and clearing displayed
+cached text; it does not erase the daemon's existing replay history. Older
+daemons still provide the list with unavailable optional metadata. Availability
+and decoding cost must be verified, not assumed from byte limits.
+
 ## Acceptance
 
 Tests first: all three selected lines highlighted; visible selection without
