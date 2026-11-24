@@ -357,8 +357,8 @@ inline std::unique_ptr<ui::ConfirmDialog> replaceTerminalDialog(
                         : "This pane runs " + attachdetail::plain(running, 40) +
                               ". Replace its terminal?",
         std::move(buttons),
-        0,
-        2);
+        2,
+        0);
 }
 
 inline std::unique_ptr<ui::ConfirmDialog> killTerminalDialog(
