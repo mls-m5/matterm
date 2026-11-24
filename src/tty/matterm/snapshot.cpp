@@ -298,6 +298,12 @@ std::string hostRestore(bool inAlternateScreen) {
     if (inAlternateScreen) {
         out += "\x1b[?1049l";
     }
+    else {
+        // CUP clamps to the host's actual last row, including a recent resize.
+        // After resetting margins/origin above, append a fresh line there:
+        // scrolling preserves the former bottom row instead of overwriting it.
+        out += "\x1b[65535;1H";
+    }
     out += "\r\n";
     return out;
 }

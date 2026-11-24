@@ -438,6 +438,23 @@ try:
               and "parse_ms=" in log and "in_msg=" in log,
               role + " writes diagnostics and a final summary with a real daemon")
 
+    # Primary-screen detach must append below existing contents, not at the program's cursor.
+    primary = Tty(socket, ("--new", "--", "sh", "-c",
+                          "printf '\\033[24;1Hbottom-preserved\\033[2;10r\\033[3;1Hprimary-mid'; sleep 60"))
+    ttys.append(primary)
+    check(primary.wait_for("primary-mid"), "primary-screen program with a restricted scroll region is shown")
+    fcntl.ioctl(primary.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 3, 20, 0, 0))
+    primary.pump(0.2)
+    primary.raw = b""
+    primary.send(b"\x02d")
+    check(primary.wait_exit(), "primary-screen detach returns")
+    restore = primary.raw
+    bottom = restore.find(b"\x1b[65535;1H\r\n")
+    note = restore.find(b"matmux:")
+    check(bottom >= 0 and (note < 0 or bottom < note) and
+          restore.find(b"\x1b[r") < bottom and b"\x1b[2J" not in restore and b"\x1b[?1049l" not in restore,
+          "primary detach resets margins then appends at host bottom without clearing or switching screens")
+
     # SIGTERM restores the terminal.
     k = Tty(socket, ("--new",))
     ttys.append(k)

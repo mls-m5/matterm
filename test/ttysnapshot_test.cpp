@@ -303,6 +303,26 @@ TEST_CASE(
            CellAttribute::None);
 }
 
+TEST_CASE("Primary restore appends below the bottom row without clearing content, even after resize") {
+    for (const auto rows : {1, 3, 24}) {
+        Term host(40, 30);
+        host.model.resize(20, std::size_t(rows));
+        host.feed("\x1b[" + std::to_string(rows) + ";1Hbottom-kept\x1b[1;1H");
+        host.feed(tty::hostRestore(false));
+        EXPECT_EQ(host.model.cursor().row, rows - 1);
+        EXPECT_EQ(host.model.cursor().column, 0);
+        if (rows > 1) {
+            EXPECT_EQ(host.model.cell(0, std::size_t(rows - 2)).codePoint, U'b');
+        } else {
+            EXPECT(host.model.historySize() > 0);
+            EXPECT_EQ(host.model.historyCell(0, host.model.historySize() - 1).codePoint, U'b');
+        }
+    }
+    const auto alt = tty::hostRestore(true);
+    EXPECT(alt.find("\x1b[65535;1H") == std::string::npos);
+    EXPECT(alt.find("\x1b[?1049l\r\n") != std::string::npos);
+}
+
 TEST_CASE(
     "Random output of every kind arrives the same (a seeded property test)") {
     std::uint64_t state = 12345;
