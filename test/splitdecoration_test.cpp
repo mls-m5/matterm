@@ -65,25 +65,22 @@ TEST_CASE(
                         false);
     EXPECT(pixel(below, 12, 25) == 1);
 }
-TEST_CASE("Outer edges avoid own-frame double borders and screen edges in "
-          "maximized/fullscreen") {
-    const PixelRect content{0, 5, 40, 25};
-    const auto ordinary = splitDecoration({}, content, false, false, false);
-    EXPECT(pixel(ordinary, 0, 12) == 0 && pixel(ordinary, 39, 12) == 0);
-    EXPECT(pixel(ordinary, 20, 5) == 0 && pixel(ordinary, 20, 29) == 0);
-    const auto own = splitDecoration({}, content, true, false, false);
-    EXPECT(pixel(own, 0, 12) == -1 && pixel(own, 20, 29) == -1);
-    EXPECT(pixel(own, 20, 5) ==
-           0); // Thin seam below the strip, not a second window frame.
-    for (const bool fullscreen : {false, true}) {
-        const auto edge =
-            splitDecoration({}, content, false, !fullscreen, fullscreen);
-        EXPECT(pixel(edge, 0, 12) == -1 && pixel(edge, 20, 29) == -1);
-        EXPECT(pixel(edge, 20, 5) == 0);
-        EXPECT(
-            splitDecoration({}, {0, 0, 40, 30}, false, !fullscreen, fullscreen)
-                .outer.empty());
-    }
+TEST_CASE("Gutter decoration never overlays terminal-area boundaries") {
+    for (bool own : {false, true})
+        for (int state : {0, 1, 2}) {
+            const auto plan =
+                splitDecoration({{{10, 5, 12, 25}, SplitDirection::SideBySide}},
+                                {0, 5, 40, 25},
+                                own,
+                                state == 1,
+                                state == 2);
+            EXPECT(plan.outer.empty());
+            EXPECT(pixel(plan, 0, 12) == -1);
+            EXPECT(pixel(plan, 39, 12) == -1);
+            EXPECT(pixel(plan, 5, 5) == -1);
+            EXPECT(pixel(plan, 15, 5) ==
+                   1); // Unbroken top connection, within the existing gutter.
+        }
 }
 TEST_CASE(
     "One-pixel, clipped and tiny geometry never creates invalid rectangles") {

@@ -5,6 +5,38 @@ SDL/fullscreen tests `4e899b6`, implementation `fd4e6c7`. Human commit identity
 used; no merge/sync with rewritten main. The earlier experimental pump policy
 is not a dependency of this feature.
 
+## Follow-up: right-strip background regression
+
+Tests `1eac145`, `81207ca`, `ecda9e1`; fix `c706b73`.
+
+Actual SDL A/B readback against the pre-split paint order reproduces a change
+at the rightmost viewport pixel in all 16 system-frame matrix cases (normal /
+alternate screen, history present / absent, single / split pane, grey / blue).
+The other eleven reserved-strip pixels are unchanged. The original custom
+terminal background 0x3c5a78 became dark decoration 0x171717 with grey theme.
+The same post-pane outline can replace the scrollbar's last pixel and overwrite
+a full-block glyph at the left edge. The matrix uses real TerminalModel normal
+and alternate frames, not a fake alternate-screen flag. Actual track/thumb and
+wrap-marker pixels remain tested separately.
+
+Root cause: the post-pane `SplitDecoration.outer` paint, not beginFrame,
+PaneArea sizes, tint, or reserved-strip cell/background rendering. These were
+not changed by the split patch. No wider-than-one-pixel right-strip regression
+was reproduced; a user report of a wider rectangle needs separate evidence.
+
+The fix removes ALL terminal-boundary overlays and their gutter clipping.
+Only existing gutter pixels are decorated; their middle now naturally reaches
+the themed tab strip without a dark top seam. No renderer, cells, layout,
+scrollbar or hitbox changes. This deliberately leaves the requested additional
+own-frame dark border pending: it must later use the EXISTING frame's innermost
+pixel OUTSIDE the viewport, omit scrollbar edges and remain absent at screen
+edges when maximized/fullscreen. System-frame windows must have no extra app
+outline at all. The older outer-ring description below is superseded. Warning-free full build
+and 151/151 tests pass in 129.32 seconds after this follow-up. The SDL readback
+matrix passes, including original strip RGB, actual thumb/marker pixels and
+full-block edge glyph preservation. Physical desktop/GPU appearance remains
+unverified.
+
 ## Geometry and paint order
 
 `src/frontend/splitdecoration.h` is pure paint geometry in drawable pixels.
@@ -28,7 +60,9 @@ reserved gutter portions and remain visible. The former opaque full-gutter
 paint after all panes is removed; there is no second paint hiding those marks.
 The shared SDL renderer implementation and web frontend are unchanged.
 
-A one-pixel dark outer edge is painted over the terminal-area boundary only
+### Original outer-ring policy (superseded by the follow-up above)
+
+A one-pixel dark outer edge was painted over the terminal-area boundary only
 where it is not already supplied by the app's own frame. Ordinary system-frame
 windows get a thin terminal-area outline. Own-frame windows do not add another
 left/right/bottom ring; a seam immediately below a visible tab strip is allowed.

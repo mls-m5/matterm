@@ -1,9 +1,10 @@
+#include "../src/frontend/splitdecoration.h"
+#include "../src/frontend/themes.h"
 #include "cellbuffer.h"
 #include "mls-unit-test/unittest.h"
 #include "sdlbackend.h"
 #include "terminalmemory.h"
-#include "../src/frontend/splitdecoration.h"
-#include "../src/frontend/themes.h"
+#include "terminalmodel.h"
 
 #include <SDL.h>
 #include <SDL_ttf.h>
@@ -66,36 +67,164 @@ struct Fixture {
 
 TEST_SUIT_BEGIN(SdlBackend)
 
-TEST_CASE("Themed split junctions survive pane rendering while external scrollbar stays visible") {
+TEST_CASE("Themed split junctions survive pane rendering while external "
+          "scrollbar stays visible") {
     using namespace frontend;
     Fixture fixture;
     const std::vector<DividerBox> dividers = {
         {{100, 0, 12, 160}, SplitDirection::SideBySide},
         {{112, 70, 100, 12}, SplitDirection::Stacked}};
-    const auto decoration = splitDecoration(dividers, {0, 0, 320, 160}, true, false, false);
+    const auto decoration =
+        splitDecoration(dividers, {0, 0, 320, 160}, true, false, false);
     CellBuffer cells(1, 1);
     RenderFrame frame;
     frame.cells = cells.view();
     frame.cursor.visible = false;
     frame.scrollbar = {true, 0.0f, 0.25f};
     frame.wrapMarks = {true};
-    const auto packed = [](Rgb8 c) { return (Uint32(c.r) << 16) | (Uint32(c.g) << 8) | c.b; };
+    const auto packed = [](Rgb8 c) {
+        return (Uint32(c.r) << 16) | (Uint32(c.g) << 8) | c.b;
+    };
     for (const auto *theme : {"blue", "green"}) {
         const auto palette = themes::stripPalette(themes::theme(theme));
         fixture.backend->beginFrame(palette.background);
-        paintSplitGutters(decoration, palette, [&](PixelRect r, Rgb8 c) { fixture.backend->drawRect({r.x, r.y, r.w, r.h}, c); });
+        paintSplitGutters(decoration, palette, [&](PixelRect r, Rgb8 c) {
+            fixture.backend->drawRect({r.x, r.y, r.w, r.h}, c);
+        });
         fixture.backend->render(frame, {{0, 0, 100, 160}, {100, 0, 6, 160}});
         EXPECT(fixture.pixel(109, 30) == packed(splitMiddleColor(palette)));
-        EXPECT(fixture.pixel(111, 75) == packed(splitMiddleColor(palette))); // T seam stays solid.
+        EXPECT(fixture.pixel(111, 75) ==
+               packed(splitMiddleColor(palette))); // T seam stays solid.
         EXPECT(fixture.pixel(120, 71) == packed(splitMiddleColor(palette)));
         EXPECT(fixture.pixel(120, 70) == packed(splitEdgeColor(palette)));
-        EXPECT(fixture.pixel(102, 10) == Uint32(0x6e7a8e)); // Existing thumb not painted over.
+        EXPECT(fixture.pixel(102, 10) ==
+               Uint32(0x6e7a8e)); // Existing thumb not painted over.
         EXPECT(fixture.pixel(107, fixture.backend->cellHeight() / 2) ==
                Uint32(0x6e7a8e)); // Wrap marker remains visible too.
         fixture.backend->present();
     }
 }
 
+TEST_CASE("Split decoration must not replace terminal right-strip background "
+          "or scrollbar pixels") {
+    using namespace frontend;
+    Fixture fixture;
+    fixture.backend->setReserveScrollbarStrip(true);
+    std::size_t changedInterior = 0, changedRightmost = 0, changedGlyph = 0;
+    for (bool own : {false, true})
+        for (bool alternate : {false, true})
+            for (bool history : {false, true})
+                for (bool gutters : {false, true})
+                    for (const auto *theme : {"grey", "blue"}) {
+                        const auto palette =
+                            themes::stripPalette(themes::theme(theme));
+                        const auto inset = windowInset(own, false);
+                        const int ox = inset.left,
+                                  width = 320 - inset.left - inset.right,
+                                  height = 160 - inset.bottom;
+                        const int start = gutters ? 112 : 0;
+                        TerminalModel model(
+                            std::size_t((width - start - 12) /
+                                        fixture.backend->cellWidth()),
+                            4,
+                            32);
+                        if (history)
+                            for (int i = 0; i < 16; ++i)
+                                model.write(U"history\r\n");
+                        if (alternate)
+                            model.setAlternateScreen(true);
+                        model.setColors({240, 240, 240}, {60, 90, 120});
+                        model.eraseDisplay(TerminalModel::EraseMode::All);
+                        model.moveCursor(0, 0);
+                        model.write(U"\u2588");
+                        auto frame = model.frame(fixture.backend->cellHeight());
+                        frame.cursor.visible = false;
+                        EXPECT(frame.scrollbar.visible ==
+                               (history && !alternate));
+                        frame.wrapMarks = {true, false, false, false};
+                        const std::vector<DividerBox> dividers =
+                            gutters
+                                ? std::vector<
+                                      DividerBox>{{{100, 20, 12, height - 20},
+                                                   SplitDirection::SideBySide}}
+                                : std::vector<DividerBox>{};
+                        const auto renderPanes = [&] {
+                            if (gutters)
+                                fixture.backend->render(
+                                    frame,
+                                    {{ox, 20, 100, height - 20},
+                                     {ox + 100, 20, 6, height - 20}});
+                            fixture.backend->render(
+                                frame,
+                                {{ox + start, 20, width - start, height - 20},
+                                 {}});
+                        };
+                        fixture.backend->beginFrame(palette.background);
+                        renderPanes();
+                        for (const auto &d : dividers)
+                            fixture.backend->drawRect(
+                                {ox + d.rect.x, d.rect.y, d.rect.w, d.rect.h},
+                                {46, 51, 60});
+                        std::vector<Uint32> before;
+                        const auto glyphBefore = fixture.pixel(
+                            ox + start, 20 + fixture.backend->cellHeight() / 2);
+                        for (int x = width - 12; x < width; ++x)
+                            before.push_back(fixture.pixel(
+                                ox + x,
+                                20 + fixture.backend->cellHeight() + 5));
+                        fixture.backend->beginFrame(palette.background);
+                        const auto plan =
+                            splitDecoration(dividers,
+                                            {0, 20, width, height - 20},
+                                            own,
+                                            false,
+                                            false);
+                        const auto paint = [&](PixelRect r, Rgb8 c) {
+                            fixture.backend->drawRect({r.x + ox, r.y, r.w, r.h},
+                                                      c);
+                        };
+                        paintSplitGutters(plan, palette, paint);
+                        renderPanes();
+                        for (const auto &r : plan.outer)
+                            paint(r, splitEdgeColor(palette));
+                        EXPECT_EQ(fixture.pixel(
+                                      ox + width - 10,
+                                      20 + fixture.backend->cellHeight() / 2),
+                                  Uint32(0x6e7a8e));
+                        if (frame.scrollbar.visible)
+                            EXPECT_EQ(fixture.pixel(ox + width - 3, height - 3),
+                                      Uint32(0x6e7a8e));
+                        if (gutters) {
+                            EXPECT_EQ(
+                                fixture.pixel(
+                                    ox + 107,
+                                    20 + fixture.backend->cellHeight() / 2),
+                                Uint32(0x6e7a8e));
+                            if (frame.scrollbar.visible)
+                                EXPECT_EQ(fixture.pixel(ox + 102, height - 3),
+                                          Uint32(0x6e7a8e));
+                        }
+                        for (int x = width - 12; x < width; ++x) {
+                            if (fixture.pixel(
+                                    ox + x,
+                                    20 + fixture.backend->cellHeight() + 5) !=
+                                before[std::size_t(x - width + 12)]) {
+                                if (x == width - 1)
+                                    ++changedRightmost;
+                                else
+                                    ++changedInterior;
+                            }
+                        }
+                        if (fixture.pixel(ox + start,
+                                          20 + fixture.backend->cellHeight() /
+                                                   2) != glyphBefore)
+                            ++changedGlyph;
+                        fixture.backend->present();
+                    }
+    EXPECT_EQ(changedInterior, std::size_t(0));
+    EXPECT_EQ(changedRightmost, std::size_t(0));
+    EXPECT_EQ(changedGlyph, std::size_t(0));
+}
 
 TEST_CASE("Backend renders independent rows and per-cell backgrounds") {
     Fixture fixture;

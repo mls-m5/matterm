@@ -40,40 +40,26 @@ inline PixelRect intersection(const PixelRect &a, const PixelRect &b) {
 
 inline SplitDecoration splitDecoration(const std::vector<DividerBox> &dividers,
                                        PixelRect content,
-                                       bool ownFrame,
-                                       bool maximized,
-                                       bool fullscreen) {
+                                       bool /*ownFrame*/,
+                                       bool /*maximized*/,
+                                       bool /*fullscreen*/) {
     using splitdecoration_detail::intersection;
     SplitDecoration out;
     if (content.x < 0 || content.y < 0 || content.w <= 0 || content.h <= 0 ||
         std::int64_t(content.x) + content.w > std::numeric_limits<int>::max() ||
         std::int64_t(content.y) + content.h > std::numeric_limits<int>::max())
         return out;
-    const bool edgeToEdge = maximized || fullscreen;
-    const bool sides = !ownFrame && !edgeToEdge;
-    const bool top = content.y > 0 || sides;
     const auto add =
         [&](std::vector<PixelRect> &layer, PixelRect r, PixelRect bounds) {
             r = intersection(r, bounds);
             if (r.w > 0 && r.h > 0)
                 layer.push_back(r);
         };
-    if (top)
-        add(out.outer, {content.x, content.y, content.w, 1}, content);
-    if (sides) {
-        add(out.outer, {content.x, content.y, 1, content.h}, content);
-        add(out.outer,
-            {content.x + content.w - 1, content.y, 1, content.h},
-            content);
-        add(out.outer,
-            {content.x, content.y + content.h - 1, content.w, 1},
-            content);
-    }
-    // Do not let themed divider ends overwrite the thin outer pixel ring.
-    PixelRect inner{content.x + int(sides),
-                    content.y + int(top),
-                    std::max(0, content.w - 2 * int(sides)),
-                    std::max(0, content.h - int(top) - int(sides))};
+    // Only existing gutter pixels belong to this decoration. A post-pane
+    // terminal-area outline overwrites right-strip backgrounds, scrollbar
+    // pixels and full-bleed glyphs. Own-frame edges must instead use pixels
+    // outside the viewport; system-frame edges belong to the window manager.
+    const PixelRect inner = content;
     std::vector<DividerBox> clipped;
     for (auto d : dividers) {
         d.rect = intersection(d.rect, inner);

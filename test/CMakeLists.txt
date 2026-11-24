@@ -443,7 +443,7 @@ if(BUILD_TESTING)
         sdlbackend_test.cpp
     )
     target_link_libraries(sdlbackend_test PRIVATE mls_unit_test_main)
-    target_link_libraries(sdlbackend_test PRIVATE cellbuffer terminalmemory sdlbackend)
+    target_link_libraries(sdlbackend_test PRIVATE cellbuffer terminalmemory sdlbackend matterm::terminal)
     endif()
 
     if(TARGET ptyprocess)
