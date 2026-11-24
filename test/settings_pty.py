@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Real tty settings entry points: no display, daemon or SSH required."""
 import json
+import fcntl
+import struct
 import os
 import select
 import signal
@@ -19,6 +21,7 @@ def check(ok, message):
 class SettingsProcess:
     def __init__(self, binary, directory):
         self.master, self.slave = os.openpty()
+        fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
         self.before = termios.tcgetattr(self.slave)
         self.output = bytearray()
         self.env = dict(os.environ, XDG_CONFIG_HOME=directory, HOME=directory,
@@ -61,6 +64,10 @@ class SettingsProcess:
         check(self.child.returncode == 0, "settings did not exit successfully")
         check(termios.tcgetattr(self.slave) == self.before, "raw mode leaked")
         check(b"\x1b[?1049l" in self.output, "alternate screen was not restored")
+        check(b"\x1b[?1000h" in self.output and b"\x1b[?1006h" in self.output,
+              "SGR click mouse was not enabled")
+        check(b"\x1b[?1000l" in self.output and b"\x1b[?1006l" in self.output,
+              "mouse reporting was not restored")
 
     def close(self):
         if self.child.poll() is None:
@@ -75,7 +82,15 @@ for binary in sys.argv[1:]:
         proc = SettingsProcess(binary, directory)
         try:
             proc.until(lambda: b"Settings" in proc.output)
-            proc.send(b"theme\r\x1b[B\r")
+            # 80x24 layout: first control at (26,6), Apply at (26,18), zero-based.
+            # Release/motion/outside clicks must not apply pending blue.
+            proc.send(b"\x1b[<0;27;7M\x1b[B")
+            time.sleep(0.2)
+            proc.send(b"\x1b[<0;27;19m\x1b[<32;27;19M\x1b[<0;75;19M")
+            for _ in range(5):
+                proc.pump()
+            check(not proc.theme_is("blue"), "non-action mouse event saved pending edit")
+            proc.send(b"\x1b[<0;27;19M")
             proc.until(lambda: proc.theme_is("blue"))
             # Open blue -> pending green, cancel, reopen blue -> apply grey.
             # Two ESC bytes guarantee an Escape event even if writes coalesce;

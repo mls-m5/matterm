@@ -23,6 +23,7 @@ int runSettings() {
     SettingsUI ui(watcher);
     tty::SessionOptions options;
     options.screen.bracketedPaste = true;
+    options.screen.mouse = tty::ScreenOptions::Mouse::Click;
     tty::Session session(options);
     if (!session.start()) {
         (void)std::fputs("settings: stdin and stdout must be a terminal\n",

@@ -222,4 +222,86 @@ TEST_CASE("Wide computer names retain every character in the shared screen") {
     const auto output = screen.present();
     EXPECT(output.find("服务器") != std::string::npos);
 }
+TEST_CASE("Mouse uses centered drawn controls and only explicit left presses "
+          "apply or cancel") {
+    MemorySettings fs;
+    frontend::settings::SettingsWatcher watch(
+        fs, "settings.json", [] { return 0; });
+    frontend::settings::SettingsUI ui(watch);
+    tty::Canvas canvas(120, 40);
+    ui.draw(canvas);
+    const auto click =
+        [&](int x, int y, bool press = true, bool motion = false) {
+            auto k = key(tty::Key::Type::Mouse);
+            k.column = x;
+            k.row = y;
+            k.press = press;
+            k.motion = motion;
+            ui.handle(k);
+        };
+    click(35, 10); // Centered first setting row: Theme.
+    EXPECT(ui.editing());
+    ui.handle(key(tty::Key::Type::Down));
+    ui.draw(canvas);
+    click(90, 29); // Outside explicit action buttons: must not save.
+    click(34, 30, false);
+    click(34, 30, true, true);
+    EXPECT(fs.writes == 0);
+    click(34, 30); // Apply.
+    EXPECT(fs.writes == 1);
+    EXPECT(watch.settings().choice("theme") == "blue");
+    ui.draw(canvas);
+    click(35, 10);
+    ui.handle(key(tty::Key::Type::Down));
+    ui.draw(canvas);
+    click(45, 30); // Cancel.
+    EXPECT(!ui.editing());
+    EXPECT(fs.writes == 1);
+}
+
+TEST_CASE("Mouse follows narrow scroll and resize layout, sections and search "
+          "focus") {
+    MemorySettings fs;
+    frontend::settings::SettingsWatcher watch(
+        fs, "settings.json", [] { return 0; });
+    frontend::settings::SettingsUI ui(watch);
+    tty::Canvas narrow(42, 14);
+    const auto click = [&](int x, int y, int button = 0) {
+        auto k = key(tty::Key::Type::Mouse);
+        k.column = x;
+        k.row = y;
+        k.button = button;
+        ui.handle(k);
+    };
+    ui.draw(narrow);
+    click(3, 8); // Terminal section.
+    EXPECT(ui.rows().front().key == "scrollbackRows");
+    ui.draw(narrow);
+    click(3, 3); // Search focuses rows rather than sections.
+    ui.handle(text("preview"));
+    EXPECT(ui.rows().size() == 1);
+    ui.draw(narrow);
+    click(20, 6, 2);
+    EXPECT(!ui.editing());
+    click(20, 6);
+    EXPECT(ui.editing());
+    ui.handle(key(tty::Key::Type::Escape));
+    ui.setQuery("");
+    ui.handle(key(tty::Key::Type::End));
+    const auto last = ui.rows().back().value;
+    ui.draw(narrow); // Only one visible row, scrolled to last.
+    click(20, 6);
+    EXPECT(ui.editing());
+    tty::Canvas tiny(30, 8);
+    ui.draw(tiny);
+    click(19, 8);
+    EXPECT(fs.writes == 0);
+    tty::Canvas wide(120, 40);
+    ui.draw(wide);
+    click(45, 30); // Resized Cancel.
+    EXPECT(!ui.editing());
+    EXPECT(fs.writes == 0);
+    EXPECT(ui.rows().back().value == last);
+}
+
 TEST_SUIT_END

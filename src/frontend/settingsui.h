@@ -112,6 +112,10 @@ public:
         }
         if (!interactive_ && !key.is(K::Escape))
             return;
+        if (key.is(K::Mouse)) {
+            mouseKey(key);
+            return;
+        }
         if (editing_) {
             editKey(key);
             return;
@@ -178,12 +182,16 @@ public:
             canvas.text(0, 1, "Ctrl+Q exits", dim, bg);
             return;
         }
-        const int width = std::min(100, canvas.columns() - 4);
-        const int x = (canvas.columns() - width) / 2;
-        const int top = canvas.rows() > 32 ? (canvas.rows() - 30) / 2 : 1;
-        const int bottom = std::min(canvas.rows() - 2, top + 29);
-        const int leftWidth = width >= 70 ? 22 : 15;
-        const int right = x + leftWidth + 2, rightWidth = width - leftWidth - 2;
+        layout_ = layout(canvas.columns(), canvas.rows());
+        const auto [width,
+                    x,
+                    top,
+                    bottom,
+                    leftWidth,
+                    right,
+                    rightWidth,
+                    visible,
+                    first] = layout_;
         const auto line = [&](int px,
                               int py,
                               const std::string &s,
@@ -226,9 +234,6 @@ public:
         for (int y = top + 4; y < bottom - 4; ++y)
             canvas.put(x + leftWidth, y, U'│', dim, bg);
         const auto items = rows();
-        const std::size_t visible =
-            std::size_t(std::max(1, (bottom - 5 - (top + 5)) / 2));
-        const auto first = selected_ >= visible ? selected_ - visible + 1 : 0;
         if (items.empty())
             line(right, top + 5, "No matching settings", rightWidth, dim, bg);
         for (std::size_t i = first; i < items.size() && i < first + visible;
@@ -286,7 +291,7 @@ public:
             line(right, bottom - 5, prompt, rightWidth, fg, accent, true);
             line(right,
                  bottom - 4,
-                 "Enter applies  /  Esc cancels this edit",
+                 "[Apply]  [Cancel]  Enter / Esc",
                  rightWidth,
                  dim,
                  bg);
@@ -301,6 +306,73 @@ public:
     }
 
 private:
+    struct Layout {
+        int width = 0, x = 0, top = 0, bottom = 0, leftWidth = 0, right = 0,
+            rightWidth = 0;
+        std::size_t visible = 0, first = 0;
+    };
+    Layout layout(int columns, int height) const {
+        Layout l;
+        l.width = std::min(100, columns - 4);
+        l.x = (columns - l.width) / 2;
+        l.top = height > 32 ? (height - 30) / 2 : 1;
+        l.bottom = std::min(height - 2, l.top + 29);
+        l.leftWidth = l.width >= 70 ? 22 : 15;
+        l.right = l.x + l.leftWidth + 2;
+        l.rightWidth = l.width - l.leftWidth - 2;
+        l.visible = std::size_t(std::max(1, (l.bottom - 5 - (l.top + 5)) / 2));
+        l.first = selected_ >= l.visible ? selected_ - l.visible + 1 : 0;
+        return l;
+    }
+    void mouseKey(const tty::Key &key) {
+        if (!key.press || key.motion || key.button != 0)
+            return;
+        const auto &l = layout_;
+        const int x = key.column, y = key.row;
+        if (x < l.x || x >= l.x + l.width)
+            return;
+        if (editing_) {
+            if (y != l.bottom - 4)
+                return;
+            tty::Key action;
+            if (x >= l.right && x < l.right + 7)
+                action.type = tty::Key::Type::Enter;
+            else if (x >= l.right + 9 && x < l.right + 17)
+                action.type = tty::Key::Type::Escape;
+            else
+                return;
+            editKey(action);
+            return;
+        }
+        if (y == l.top + 2) {
+            sectionsFocus_ = false;
+            return;
+        }
+        if (x < l.x + l.leftWidth) {
+            for (int i = 0; i < 3; ++i) {
+                if (y == l.top + 5 + i * 2) {
+                    section_ = i;
+                    query_.clear();
+                    selected_ = 0;
+                    sectionsFocus_ = true;
+                    return;
+                }
+            }
+        }
+        if (x < l.right || x >= l.right + l.rightWidth || y < l.top + 5)
+            return;
+        const int offset = y - (l.top + 5);
+        if (offset % 2 != 0 || std::size_t(offset / 2) >= l.visible)
+            return;
+        const auto items = rows();
+        const auto index = l.first + std::size_t(offset / 2);
+        if (index >= items.size())
+            return;
+        selected_ = index;
+        sectionsFocus_ = false;
+        begin(items[index]);
+    }
+    Layout layout_;
     static std::string value(const Settings &s,
                              const std::string &key,
                              const std::string &computer) {
