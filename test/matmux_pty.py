@@ -44,10 +44,32 @@ class Tty:
                 self.raw += data
         return True
 
-    def text(self):
-        # Without escape sequences and blanks: the drawing skips blanks with a cursor move.
-        plain = re.sub(rb"\x1b\[[0-9;?<]*[A-Za-z]", b"", self.raw).decode("utf8", "replace")
+    def text(self, raw=None):
+        # Suitable for complete snapshots, not for reconstructing delta redraws.
+        if raw is None:
+            raw = self.raw
+        plain = re.sub(rb"\x1b\[[0-9;?<]*[A-Za-z]", b"", raw).decode("utf8", "replace")
         return plain.replace(" ", "")
+
+    def list_snapshot(self):
+        """Request a real resize/full paint, without inventing another VT parser.
+
+        Canvas may omit unchanged letters in a scroll delta. Wait for a new
+        clear and completed synchronized update, not for an arbitrary delay.
+        """
+        rows, cols, xp, yp = struct.unpack("HHHH", fcntl.ioctl(self.fd, termios.TIOCGWINSZ, b"\0" * 8))
+        cols = cols + 1 if cols % 2 == 0 else max(2, cols - 1)
+        begin = len(self.raw)
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, xp, yp))
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            fresh = self.raw[begin:]
+            clear = fresh.rfind(b"\x1b[2J")
+            if clear >= 0 and b"\x1b[?2026l" in fresh[clear:]:
+                return fresh[clear:]
+            if not self.pump(0.05):
+                break
+        raise AssertionError("no completed full list repaint after PTY resize")
 
     def send(self, data):
         os.write(self.fd, data)
@@ -103,6 +125,20 @@ def open_marked(client, marker, seconds=2.0):
         if not client.wait_for("running terminals", 3):
             return False
         client.pump(0.2)
+    return False
+
+
+def find_text(client, text):
+    """Search full list snapshots, not concatenated partial redraw bytes."""
+    if not client.wait_for("running terminals"):
+        return False  # Do not send a navigation key before raw/list mode starts.
+    client.send(b"g")
+    # One extra repaint handles resize and the preceding key being served in
+    # the same loop round; the final clamped Down still yields a full snapshot.
+    for _ in range(count_sessions() + 2):
+        if text.replace(" ", "") in client.text(client.list_snapshot()):
+            return True
+        client.send(b"j")
     return False
 
 
@@ -232,8 +268,13 @@ try:
     m2.wait_exit()
     lst = Tty(socket, ("--attach",))
     ttys.append(lst)
-    check(lst.wait_for("matterm-demo") and lst.wait_for("Namedone"), "the list names a terminal by its top folder, an explicit name wins")
-    check(lst.wait_for("shell") and lst.wait_for(tmp + "/projects/matterm-demo"), "then what runs and the full folder")
+    check(find_text(lst, "matterm-demo") and find_text(lst, "Namedone"), "the list names a terminal by its top folder, an explicit name wins")
+    check(lst.wait_for("shell") and lst.wait_for(tmp[:16]) and lst.wait_for("foreground"),
+          "a terminal block shows program, width-clipped folder and foreground status")
+    check(lst.wait_for("preview unavailable"), "an older daemon has an explicit unknown preview row")
+    sgr = re.findall(rb"\x1b\[([0-9;]*)m", lst.raw)
+    check(any(b"7" in params.split(b";") for params in sgr) and ">" in lst.text(),
+          "the selected block emits reverse video and a persistent marker")
     lst.send(b"q")
     lst.wait_exit()
     # A program started with -- COMMAND shows in the list when it is not a shell (sh -c looks like a shell to the
@@ -245,7 +286,7 @@ try:
     pr.wait_exit()
     lst2 = Tty(socket, ("--attach",))
     ttys.append(lst2)
-    check(lst2.wait_for("slumber") and lst2.wait_for("sleep 61"), "a terminal started with a program shows that program in the list")
+    check(find_text(lst2, "slumber") and find_text(lst2, "sleep 61"), "a terminal started with a program shows that program in the list")
     lst2.send(b"q")
     lst2.wait_exit()
     d0 = Tty(socket)  # No arguments, terminals run: the list, New terminal chosen.

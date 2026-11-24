@@ -858,4 +858,27 @@ TEST_CASE(
     EXPECT(metrics.counters.drawMs >= 0);
 }
 
+TEST_CASE("Rich-list preview refresh and paging never attach a terminal") {
+    std::vector<ListEntry> fixtures;
+    for (int i = 0; i < 8; ++i) {
+        auto e =
+            entry("id" + std::to_string(i), "terminal" + std::to_string(i));
+        e.preview = "recent output";
+        e.outputAgeMs = 1234;
+        fixtures.push_back(std::move(e));
+    }
+    Rig rig(fixtures);
+    rig.host.setSize(80, 10);
+    rig.mode->resized(rig.now);
+    const int initialLists = rig.source.lists;
+    for (int i = 0; i < 3; ++i)
+        rig.type("r");
+    EXPECT_EQ(rig.source.lists, initialLists + 3);
+    EXPECT_EQ(rig.source.opened, 0);
+    rig.type("\x1b[6~"); // PageDown: capacity two entries at height ten.
+    EXPECT_EQ(rig.source.opened, 0);
+    rig.type("\r");
+    EXPECT_EQ(rig.source.openedId, std::string("id2"));
+}
+
 TEST_SUIT_END

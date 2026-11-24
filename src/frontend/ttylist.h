@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -21,6 +22,12 @@ struct ListEntry {
     std::string title;  // The terminal's name, else a short form of its id.
     std::string what;   // What runs there: the command, else "shell".
     std::string folder; // The folder it is in (full), empty when unknown.
+    std::optional<bool>
+        foregroundBusy; // false means shell foreground, NOT idle prompt.
+    std::optional<std::uint64_t>
+        outputAgeMs; // Snapshot age; not a local wall-clock timestamp.
+    std::optional<std::string>
+        preview;        // Recent output, not a last-command/screen-row claim.
     bool inUse = false; // Another client has it: opening it takes it over.
     bool thisTerminal =
         false; // The terminal this program itself runs in: not to be attached.
@@ -66,6 +73,8 @@ inline ListEntry makeListEntry(const mtd::SessionEntry &entry,
                 : info        ? folderName(info->cwd)
                               : "terminal " + entry.id.substr(0, 8);
     if (info) {
+        // The legacy busy bit conflates unknown /proc state and shell
+        // foreground. Only explicit new metadata may classify foregroundBusy.
         if (info->busy && !info->command.empty()) {
             for (const std::string &part : info->command) {
                 if (!out.what.empty()) {
@@ -155,6 +164,12 @@ public:
     // instead of the first terminal.
     void setPreferNew(bool on) {
         preferNew_ = on;
+    }
+    void setPreviewEnabled(bool enabled) {
+        previewEnabled_ = enabled;
+    }
+    bool previewEnabled() const {
+        return previewEnabled_;
     }
     const std::vector<ListEntry> &entries() const {
         return entries_;
@@ -288,6 +303,7 @@ private:
     std::vector<ListEntry> entries_;
     std::size_t index_ = 0;
     bool preferNew_ = false;
+    bool previewEnabled_ = true;
     std::string message_;
     std::string question_;
     std::string confirming_;            // The id the question is about.
@@ -377,9 +393,47 @@ inline constexpr ::tty::Rgb kBarBg{190, 190, 190};
 inline constexpr ::tty::Rgb kDim{150, 150, 150};
 inline constexpr ::tty::Rgb kWarn{240, 190, 90};
 
-// The number of rows of the list that fit on a screen of `rows` rows.
+// Capacity is in entries, not visual rows. On tiny terminals sacrifice chrome
+// before the chosen entry; below three usable rows its block is clipped.
+inline int listContentTop(int rows) {
+    return rows >= 7 ? 2 : rows >= 5 ? 1 : 0;
+}
+inline int listContentEnd(int rows) {
+    return rows >= 5 ? rows - 2 : rows >= 4 ? rows - 1 : std::max(0, rows);
+}
 inline int listCapacity(int rows) {
-    return std::max(0, rows - 4); // Header, blank, (rows), message, footer.
+    const int available = listContentEnd(rows) - listContentTop(rows);
+    return available > 0 ? std::max(1, available / 3) : 0;
+}
+inline std::string outputAge(const ListEntry &entry) {
+    if (!entry.outputAgeMs)
+        return "output unknown";
+    const auto seconds = *entry.outputAgeMs / 1000;
+    if (seconds == 0)
+        return "output <1s ago";
+    if (seconds < 60)
+        return "output " + std::to_string(seconds) + "s ago";
+    if (seconds < 3600)
+        return "output " + std::to_string(seconds / 60) + "m ago";
+    return "output " + std::to_string(seconds / 3600) + "h ago";
+}
+
+// Metadata previews must already be plain text. Fail closed if the daemon
+// sends controls: merely removing ESC can reveal an OSC/DCS payload. This is
+// validation, not another VT parser; the existing daemon parser supplies text.
+inline std::string previewText(const ListEntry &entry, bool enabled) {
+    if (!enabled)
+        return "[preview disabled]";
+    if (!entry.preview)
+        return "[preview unavailable]";
+    if (entry.preview->empty())
+        return "[no recent output]";
+    const std::string bounded = entry.preview->substr(0, 4096);
+    for (const auto cp : ::tty::decodeUtf8(bounded)) {
+        if (unsafeScreenCodePoint(cp))
+            return "[unsafe preview omitted]";
+    }
+    return bounded;
 }
 
 // Draws the list over the whole canvas.
@@ -390,67 +444,118 @@ inline void renderList(const ListModel &model, ::tty::Canvas &canvas) {
     if (columns <= 0 || rows <= 0) {
         return;
     }
-    fillRow(canvas, 0, kBarFg, kBarBg);
-    put(canvas, 1, 0, "matterm: running terminals", kBarFg, kBarBg, true);
+    if (rows >= 5) {
+        fillRow(canvas, 0, kBarFg, kBarBg);
+        put(canvas, 1, 0, "matterm: running terminals", kBarFg, kBarBg, true);
+    }
     const auto &entries = model.entries();
     const int capacity = listCapacity(rows);
-    if (entries.empty()) {
-        put(canvas, 1, 3, "No terminals are running in the daemon.", kDim);
-    }
-    // The visible part follows the chosen row.
-    std::size_t first = 0;
-    if (capacity > 0 && model.index() >= std::size_t(capacity)) {
-        first = model.index() + 1 - std::size_t(capacity);
-    }
-    for (int line = 0;
-         line < capacity && first + std::size_t(line) < model.rowCount();
-         ++line) {
-        const std::size_t i = first + std::size_t(line);
+    const std::size_t first =
+        capacity > 0 && model.index() >= std::size_t(capacity)
+            ? model.index() + 1 - std::size_t(capacity)
+            : 0;
+    const int contentEnd = listContentEnd(rows);
+    for (int slot = 0;
+         slot < capacity && first + std::size_t(slot) < model.rowCount();
+         ++slot) {
+        const std::size_t i = first + std::size_t(slot);
         const bool chosen = i == model.index();
-        const ::tty::Rgb fg = chosen ? kBarFg : kScreenFg;
-        const ::tty::Rgb bg = chosen ? kBarBg : kScreenBg;
-        const int y = 2 + line;
-        fillRow(canvas, y, fg, bg);
+        const int y = listContentTop(rows) + slot * 3;
+        const int height = std::min(3, contentEnd - y);
+        for (int line = 0; line < height; ++line)
+            fillRow(canvas, y + line, kScreenFg, kScreenBg);
+        put(canvas, 0, y, chosen ? ">" : " ");
         if (i == 0) {
-            int x = put(canvas, 1, y, "n ", chosen ? fg : kDim, bg);
-            put(canvas, x, y, "New terminal", fg, bg, true);
-            continue;
+            int x = put(canvas, 2, y, "n ", kDim);
+            put(canvas, x, y, "New terminal", kScreenFg, kScreenBg, true);
+            if (height > 1)
+                put(canvas,
+                    4,
+                    y + 1,
+                    entries.empty() ? "No terminals are running in the daemon."
+                                    : "Start a terminal with your shell.",
+                    kDim);
         }
-        const ListEntry &entry = entries[i - 1];
-        const std::string number = i < 10 ? std::to_string(i) : " ";
-        int x = put(canvas, 1, y, number + " ", chosen ? fg : kDim, bg);
-        x = put(canvas, x, y, entry.title, fg, bg, true);
-        if (entry.thisTerminal) { // Before the long part, so that a narrow
-                                  // screen still shows it.
-            x = put(canvas, x, y, " (this terminal)", chosen ? fg : kWarn, bg);
+        else {
+            const ListEntry &entry = entries[i - 1];
+            const std::string number = i < 10 ? std::to_string(i) : " ";
+            int x = put(canvas, 2, y, number + " ", kDim);
+            x = put(canvas, x, y, entry.title, kScreenFg, kScreenBg, true);
+            if (entry.thisTerminal)
+                x = put(canvas, x, y, " (this terminal)", kWarn);
+            else if (entry.inUse)
+                x = put(canvas, x, y, " (in use)", kWarn);
+            put(canvas,
+                x,
+                y,
+                "  " + (entry.what.empty() ? "program unknown" : entry.what));
+            if (height > 1) {
+                x = put(canvas,
+                        4,
+                        y + 1,
+                        entry.folder.empty() ? "folder unknown" : entry.folder,
+                        kDim,
+                        kScreenBg,
+                        false,
+                        std::max(8, (columns - 4) / 3));
+                const std::string foreground =
+                    !entry.foregroundBusy   ? "foreground unknown"
+                    : *entry.foregroundBusy ? "foreground program"
+                                            : "shell foreground";
+                put(canvas,
+                    x,
+                    y + 1,
+                    " | " + foreground + " | " +
+                        (entry.inUse ? "attached" : "not attached") + " | " +
+                        outputAge(entry),
+                    kDim);
+            }
+            if (height > 2) {
+                put(canvas,
+                    4,
+                    y + 2,
+                    previewText(entry, model.previewEnabled()),
+                    kDim);
+            }
         }
-        else if (entry.inUse) {
-            x = put(canvas, x, y, " (in use)", chosen ? fg : kWarn, bg);
-        }
-        x = put(canvas, x, y, "  " + entry.what, chosen ? fg : kScreenFg, bg);
-        if (!entry.folder.empty()) {
-            put(canvas, x, y, "  " + entry.folder, chosen ? fg : kDim, bg);
+        if (chosen) {
+            // Inverse is a monochrome cue as well. Store the colours reversed
+            // so the terminal's effective background is the light selection.
+            // The literal > remains sufficient if all SGR is discarded.
+            for (int line = 0; line < height; ++line) {
+                for (int x = 0; x < columns; ++x) {
+                    auto cell = canvas.at(x, y + line);
+                    cell.foreground = kBarBg;
+                    cell.background = kBarFg;
+                    cell.inverse = true;
+                    canvas.put(x, y + line, cell);
+                }
+            }
         }
     }
     const ListEntry *chosenEntry = model.selected();
-    if (model.message().empty() && chosenEntry && chosenEntry->inUse &&
-        !chosenEntry->thisTerminal) {
+    if (rows >= 5 && model.message().empty() && chosenEntry &&
+        chosenEntry->inUse && !chosenEntry->thisTerminal) {
         put(canvas, 1, rows - 2, "In use: opening takes it over.", kWarn);
     }
-    if (!model.message().empty()) {
+    if (rows >= 5 && !model.message().empty()) {
         put(canvas, 1, rows - 2, model.message(), kWarn);
     }
     if (model.confirming()) {
-        fillRow(canvas, rows - 2, kBarFg, kWarn);
-        put(canvas, 1, rows - 2, model.question(), kBarFg, kWarn, true);
+        const int note = rows >= 4 ? rows - 2 : rows - 1;
+        fillRow(canvas, note, kBarFg, kWarn);
+        put(canvas, 0, note, ">", kBarFg, kWarn);
+        put(canvas, 1, note, model.question(), kBarFg, kWarn, true);
     }
-    fillRow(canvas, rows - 1, kBarFg, kBarBg);
-    put(canvas,
-        1,
-        rows - 1,
-        "Up/Down choose  Enter open  n new  x end  r refresh  q quit",
-        kBarFg,
-        kBarBg);
+    if (rows >= 4) {
+        fillRow(canvas, rows - 1, kBarFg, kBarBg);
+        put(canvas,
+            1,
+            rows - 1,
+            "Up/Down choose  Enter open  n new  x end  r refresh  q quit",
+            kBarFg,
+            kBarBg);
+    }
 }
 
 } // namespace frontend::ttymode

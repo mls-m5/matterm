@@ -1,6 +1,9 @@
 #include "mls-unit-test/unittest.h"
+#include "palette.h"
+#include "terminalmodel.h"
 #include "tty/canvas.h"
 #include "ttylist.h"
+#include "vtparser.h"
 
 #include <string>
 #include <vector>
@@ -42,6 +45,7 @@ std::string rowText(const ::tty::Canvas &image, int y) {
 
 ::tty::Canvas drawn(const ListModel &model, int columns, int rows) {
     ::tty::Canvas canvas(columns, rows);
+    canvas.setWideChars(true);
     renderList(model, canvas);
     return canvas;
 }
@@ -104,18 +108,19 @@ TEST_CASE(
     EXPECT_EQ(makeListEntry(entry("abc"), &named).title, std::string("laptop"));
 }
 
-TEST_CASE("A row shows the folder name, the program and the full folder, in "
-          "that order") {
+TEST_CASE(
+    "Each terminal shows its name and program above its folder and metadata") {
     ListModel model;
     auto vim = info("/home/a/projects/matterm", true, {"vim", "x.cpp"});
     auto sh = info("/srv/www");
     model.setEntries({makeListEntry(entry("aaaaaaaa11"), &vim),
                       makeListEntry(entry("bbbbbbbb22"), &sh)});
-    const ::tty::Canvas image = drawn(model, 80, 10);
-    const std::string r1 = rowText(image, 3), r2 = rowText(image, 4);
-    EXPECT(r1.find("1 matterm  vim x.cpp  /home/a/projects/matterm") !=
+    const ::tty::Canvas image = drawn(model, 100, 13);
+    EXPECT(rowText(image, 5).find("1 matterm  vim x.cpp") != std::string::npos);
+    EXPECT(rowText(image, 6).find("/home/a/projects/matterm") !=
            std::string::npos);
-    EXPECT(r2.find("2 www  shell  /srv/www") != std::string::npos);
+    EXPECT(rowText(image, 8).find("2 www  shell") != std::string::npos);
+    EXPECT(rowText(image, 9).find("/srv/www") != std::string::npos);
 }
 
 TEST_CASE(
@@ -215,7 +220,7 @@ TEST_CASE("\"New terminal\" is the first row, also with n; the terminal this "
     own.key(ListKey::Down);
     EXPECT(own.key(ListKey::Open).kind == ListAction::Kind::Open);
     const ::tty::Canvas image = drawn(own, 70, 10);
-    EXPECT(rowText(image, 3).find("(this terminal)") != std::string::npos);
+    EXPECT(rowText(image, 2).find("(this terminal)") != std::string::npos);
 }
 
 TEST_CASE("x asks before a terminal is ended: the question names it and what "
@@ -340,17 +345,17 @@ TEST_CASE("Keys of the host terminal map to list keys") {
 TEST_CASE("The list is drawn with a header, the rows, the mark for in use and "
           "a footer") {
     const ListModel model = threeRows();
-    const ::tty::Canvas image = drawn(model, 70, 10);
+    const ::tty::Canvas image = drawn(model, 70, 16);
     EXPECT_EQ(rowText(image, 0), std::string(" matterm: running terminals"));
     EXPECT(rowText(image, 2).find("n New terminal") != std::string::npos);
-    EXPECT(rowText(image, 3).find("1 build") != std::string::npos);
-    EXPECT(rowText(image, 4).find("2 terminal bbbbbbbb") != std::string::npos);
-    EXPECT(rowText(image, 4).find("(in use)") != std::string::npos);
-    EXPECT(rowText(image, 3).find("(in use)") == std::string::npos);
-    EXPECT(rowText(image, 8).empty()); // The chosen row is free: no remark.
-    EXPECT(rowText(image, 9).find("q quit") != std::string::npos);
-    // The chosen row is drawn inverted: dark on light.
-    EXPECT(image.at(5, 3).background.r > image.at(5, 4).background.r);
+    EXPECT(rowText(image, 5).find("1 build") != std::string::npos);
+    EXPECT(rowText(image, 8).find("2 terminal bbbbbbbb") != std::string::npos);
+    EXPECT(rowText(image, 8).find("(in use)") != std::string::npos);
+    EXPECT(rowText(image, 5).find("(in use)") == std::string::npos);
+    EXPECT(rowText(image, 14).empty()); // The chosen terminal is free.
+    EXPECT(rowText(image, 15).find("q quit") != std::string::npos);
+    EXPECT(image.at(5, 5).inverse);
+    EXPECT(image.at(5, 5).background.r > image.at(5, 8).background.r);
 }
 
 TEST_CASE(
@@ -360,7 +365,7 @@ TEST_CASE(
         info("/home/someone/projects/a/very/deep/folder/tree/that/goes/on");
     model.setEntries({makeListEntry(entry("aaaaaaaa11", true), &far)});
     const ::tty::Canvas image = drawn(model, 40, 8);
-    EXPECT(rowText(image, 3).find("(in use)") != std::string::npos);
+    EXPECT(rowText(image, 2).find("(in use)") != std::string::npos);
     EXPECT(rowText(image, 6).find("opening takes it over") !=
            std::string::npos);
 }
@@ -405,6 +410,165 @@ TEST_CASE("A long list scrolls to keep the chosen row visible, and tiny "
             drawn(model, c, r); // Must not throw or write outside.
         }
     }
+}
+
+TEST_CASE("A selected terminal is a three-line block with background and "
+          "reverse plus a marker") {
+    ListModel model = threeRows();
+    const auto image = drawn(model, 80, 10);
+    EXPECT_EQ(image.at(0, 5).codePoint, U'>');
+    for (int y = 5; y < 8; ++y) {
+        for (int x = 0; x < 80; ++x) {
+            EXPECT(image.at(x, y)
+                       .inverse); // Monochrome cue independent of colour.
+            EXPECT(image.at(x, y).background != kScreenBg);
+            EXPECT(image.at(x, y).sameStyle(image.at(x, 5)) ||
+                   image.at(x, y).bold != image.at(x, 5).bold);
+        }
+    }
+    // Even after discarding all attributes the persistent marker remains.
+    EXPECT(rowText(image, 5).find('>') != std::string::npos);
+    EXPECT(rowText(image, 6).find("unknown") != std::string::npos);
+    EXPECT(rowText(image, 7).find("preview unavailable") != std::string::npos);
+}
+
+TEST_CASE("Paging counts entries, and tiny heights never hide the selected "
+          "terminal") {
+    EXPECT_EQ(listCapacity(10), 2);
+    EXPECT_EQ(listCapacity(13), 3);
+    EXPECT_EQ(listCapacity(6), 1);
+    ListModel model = threeRows();
+    model.key(ListKey::PageDown, 0, listCapacity(10));
+    EXPECT_EQ(model.index(), std::size_t(3));
+    model.key(ListKey::PageUp, 0, listCapacity(10));
+    EXPECT_EQ(model.index(), std::size_t(1));
+    model.key(ListKey::Last);
+    for (int height = 1; height <= 13; ++height) {
+        const auto image = drawn(model, 80, height);
+        bool marker = false, title = false;
+        for (int y = 0; y < height; ++y) {
+            marker = marker || image.at(0, y).codePoint == U'>';
+            title = title || rowText(image, y).find("terminal cccccccc") !=
+                                 std::string::npos;
+        }
+        EXPECT(marker && title);
+    }
+}
+
+TEST_CASE(
+    "Optional metadata separates shell foreground, output age and attachment") {
+    auto shell = info("/tmp/work");
+    auto e = makeListEntry(entry("a", true, "work"), &shell);
+    e.foregroundBusy =
+        false; // Explicit verified detail, not the legacy busy bit.
+    e.outputAgeMs = 2500;
+    e.preview = "still building";
+    ListModel model;
+    model.setEntries({e});
+    const auto image = drawn(model, 100, 10);
+    EXPECT(rowText(image, 6).find("shell foreground") != std::string::npos);
+    EXPECT(rowText(image, 6).find("attached") != std::string::npos);
+    EXPECT(rowText(image, 6).find("2s ago") != std::string::npos);
+    EXPECT(rowText(image, 6).find("idle") == std::string::npos);
+    EXPECT(rowText(image, 7).find("still building") != std::string::npos);
+    model.setPreviewEnabled(false);
+    EXPECT(rowText(drawn(model, 100, 10), 7).find("preview disabled") !=
+           std::string::npos);
+}
+
+TEST_CASE("Preview rendering is bounded, control-safe and clipped by terminal "
+          "cell width") {
+    ListModel model;
+    ListEntry e = makeListEntry(entry("a", false, "wide"), nullptr);
+    e.preview = "\x1b]52;c;secret\x07\r\n" + std::string(1000000, 'x');
+    model.setEntries({e});
+    auto image = drawn(model, 24, 10);
+    const std::string wire = image.flush();
+    EXPECT(wire.find("\x1b]52") == std::string::npos);
+    EXPECT(wire.find("secret") ==
+           std::string::npos); // Do not reveal an OSC payload by merely
+                               // stripping ESC.
+    EXPECT(rowText(image, 7).find("unsafe preview") != std::string::npos);
+    for (int x = 0; x < image.columns(); ++x) {
+        const auto cp = image.at(x, 7).codePoint;
+        EXPECT(cp >= 32 && !(cp >= 127 && cp <= 159));
+    }
+    e.preview = "界界界界界界界界界界界界界界";
+    model.setEntries({e});
+    image = drawn(model, 15, 10);
+    // Preview indentation consumes four columns; a wide glyph must never
+    // begin in the final column or overwrite the cell after its allocation.
+    EXPECT(image.at(14, 7).codePoint != U'界');
+}
+
+TEST_CASE("Selected backgrounds stay light after real SGR inversion in "
+          "truecolor and ANSI mono fallback") {
+    const ListModel list = threeRows();
+    for (const bool truecolor : {true, false}) {
+        ::tty::Caps caps;
+        caps.truecolor = truecolor;
+        caps.colors256 = false;
+        ::tty::Canvas image(80, 10, caps);
+        renderList(list, image);
+        TerminalModel terminal(80, 10, 0);
+        VtParser parser(terminal);
+        parser.feed(image.flush(true));
+        const auto frame = terminal.frame(16);
+        Palette palette;
+        for (std::size_t y = 5; y < 8; ++y) {
+            for (std::size_t x = 0; x < 80; ++x) {
+                const auto effective =
+                    palette.resolve(frame.cells.row(y).data()[x]);
+                EXPECT(effective.background.r > effective.foreground.r);
+                EXPECT(effective.background.g > effective.foreground.g);
+                EXPECT(effective.background.b > effective.foreground.b);
+            }
+        }
+    }
+}
+
+TEST_CASE("Legacy busy false does not prove a foreground shell; verified "
+          "metadata may") {
+    const auto legacyInfo = info("/tmp/work", false);
+    auto e = makeListEntry(entry("legacy", false, "work"), &legacyInfo);
+    EXPECT(!e.foregroundBusy.has_value());
+    ListModel list;
+    list.setEntries({e});
+    EXPECT(rowText(drawn(list, 100, 10), 6).find("foreground unknown") !=
+           std::string::npos);
+    e.foregroundBusy =
+        false; // Only explicit, verified new metadata may set this.
+    list.setEntries({e});
+    EXPECT(rowText(drawn(list, 100, 10), 6).find("shell foreground") !=
+           std::string::npos);
+}
+
+TEST_CASE("A scroll delta may omit title characters; a resized full snapshot "
+          "repeats the name") {
+    ListModel list;
+    list.setEntries({makeListEntry(entry("a", false, "matterm-demo"), nullptr),
+                     makeListEntry(entry("b", false, "Namedone"), nullptr)});
+    ::tty::Canvas canvas(80, 8); // Exactly one terminal block fits.
+    renderList(list, canvas);
+    TerminalModel terminal(80, 8, 0);
+    VtParser parser(terminal);
+    parser.feed(canvas.flush(true));
+    list.key(ListKey::Down);
+    renderList(list, canvas);
+    const std::string delta = canvas.flush();
+    // Both names have 'a' in the same column/style. Canvas correctly omits
+    // that unchanged cell: searching stripped raw output for Namedone fails.
+    EXPECT(delta.find("Namedone") == std::string::npos);
+    parser.feed(delta);
+    const auto frame = terminal.frame(16);
+    std::string visible;
+    for (std::size_t x = 4; x < 12; ++x) {
+        ::tty::appendUtf8(visible, frame.cells.row(2).data()[x].codePoint);
+    }
+    EXPECT_EQ(visible, std::string("Namedone"));
+    canvas.resize(81, 8);
+    renderList(list, canvas);
+    EXPECT(canvas.flush().find("Namedone") != std::string::npos);
 }
 
 TEST_SUIT_END
