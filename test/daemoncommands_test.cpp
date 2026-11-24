@@ -17,8 +17,10 @@ TEST_CASE("The stop question names the programs when they are known") {
 TEST_CASE("The fallback note names the reason on plain lines") {
     const auto note = daemonFallbackNote("cannot connect\x1b[31m\n");
     std::string s;
-    for (const auto c : note) s += c < 128 ? char(c) : '?';
-    EXPECT(s.find("could not be started (cannot connect [31m )") != std::string::npos);
+    for (const auto c : note)
+        s += c < 128 ? char(c) : '?';
+    EXPECT(s.find("could not be started (cannot connect [31m )") !=
+           std::string::npos);
     EXPECT(s.find("\x1b") == std::string::npos);
     EXPECT(s.find("end with it") != std::string::npos);
     EXPECT(daemonFallbackNote("").size() > 20);
@@ -46,30 +48,40 @@ TEST_CASE("Reconnect is offered only for a remote daemon") {
     EXPECT_EQ(remote.back().name, "Reconnect");
 }
 
-TEST_CASE("Attach entries: detach and move only for a daemon pane, attach-all only with leftovers") {
+TEST_CASE("Attach entries: detach and move only for a daemon pane, attach-all "
+          "only with leftovers") {
     const auto names = [](const AttachState &s) {
         std::string all;
-        for (const auto &e : attachCommandEntries(s)) all += e.name + "|";
+        for (const auto &e : attachCommandEntries(s))
+            all += e.name + "|";
         return all;
     };
     EXPECT_EQ(names({}), std::string("Attach terminal...|"));
-    EXPECT(names({1, 2, false}).find("Attach all leftover terminals") != std::string::npos);
+    EXPECT(names({1, 2, false}).find("Attach all leftover terminals") !=
+           std::string::npos);
     const auto alone = names({1, 0, true});
     EXPECT(alone.find("Detach terminal (keep running)") != std::string::npos);
-    EXPECT(alone.find("Move terminal to new tab") == std::string::npos); // nothing to move out of
-    EXPECT(names({2, 0, true}).find("Move terminal to new tab") != std::string::npos);
+    EXPECT(alone.find("Move terminal to new tab") ==
+           std::string::npos); // nothing to move out of
+    EXPECT(names({2, 0, true}).find("Move terminal to new tab") !=
+           std::string::npos);
     EXPECT(alone.find("Rename terminal...") != std::string::npos);
     EXPECT(names({}).find("Rename terminal") == std::string::npos);
 }
 
-TEST_CASE("Entries for the pane, the tab and the layouts appear only when they can work") {
+TEST_CASE("Entries for the pane, the tab and the layouts appear only when they "
+          "can work") {
     const auto names = [](const AttachState &s) {
         std::string all;
-        for (const auto &e : attachCommandEntries(s)) all += e.name + "|";
+        for (const auto &e : attachCommandEntries(s))
+            all += e.name + "|";
         return all;
     };
     const auto none = names({});
-    for (const char *n : {"Attach terminal here", "Kill terminal", "Detach tab", "Attach tab"}) {
+    for (const char *n : {"Attach terminal here",
+                          "Kill terminal",
+                          "Detach tab",
+                          "Attach tab"}) {
         EXPECT(none.find(n) == std::string::npos);
     }
     AttachState pane;
@@ -84,14 +96,17 @@ TEST_CASE("Entries for the pane, the tab and the layouts appear only when they c
     EXPECT(names(layouts).find("Attach tab...") != std::string::npos);
 }
 
-TEST_CASE("Replacing or killing a terminal asks first, with Cancel as the default") {
-    EXPECT_EQ(replaceTerminalDialog("abc", "vim a.txt")->selected(), std::size_t(2));
-    EXPECT_EQ(replaceTerminalDialog("abc", "")->selected(), std::size_t(2));
+TEST_CASE(
+    "Replace selects end first; other destructive dialogs default to Cancel") {
+    EXPECT_EQ(replaceTerminalDialog("abc", "vim a.txt")->selected(),
+              std::size_t(0));
+    EXPECT_EQ(replaceTerminalDialog("abc", "")->selected(), std::size_t(0));
     EXPECT_EQ(killTerminalDialog("make")->selected(), std::size_t(1));
     EXPECT_EQ(takeOverLayoutDialog("work", 2)->selected(), std::size_t(1));
 }
 
-TEST_CASE("Attaching a layout: free terminals are reused, others' are taken over, gone ones are made new") {
+TEST_CASE("Attaching a layout: free terminals are reused, others' are taken "
+          "over, gone ones are made new") {
     const auto id = [](char c) { return std::string(32, c); };
     SavedPane a, b, c, d;
     a.terminal = id('a'); // free
@@ -99,9 +114,16 @@ TEST_CASE("Attaching a layout: free terminals are reused, others' are taken over
     c.terminal = id('c'); // gone
     d.terminal = id('a'); // named twice
     SavedTab tab;
-    tab.root = SavedNode::split(SplitDirection::SideBySide, 500,
-                                SavedNode::split(SplitDirection::Stacked, 500, SavedNode::leafOf(a), SavedNode::leafOf(b)),
-                                SavedNode::split(SplitDirection::Stacked, 500, SavedNode::leafOf(c), SavedNode::leafOf(d)));
+    tab.root = SavedNode::split(SplitDirection::SideBySide,
+                                500,
+                                SavedNode::split(SplitDirection::Stacked,
+                                                 500,
+                                                 SavedNode::leafOf(a),
+                                                 SavedNode::leafOf(b)),
+                                SavedNode::split(SplitDirection::Stacked,
+                                                 500,
+                                                 SavedNode::leafOf(c),
+                                                 SavedNode::leafOf(d)));
     std::vector<AttachableSession> sessions(3);
     sessions[0].id = id('a');
     sessions[1].id = id('b');
@@ -112,7 +134,8 @@ TEST_CASE("Attaching a layout: free terminals are reused, others' are taken over
     EXPECT_EQ(plan.reused, std::size_t(1));
     EXPECT_EQ(plan.takeOver, std::size_t(1));
     EXPECT_EQ(plan.fresh, std::size_t(2));
-    EXPECT(plan.use[0] == id('a') && plan.use[1] == id('b') && plan.use[2].empty() && plan.use[3].empty());
+    EXPECT(plan.use[0] == id('a') && plan.use[1] == id('b') &&
+           plan.use[2].empty() && plan.use[3].empty());
     // A terminal this window already shows is not taken twice.
     sessions[0].inThisWindow = true;
     plan = planLayoutAttach(tab, sessions);
@@ -120,7 +143,8 @@ TEST_CASE("Attaching a layout: free terminals are reused, others' are taken over
     EXPECT_EQ(plan.fresh, std::size_t(3));
 }
 
-TEST_CASE("The attach list shows folder, command and who has the terminal; own terminals are left out") {
+TEST_CASE("The attach list shows folder, command and who has the terminal; own "
+          "terminals are left out") {
     std::vector<AttachableSession> all(4);
     all[0] = {"a", "/home/me/project/src", {}, false, false, false};
     all[1] = {"b", "/srv", {"vim", "notes.txt"}, true, true, false};
@@ -132,19 +156,24 @@ TEST_CASE("The attach list shows folder, command and who has the terminal; own t
     EXPECT_EQ(items[0].detail, std::string("shell"));
     EXPECT_EQ(items[0].action, std::string("daemon.attach.go:a"));
     EXPECT_EQ(items[1].label, std::string("/srv").substr(1));
-    EXPECT_EQ(items[1].detail, std::string("vim notes.txt (in another window) (shared)"));
+    EXPECT_EQ(items[1].detail,
+              std::string("vim notes.txt (in another window) (shared)"));
     EXPECT_EQ(items[2].label, std::string("terminal"));
     EXPECT(items[2].detail.find('\x1b') == std::string::npos);
     all[0].name = "build box";
-    EXPECT_EQ(attachItems(all)[0].label, std::string("build box (.../project/src)"));
+    EXPECT_EQ(attachItems(all)[0].label,
+              std::string("build box (.../project/src)"));
     EXPECT_EQ(takenOverNotice(true, "build box"),
-              std::string("a shared terminal 'build box' was taken over from another window"));
-    EXPECT_EQ(takenOverNotice(false, ""), std::string("a terminal was taken over by another window"));
+              std::string("a shared terminal 'build box' was taken over from "
+                          "another window"));
+    EXPECT_EQ(takenOverNotice(false, ""),
+              std::string("a terminal was taken over by another window"));
     EXPECT_EQ(shortFolder("/"), std::string("/"));
     EXPECT_EQ(shortFolder("/home/me/"), std::string("home/me"));
 }
 
-TEST_CASE("Taking a terminal over asks first and defaults to Cancel; attach-all names the count") {
+TEST_CASE("Taking a terminal over asks first and defaults to Cancel; "
+          "attach-all names the count") {
     const auto dialog = takeOverDialog("abc", "/srv");
     EXPECT_EQ(dialog->selected(), std::size_t(1));
     EXPECT_EQ(attachAllDialog(2)->selected(), std::size_t(0));
@@ -195,11 +224,14 @@ TEST_CASE("Sharing entries follow what is shared now") {
               "Share this terminal");
 }
 
-TEST_CASE("Deleting a saved session asks first, defaults to Cancel and warns when it is in use") {
+TEST_CASE("Deleting a saved session asks first, defaults to Cancel and warns "
+          "when it is in use") {
     EXPECT_EQ(sessionCommandEntries().size(), std::size_t(1));
-    EXPECT_EQ(sessionCommandEntries()[0].name, std::string("Delete session..."));
+    EXPECT_EQ(sessionCommandEntries()[0].name,
+              std::string("Delete session..."));
     EXPECT_EQ(deleteSessionDialog("work", false)->selected(), std::size_t(1));
-    EXPECT_EQ(deleteSessionDialog("work\x1b", true)->selected(), std::size_t(1));
+    EXPECT_EQ(deleteSessionDialog("work\x1b", true)->selected(),
+              std::size_t(1));
 }
 
 TEST_CASE("The terminal the window runs in is marked in the attach list") {
@@ -214,7 +246,8 @@ TEST_CASE("The terminal the window runs in is marked in the attach list") {
     EXPECT(items[0].detail.find("(this terminal)") != std::string::npos);
     EXPECT(items[0].detail.find("another window") == std::string::npos);
     EXPECT(items[1].detail.find("(this terminal)") == std::string::npos);
-    EXPECT(std::string(thisTerminalNotice()).find("feed it to itself") != std::string::npos);
+    EXPECT(std::string(thisTerminalNotice()).find("feed it to itself") !=
+           std::string::npos);
 }
 
 TEST_SUIT_END
