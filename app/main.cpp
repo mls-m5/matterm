@@ -12,6 +12,7 @@
 #ifdef MATTERM_HAS_ATTACH_TTY
 #include "attachtty.h"
 #include "daemoncli.h"
+#include "settingsrun.h"
 #endif
 
 #include <SDL.h>
@@ -60,6 +61,8 @@ void printUsage(std::ostream &out, const char *program) {
            "another "
            "window.\n\n"
            "  --help, -h           Show this help without opening a window.\n"
+           "  --settings           Edit this computer's settings in the "
+           "current terminal.\n"
            "  --font-size PIXELS   Font size, 1..128 renderer pixels (default: "
            "18).\n"
            "  --term TERM          Child TERM (default: xterm-256color).\n"
@@ -502,6 +505,7 @@ int main(int argc, char **argv) {
     bool systemFrameFlag = false;
     bool windowTestOnly = false;
     bool attachTty = false;
+    bool settingsMode = false;
     bool attachNew = false;
     std::string attachName;
     bool daemonList = false, daemonStop = false;
@@ -536,6 +540,9 @@ int main(int argc, char **argv) {
         else if (arg == "--help" || arg == "-h") {
             printUsage(std::cout, argv[0]);
             return 0;
+        }
+        else if (arg == "--settings") {
+            settingsMode = true;
         }
         else if (arg == "--font-size") {
             const std::string_view value = ++i < argc ? argv[i] : "";
@@ -676,6 +683,24 @@ int main(int argc, char **argv) {
     if (!daemonHost.empty() && (!daemonSocket.empty() || !useDaemon)) {
         std::cerr << "--daemon-host is its own daemon: it cannot be combined with --daemon-socket or --no-daemon\n";
         return 1;
+    }
+    if (settingsMode) {
+        if (!valid || inputPath || smokeTest || showcase || ptySmokeTest ||
+            ptyTabsSmokeTest || ptyLayoutSmokeTest || attachTty || attachNew ||
+            !attachName.empty() || daemonList || daemonStop || windowTestOnly ||
+            !command.empty()) {
+            std::cerr << "--settings is a mode of its own; do not combine it "
+                         "with other commands\n";
+            return 1;
+        }
+#ifdef MATTERM_HAS_ATTACH_TTY
+        return runSettings(); // Deliberately before daemon/SSH/SDL
+                              // initialization.
+#else
+        std::cerr << "This build has no terminal settings program (needs POSIX "
+                     "support)\n";
+        return 1;
+#endif
     }
     if (smoothCursor && (inputPath || smokeTest || showcase)) {
         std::cerr << "--smooth-cursor requires native PTY mode; do not combine "

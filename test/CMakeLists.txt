@@ -357,6 +357,11 @@ if(BUILD_TESTING)
     target_include_directories(perflog_test PRIVATE ${PROJECT_SOURCE_DIR}/src)
     add_test(NAME perflog COMMAND perflog_test)
 
+    add_executable(settingsui_test settingsui_test.cpp)
+    target_link_libraries(settingsui_test PRIVATE mls_unit_test_main matterm::tty palette)
+    target_include_directories(settingsui_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+    add_test(NAME settings_ui COMMAND settingsui_test)
+
     add_executable(settings_test settings_test.cpp)
     target_link_libraries(settings_test PRIVATE mls_unit_test_main)
     target_include_directories(settings_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
@@ -552,6 +557,10 @@ if(BUILD_TESTING)
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/native_perf_log.py"
                         $<TARGET_FILE:matterm> $<TARGET_FILE:matterm-daemon>)
             set_tests_properties(native_perf_log PROPERTIES TIMEOUT 100)
+            add_test(NAME settings_native
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/settings_native.py"
+                    "$<TARGET_FILE:matterm>" "$<TARGET_FILE:matterm-daemon>")
+            set_tests_properties(settings_native PROPERTIES TIMEOUT 100)
         endif()
 
         # Detach tab, then Attach tab... is offered: local daemon, and --daemon-host through the fake ssh.
@@ -572,6 +581,12 @@ if(BUILD_TESTING)
         target_compile_definitions(daemonversion_test PRIVATE MATTERM_DAEMON_BIN="$<TARGET_FILE:matterm-daemon>")
         add_dependencies(daemonversion_test matterm-daemon)
         add_test(NAME daemon_version COMMAND daemonversion_test)
+        if(TARGET matmux AND TARGET matterm AND Python3_Interpreter_FOUND)
+            add_test(NAME settings_pty
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/settings_pty.py"
+                    "$<TARGET_FILE:matterm>" "$<TARGET_FILE:matmux>")
+            set_tests_properties(settings_pty PROPERTIES TIMEOUT 60)
+        endif()
         if(TARGET matmux AND Python3_Interpreter_FOUND)
             add_test(NAME matmux COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/matmux_test.py
                      $<TARGET_FILE:matmux> $<TARGET_FILE:matterm-daemon>)

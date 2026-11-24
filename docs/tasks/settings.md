@@ -46,6 +46,24 @@ Owner's wishes (2026-11-23) and decisions (do not reopen; ask with alternatives 
   `docs/handover/features/agentN-<name>.md`. Rules as before: tests first, small commits, tidy
   clean, SHAs to the integrator; state what was not run (no display here).
 
+## TUI continuation contract (2026-11-23)
+
+Agent2 now owns the settings TUI; agent3 finishes client performance logging.
+Use two columns (sections left, controls right), centered on wide terminals.
+Reuse src/tty Session/Canvas/KeyDecoder and searchCommands; no new widget/input
+framework and no separate preview panel. Applying a control saves immediately
+through the existing atomic writer; the window follows within one second.
+Escape cancels only the current edit, never earlier saves. Re-read before
+applying a single-field edit, preserve unknown keys/other external edits, and
+refuse a conflict on the edited value or a broken file. A signature check just
+before save catches intervening external changes; arbitrary non-cooperating
+writers can still race the final check/rename (not a cross-process CAS).
+`matterm --settings` / `matmux --settings` edit the local client's file without
+starting a daemon/SSH/window. Palette Settings creates a new LOCAL process/tab,
+also when the window uses --daemon-host. Shared CLI/ptyfrontend/CMake changes
+wait for the integrator's combined performance base; agent3 has released them.
+New files: src/frontend/settingsui.h, app/settingsrun.{h,cpp}, settings UI tests.
+
 ## Addendum (owner, 2026-11-23): where the computer's name sits
 The name goes roughly in the **middle** of the strip's draggable gap. Make the placement a setting
 to try out: `computerNamePlacement` = `center` (default) | `left` (next to the tabs) | `right`

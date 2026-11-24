@@ -701,6 +701,20 @@ does not know are written back as they were. The definitions (key, text, type, d
 A value that does not fit is a warning and its default is used; a file that is not JSON is reported (in the window title) and the
 values from before stay; saving over a broken file is refused.
 
+**The settings program.** `matterm --settings` and `matmux --settings` run in the
+current terminal without starting a window, daemon or SSH connection. The native
+palette's **Settings** entry starts the same program in a new **local** tab,
+even in a window connected with `--daemon-host`. Two columns show sections on the
+left and controls on the right; the layout centers on a wide terminal. Type to
+search (the same fuzzy search as the palette), Tab changes focus, arrows select,
+and Enter edits/applies. Each apply saves atomically at once, with no separate
+preview panel or Save button. Esc cancels only an unfinished edit; Ctrl+Q quits.
+The file is rewritten in definition order with every known effective/default
+value, then unknown members; a second save produces the same text. Before an
+apply the program reloads and rebases only that field; same-field external
+conflicts and broken files are refused. A too-small terminal suspends editing
+until resized (quit/cancel still work).
+
 **Following the file.** `SettingsWatcher` reads the file at start and looks at it about once a second (one `stat`; the file is read
 only when its time or size changed), pure given a file system and a clock. The palette entry "Reload settings" reads at once.
 inotify can come later; polling stays the baseline.

@@ -55,6 +55,25 @@ The browser build and the server are described in [web/README.md](web/README.md)
    own user): palette *Attach terminal...*.
 6. Ctrl+Shift+H lists every keyboard shortcut.
 
+## Settings
+
+Run `matterm --settings` or `matmux --settings` in a terminal, or choose **Settings**
+in the native command palette (Ctrl+Shift+P) to open a new local tab. Even with
+`--daemon-host`, this edits the client's settings, not a file on the other computer.
+
+Type to search; Tab switches sections/controls, arrows select, and Enter edits or
+applies. Changes are saved immediately and the window follows within about one
+second. Esc cancels the current edit, not earlier saves; Ctrl+Q exits. Themes,
+per-computer overrides, computer-name placement (center/left/right), tab activity,
+window frame, scrollback and close confirmation are available. Frame/scrollback
+changes apply to new windows/terminals.
+
+The file is `$XDG_CONFIG_HOME/matterm/settings.json` (otherwise
+`~/.config/matterm/settings.json`): strict JSON, always formatted with defaults
+included. Unknown members are retained. External changes are re-read before
+applying a field; conflicts or broken files are reported instead of overwritten.
+Keys, values and theme rules: [docs/TABS_PLAN.md, section 17](docs/TABS_PLAN.md#17-settings-and-themes-agent2-decided-by-the-owner-2026-11-23).
+
 ## The window frame
 
 The native window draws its own frame: the tab strip is the title bar (drag the empty part, minimise,

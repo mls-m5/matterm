@@ -88,6 +88,21 @@ TEST_CASE(
     EXPECT(watcher.settings().choice("theme") == "blue");
 }
 
+TEST_CASE("A stale save refuses to replace an externally modified file") {
+    FakeFs fs;
+    fs.put(kPath, R"({"theme":"blue"})");
+    SettingsWatcher watcher(fs, kPath, [] { return 0; });
+    auto edited = watcher.settings();
+    std::string error;
+    EXPECT(edited.set("theme", "green", error));
+    const std::string external = R"({"theme":"red","external":42})";
+    fs.put(kPath, external);
+    EXPECT(!watcher.save(edited, error));
+    EXPECT(error.find("changed") != std::string::npos);
+    EXPECT_EQ(fs.files[kPath].text, external);
+    EXPECT_EQ(fs.writes, 0);
+}
+
 TEST_CASE("No file: the defaults, and nothing to report") {
     FakeFs fs;
     std::int64_t now = 0;

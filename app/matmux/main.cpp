@@ -5,6 +5,7 @@
 #include "attachtty.h"
 #include "daemoncli.h"
 #include "daemonclient.h"
+#include "settingsrun.h"
 #include "socketpath.h"
 #include "version.h"
 
@@ -30,6 +31,8 @@ void usage(std::ostream &out) {
            "at once (the daemon is\n"
            "  started when missing). Leave a terminal with Ctrl+B d: it keeps "
            "running.\n"
+           "  --settings            edit this computer's settings in the "
+           "current terminal\n"
            "  --attach              the same list with the first terminal "
            "chosen "
            "(Ctrl+B l is the\n"
@@ -70,9 +73,13 @@ int main(int argc, char **argv) {
     options.attachProgram = "matmux --attach";
     options.rendered = false; // Passthrough: the host terminal keeps its
                               // scrollback. --rendered: cell by cell.
-    bool list = false, stop = false, attach = false;
+    bool list = false, stop = false, attach = false, settingsMode = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
+        if (arg == "--settings") {
+            settingsMode = true;
+            continue;
+        }
         if (arg == "--attach") {
             attach = true;
             continue;
@@ -130,6 +137,15 @@ int main(int argc, char **argv) {
             usage(std::cerr);
             return 2;
         }
+    }
+    if (settingsMode) {
+        if (attach || list || stop || options.attachNew ||
+            !options.attachName.empty() || !options.attachCommand.empty()) {
+            std::cerr << "--settings is a mode of its own; do not combine it "
+                         "with other commands\n";
+            return 2;
+        }
+        return runSettings(); // No daemon or SSH: this computer's settings.
     }
     // A name or a command is for a new terminal. Without any mode: the list
     // with New terminal chosen, or a new terminal at once when none runs.

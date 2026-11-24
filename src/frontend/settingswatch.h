@@ -96,6 +96,11 @@ public:
             error = "there is no place for a settings file (no HOME)";
             return false;
         }
+        if (!(fs_.stat(path_) == signature_)) {
+            error =
+                "the settings file changed externally; reload before saving";
+            return false;
+        }
         if (!fs_.writeAtomic(path_, edited.toText(), error)) {
             return false;
         }

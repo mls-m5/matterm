@@ -39,9 +39,9 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
-#include <deque>
 #include <csignal>
 #include <ctime>
+#include <deque>
 #include <fcntl.h>
 #include <filesystem>
 #include <functional>
@@ -53,6 +53,7 @@
 #include <system_error>
 #include <tuple>
 #include <unistd.h>
+#include <utility>
 
 namespace {
 using namespace frontend;
@@ -569,6 +570,10 @@ int runPtyFrontend(const char *font,
     int hintColumns = 80, hintRows = 24; // size of a new pane until the layout says
     // Folder the next pane's shell should start in (a restored session), else empty.
     std::string nextCwd;
+    bool nextSettings = false; // Settings always runs on this client, never in
+                               // its remote daemon.
+    bool failNextSettingsForTest =
+        false; // Layout smoke: inject a factory failure.
     // A daemon terminal the next pane should show instead of making a new one
     // (Attach terminal). For measuring a reattach (bench/replay-measure.py,
     // docs/CPU.md): the first pane shows this terminal.
@@ -589,6 +594,11 @@ int runPtyFrontend(const char *font,
     // The first pane is made before SDL and its threads exist (fork); later ones
     // are made on demand, see docs/TABS_PLAN.md.
     Space workspace([&]() -> std::unique_ptr<NativePane> {
+        // Consume before anything can throw: a failed Settings launch must
+        // never redirect the next ordinary tab or split to local Settings.
+        const bool settingsPane = std::exchange(nextSettings, false);
+        if (settingsPane && std::exchange(failNextSettingsForTest, false))
+            throw std::runtime_error("injected Settings factory failure");
         std::function<void(std::string_view)> record;
         if (recordFirst) {
             recordFirst = false;
@@ -596,16 +606,25 @@ int runPtyFrontend(const char *font,
                 recording.append(bytes);
             };
         }
-        std::vector<std::string> command = arguments;
-        if (!nextCwd.empty()) {
+        std::vector<std::string> command =
+            settingsPane
+                ? std::vector<std::string>{"/proc/self/exe", "--settings"}
+                : arguments;
+        if (!settingsPane && !nextCwd.empty()) {
             // cd, then become the usual command (the pane's process stays the shell, so /proc
             // and the close question see the shell). A folder that vanished was checked before.
             command = {"/bin/sh", "-c", "cd -- \"$1\" 2>/dev/null; shift; exec \"$@\"", "sh", nextCwd};
             command.insert(command.end(), arguments.begin(), arguments.end());
         }
-        auto pane = daemonOptions.enabled
-                        ? std::make_unique<NativePane>(daemonPath, nextAttachId, daemonCwd(), hintColumns, hintRows)
-                        : std::make_unique<NativePane>(command, term, hintColumns, hintRows, std::move(record));
+        auto pane =
+            daemonOptions.enabled && !settingsPane
+                ? std::make_unique<NativePane>(daemonPath,
+                                               nextAttachId,
+                                               daemonCwd(),
+                                               hintColumns,
+                                               hintRows)
+                : std::make_unique<NativePane>(
+                      command, term, hintColumns, hintRows, std::move(record));
         pane->v.glide() = CursorGlide([&] {
             CursorGlide::Config c;
             c.enabled = smoothCursor;
@@ -1342,6 +1361,12 @@ int runPtyFrontend(const char *font,
              std::nullopt,
              {},
              {}},
+            {"settings.open",
+             "Settings",
+             "Edit this computer's settings in a new local tab",
+             std::nullopt,
+             {},
+             {}},
             {"settings.reload",
              "Reload settings",
              "Read settings.json again now",
@@ -1433,6 +1458,15 @@ int runPtyFrontend(const char *font,
                     deliver(program.pane, offer, rerunInput(program.saved));
                 }
             }
+        }
+        else if (id == "settings.open") {
+            nextSettings = true;
+            const auto result = workspace.apply(Command::NewTab);
+            nextSettings = false;
+            if (result == Outcome::Ignored)
+                notify("no room for a settings tab");
+            else
+                workspace.setUserTitle(workspace.activeIndex(), "Settings");
         }
         else if (id == "settings.reload") {
             const auto event = settingsWatch.reloadNow();
@@ -1929,7 +1963,32 @@ int runPtyFrontend(const char *font,
             break;
         case 1:
             expectThat(connected(workspace.focusedPane()), "the first terminal is attached to the daemon");
-            if (variant == "emptyshell" || variant == "emptyshell-typed") {
+            if (variant == "settings") {
+                expectThat(paletteEntryNamed(paletteExtra(), "Settings"),
+                           "the palette offers Settings");
+                std::string error;
+                const auto reply =
+                    askDaemon(daemonPath, mtd::ListSessions{}, error, 2000);
+                if (const auto *list =
+                        reply ? std::get_if<mtd::SessionList>(&*reply)
+                              : nullptr)
+                    smokeCount = list->sessions.size();
+                failNextSettingsForTest = true;
+                bool rejected = false;
+                try {
+                    handleAction("settings.open");
+                }
+                catch (const std::runtime_error &) {
+                    rejected = true;
+                }
+                expectThat(
+                    rejected && !nextSettings,
+                    "a failed settings factory clears its local-only override");
+                handleAction("settings.open");
+                later(1500);
+                scriptStep = 110;
+            }
+            else if (variant == "emptyshell" || variant == "emptyshell-typed") {
                 // A terminal that no window shows, and the fresh shell in front: Attach terminal... closes
                 // the fresh shell only when nothing was typed in it.
                 std::string error;
@@ -1970,6 +2029,41 @@ int runPtyFrontend(const char *font,
                 later(2000);
             }
             break;
+        case 110: {
+            NativePane *pane = workspace.focusedPane();
+            const bool local = pane && pane->link && !pane->daemon;
+            expectThat(workspace.tabCount() == 2 && local,
+                       "Settings opens a LOCAL tab, also with --daemon-host");
+            if (!local) {
+                scriptDone = true;
+                running = false;
+                break;
+            }
+            expectThat(visibleText(pane->v.model()).find("Settings") !=
+                           std::string::npos,
+                       "the local TUI has drawn");
+            expectThat(pane->v.sendInput("theme\r\x1b[B\r"),
+                       "choose Blue in the local settings program");
+            later(2000);
+            scriptStep = 111;
+            break;
+        }
+        case 111: {
+            expectThat(settingsWatch.settings().choice("theme") == "blue",
+                       "the native watcher follows the locally saved setting");
+            std::string error;
+            const auto reply =
+                askDaemon(daemonPath, mtd::ListSessions{}, error, 2000);
+            const auto *list =
+                reply ? std::get_if<mtd::SessionList>(&*reply) : nullptr;
+            expectThat(list && list->sessions.size() == smokeCount,
+                       "Settings did not create a daemon terminal");
+            if (auto *pane = workspace.focusedPane())
+                pane->v.sendInput("\x11");
+            scriptDone = true;
+            running = false;
+            break;
+        }
         case 100: {
             std::string error;
             const auto reply = askDaemon(daemonPath, mtd::ListSessions{}, error, 2000);

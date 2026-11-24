@@ -293,7 +293,7 @@ endif()
 # client and the shared tty layer. matterm links it; a program without SDL (matmux) can too.
 # Entry point: runAttachTty(DaemonOptions) in app/attachtty.h.
 if(UNIX AND TARGET ptysession)
-    add_library(attachtty app/attachtty.cpp app/passthroughrun.cpp app/daemoncli.cpp src/daemon/control.cpp src/daemon/buildhash.cpp
+    add_library(attachtty app/attachtty.cpp app/passthroughrun.cpp app/settingsrun.cpp app/daemoncli.cpp src/daemon/control.cpp src/daemon/buildhash.cpp
                       src/daemon/socketpath.cpp)
     add_library(matterm::attachtty ALIAS attachtty)
     target_compile_features(attachtty PUBLIC cxx_std_17)
