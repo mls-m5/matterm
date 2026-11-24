@@ -49,10 +49,14 @@ with tempfile.TemporaryDirectory(prefix="matterm-native-perf-") as tmp:
             with open(log) as stream:
                 text = stream.read()
             for field in ("matterm-native", "summary", "verdict", "in_bytes=", "in_msg=",
-                          "parse_ms=", "layout_ms=", "draw_ms=", "cpu_ms=", "rtt_n="):
+                          "parse_ms=", "layout_ms=", "draw_ms=", "cpu_ms=", "rtt_n=",
+                          "gui_loop_gap_n=", "gui_pump_round_n=", "gui_pump_focused_n=",
+                          "gui_pump_visible_n=", "gui_pump_hidden_n="):
                 assert field in text, (mode, field, text)
             lines = [line for line in text.splitlines() if "summary" not in line and "in_bytes=" in line]
             assert lines, text
+            assert any(int(line.split("gui_loop_gap_n=")[1].split()[0]) > 0 for line in lines), text
+            assert any(int(line.split("gui_pump_focused_n=")[1].split()[0]) > 0 for line in lines), text
             assert any(int(line.split("in_bytes=")[1].split()[0]) > 0 for line in lines), text
             assert all(float(line.split("interval_s=")[1].split()[0]) >= 0 for line in lines), text
             if mode == "remote":

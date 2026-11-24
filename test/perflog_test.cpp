@@ -51,6 +51,23 @@ TEST_CASE("Totals weight CPU by actual partial interval and merge samples") {
            std::string::npos);
     EXPECT(perf::verdict({}) == "unknown");
 }
+TEST_CASE("GUI loop and per-pane pump histograms are bounded and merged without terminal data") {
+    perf::Second a, b;
+    a.guiLoopGap.add(40); b.guiLoopGap.add(80);
+    a.guiPumpRound.add(30); b.guiPumpRound.add(60);
+    a.guiPumpFocused.add(3); b.guiPumpFocused.add(6);
+    a.guiPumpVisible.add(4); b.guiPumpVisible.add(8);
+    a.guiPumpHidden.add(20); b.guiPumpHidden.add(40);
+    perf::Totals totals;
+    totals.add(a, 1); totals.add(b, 1);
+    EXPECT(totals.total().guiLoopGap.summary().avg == 60);
+    EXPECT(totals.total().guiPumpHidden.summary().count == 2);
+    const auto line = perf::formatSecond("test", 2, totals.total(), 2);
+    for (const auto *field : {"gui_loop_gap_n=2", "gui_pump_round_n=2", "gui_pump_focused_n=2", "gui_pump_visible_n=2", "gui_pump_hidden_n=2"})
+        EXPECT(line.find(field) != std::string::npos);
+    EXPECT(sizeof(perf::Second) < 20000u);
+}
+
 TEST_CASE("Numeric formatting bounds precision and does not truncate doubles") {
     EXPECT(perf::number(std::numeric_limits<double>::max()).size() > 300u);
     EXPECT_EQ(perf::number(1.25, 8), std::string("1.250000"));

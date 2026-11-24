@@ -135,6 +135,8 @@ struct Counters {
 struct Second {
     Counters counters;
     Samples echo, rtt, pump;
+    Samples guiLoopGap, guiPumpRound, guiPumpFocused, guiPumpVisible,
+        guiPumpHidden;
     double cpuMs = 0;
     std::uint64_t sessions = 0, clients = 0;
 };
@@ -165,6 +167,11 @@ public:
         total_.echo.merge(s.echo);
         total_.rtt.merge(s.rtt);
         total_.pump.merge(s.pump);
+        total_.guiLoopGap.merge(s.guiLoopGap);
+        total_.guiPumpRound.merge(s.guiPumpRound);
+        total_.guiPumpFocused.merge(s.guiPumpFocused);
+        total_.guiPumpVisible.merge(s.guiPumpVisible);
+        total_.guiPumpHidden.merge(s.guiPumpHidden);
         total_.cpuMs += s.cpuMs;
         total_.sessions = s.sessions;
         total_.clients = s.clients;
@@ -206,7 +213,12 @@ inline std::string formatSecond(const std::string &who,
     return who + " t=" + number(elapsedSeconds, 3) +
            " interval_s=" + number(intervalSeconds, 3) + " " +
            formatSamples("echo", s.echo) + " | " + formatSamples("rtt", s.rtt) +
-           " | " + formatSamples("pump", s.pump) +
+           " | " + formatSamples("pump", s.pump) + " | " +
+           formatSamples("gui_loop_gap", s.guiLoopGap) + " | " +
+           formatSamples("gui_pump_round", s.guiPumpRound) + " | " +
+           formatSamples("gui_pump_focused", s.guiPumpFocused) + " | " +
+           formatSamples("gui_pump_visible", s.guiPumpVisible) + " | " +
+           formatSamples("gui_pump_hidden", s.guiPumpHidden) +
            " | in_bytes=" + std::to_string(c.bytesIn) +
            " in_msg=" + std::to_string(c.messagesIn) +
            " largest_in=" + std::to_string(c.largestIn) +

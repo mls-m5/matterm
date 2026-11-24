@@ -2481,9 +2481,14 @@ int runPtyFrontend(const char *font,
     std::string shownTitle;
     std::uint64_t framesDrawn = 0, iterations = 0;
     const Uint64 loopStarted = SDL_GetTicks64();
+    double previousGuiLoopAt = 0;
     while (running) {
         if (perfLog.enabled()) {
+            const double loopAt = perfClockMs();
             perfLog.tick();
+            if (previousGuiLoopAt != 0)
+                perfLog.second.guiLoopGap.add(loopAt - previousGuiLoopAt);
+            previousGuiLoopAt = loopAt;
             perfLog.second.clients = 0;
             workspace.forEachPane([&](PaneId, NativePane &pane, bool) {
                 pane.measure(perfLog.second);
@@ -2984,8 +2989,17 @@ int runPtyFrontend(const char *font,
         }
         // Every process keeps being served, shown or not; ended ones close their pane.
         std::vector<PaneId> ended;
-        workspace.forEachPane([&](PaneId id, NativePane &pane, bool) {
+        const double pumpRoundAt = perfLog.enabled() ? perfClockMs() : 0;
+        workspace.forEachPane([&](PaneId id, NativePane &pane, bool visible) {
+            const double pumpAt = perfLog.enabled() ? perfClockMs() : 0;
             pane.pump();
+            if (perfLog.enabled()) {
+                auto &samples = id == workspace.focusedPaneId()
+                                    ? perfLog.second.guiPumpFocused
+                                : visible ? perfLog.second.guiPumpVisible
+                                          : perfLog.second.guiPumpHidden;
+                samples.add(perfClockMs() - pumpAt);
+            }
             if (pane.inDaemon()) {
                 const bool taken = pane.v.state() == TerminalView::State::Replaced;
                 if (taken && !pane.takeoverReported) {
@@ -2997,6 +3011,8 @@ int runPtyFrontend(const char *font,
                 ended.push_back(id);
             }
         });
+        if (perfLog.enabled())
+            perfLog.second.guiPumpRound.add(perfClockMs() - pumpRoundAt);
         for (auto it = deliveries.begin(); it != deliveries.end();) {
             NativePane *pane = workspace.pane(it->pane);
             const bool up = pane && (!pane->daemon || pane->daemon->session().state() == ClientSession::State::Running);
