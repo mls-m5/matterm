@@ -371,7 +371,37 @@ TEST_CASE("isStaticElf tells a static binary from a dynamic one and from other f
     if (const char *other = std::getenv("MATTERM_TEST_DAEMON"); other && *other) EXPECT(isStaticElf(other));
 }
 
-TEST_CASE("--daemon-install: our daemon is copied (after asking), named after its content, and started there") {
+TEST_CASE("First install gets a fresh readiness budget after a slow successful "
+          "upload") {
+    for (const auto policy : {DaemonInstall::Always, DaemonInstall::Auto}) {
+        Fake fake;
+        ::unsetenv("FAKE_SSH_DAEMON_ON_PATH");
+        // Existing fake delays every remote command. Installation comprises
+        // several commands and exceeds startup's 1s, but each readiness phase
+        // still fits. Its independent installation timeout must remain intact.
+        ::setenv("FAKE_SSH_DELAY", "0.4", 1);
+        auto options = fake.options();
+        options.install = policy;
+        options.localDaemon = daemonBinary();
+        options.timeoutMs = 1000;
+        options.installTimeoutMs = 20000;
+        options.confirm = [](const std::string &) { return true; };
+        std::string error;
+        const auto began = std::chrono::steady_clock::now();
+        auto tunnel = SshTunnel::open(options, error);
+        const auto elapsed = std::chrono::steady_clock::now() - began;
+        const bool ready = tunnel && statusOf(tunnel->socketPath()).has_value();
+        tunnel.reset();
+        stopRemote(fake.dir.path + "/remote.sock");
+        EXPECT(elapsed > milliseconds(options.timeoutMs));
+        EXPECT(installed(fake).size() == 1); // Upload itself really succeeded.
+        EXPECT(error.empty());
+        EXPECT(ready);
+    }
+}
+
+TEST_CASE("--daemon-install: our daemon is copied (after asking), named after "
+          "its content, and started there") {
     Fake fake;
     ::unsetenv("FAKE_SSH_DAEMON_ON_PATH");
     auto options = fake.options();

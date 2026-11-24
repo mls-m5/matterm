@@ -60,7 +60,7 @@ struct SshTunnelOptions {
     std::string ssh = "ssh";             // The ssh program.
     std::string remoteDaemon = "matterm-daemon"; // How the remote shell finds the daemon.
     std::string remoteSocket;            // Empty: the remote default ($XDG_RUNTIME_DIR/matterm/daemon.sock).
-    int timeoutMs = 20000;               // For the whole startup.
+    int timeoutMs = 20000;               // Remote startup + forwarding readiness, excluding installation.
     DaemonInstall install = DaemonInstall::Never;
     bool assumeYes = false;              // --yes: copy without asking.
     // Asked before the first copy (nothing is copied when it says no or is not set and assumeYes is not).
@@ -242,7 +242,8 @@ public:
             error = "--daemon-host: the remote daemon or socket name has characters the remote shell would read";
             return nullptr;
         }
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(options.timeoutMs);
+        auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(options.timeoutMs);
         auto tunnel = std::unique_ptr<SshTunnel>(new SshTunnel());
         tunnel->options_ = options;
         // 1. Where is the socket, and is the daemon there?
@@ -254,20 +255,34 @@ public:
             if (!installRemote(options, daemonPath, error)) {
                 return nullptr;
             }
+            // Upload/confirmation have their own installation budget. Begin
+            // startup readiness only after that independently bounded work.
+            deadline = std::chrono::steady_clock::now() +
+                       std::chrono::milliseconds(options.timeoutMs);
         }
         ask = commandArguments(options, daemonPath);
-        if (!runCapture(options.ssh, ask, deadline, output, error, {}, &status)) {
-            const bool missing = status == 127 || error.find("not found") != std::string::npos ||
-                                 error.find("No such file") != std::string::npos;
+        if (!runCapture(
+                options.ssh, ask, deadline, output, error, {}, &status)) {
+            const bool missing =
+                status == 127 || error.find("not found") != std::string::npos ||
+                error.find("No such file") != std::string::npos;
             if (options.install == DaemonInstall::Auto && missing) {
                 // Not on its PATH: our own copy, if the owner agrees.
                 if (!installRemote(options, daemonPath, error)) {
                     return nullptr;
                 }
+                deadline = std::chrono::steady_clock::now() +
+                           std::chrono::milliseconds(options.timeoutMs);
                 ask = commandArguments(options, daemonPath);
                 error.clear();
                 output.clear();
-                if (!runCapture(options.ssh, ask, deadline, output, error, {}, &status)) {
+                if (!runCapture(options.ssh,
+                                ask,
+                                deadline,
+                                output,
+                                error,
+                                {},
+                                &status)) {
                     error = "ssh " + options.host + ": " + error;
                     return nullptr;
                 }
