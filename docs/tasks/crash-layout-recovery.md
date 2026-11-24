@@ -1,0 +1,34 @@
+# Recover tab and split layouts after an unexpected window exit
+
+Owner request: automatically save tab/split layouts when they change (including
+tab names), so that a window crash or lost connection does not leave only
+individually attachable daemon terminals. Restore their existing daemon session
+IDs and layout, not new shells in home. Distinguish this from named saved
+sessions, which capture cwd/commands and may offer to start new programs.
+
+## Design first
+
+- Inspect existing detached-tab layout files, session IDs, workspace capture,
+  daemon host identity and session policies; reuse where safe. Do not create a
+  second layout serialization format without explaining why.
+- Capture changes to splits, tab order/names and attach/detach; debounce and
+  use atomic, private writes. Avoid per-frame writes and do not save terminal
+  content, input or secrets. Never overwrite the last good file on parse/write
+  failure. Avoid synchronous SSH RPC per pane during a layout update.
+- Define ownership for multiple windows/hosts and avoid overwriting or stealing
+  another window's layout. On crash, attach only the intended daemon sessions;
+  do not automatically take over terminals currently attached elsewhere.
+- Handle stale/missing IDs and old daemons gracefully; never start saved commands
+  automatically. Explicitly distinguish controlled Close (end), Detach (keep),
+  crash and reconnect, and remove/retire recoveries only at the right time.
+- Propose discoverable recovery UX (e.g. palette action/list with timestamps and
+  explicit confirmation), and ask the owner before choosing automatic startup
+  reattachment or takeover. Keep named saved-session semantics separate.
+- Include test-first fake storage and real-daemon test: create split layout with
+  running programs, kill only the window without graceful shutdown, open another
+  window, recover exact surviving session IDs/layout without terminating or
+  restarting them; also multi-window isolation and controlled-close cases.
+
+Coordinate with agent3's current settings crash and tab/pane detach work; avoid
+concurrent edits to app/ptyfrontend.cpp. Document limitations and require real
+SSH/display verification where sandbox tests cannot cover them.
