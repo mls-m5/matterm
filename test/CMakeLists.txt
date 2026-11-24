@@ -383,6 +383,11 @@ if(BUILD_TESTING)
     target_compile_features(jsonreaders_test PRIVATE cxx_std_20) # fast-json needs C++20 (the client code is C++17)
     add_test(NAME json_readers COMMAND jsonreaders_test)
 
+    add_executable(attachreplacement_test attachreplacement_test.cpp)
+    target_link_libraries(attachreplacement_test PRIVATE mls_unit_test_main)
+    target_include_directories(attachreplacement_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+    add_test(NAME attach_replacement COMMAND attachreplacement_test)
+
     add_executable(ttysnapshot_test ttysnapshot_test.cpp)
     target_link_libraries(ttysnapshot_test PRIVATE mls_unit_test_main)
     target_link_libraries(ttysnapshot_test PRIVATE matterm::ttymatterm matterm::vt)
@@ -566,6 +571,11 @@ if(BUILD_TESTING)
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/window_detach_native.py"
                     $<TARGET_FILE:matterm> $<TARGET_FILE:matterm-daemon>)
             set_tests_properties(window_detach_native PROPERTIES TIMEOUT 100)
+
+            add_test(NAME attach_here_native
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/attach_here_native.py"
+                    $<TARGET_FILE:matterm> $<TARGET_FILE:matterm-daemon>)
+            set_tests_properties(attach_here_native PROPERTIES TIMEOUT 180)
         endif()
 
         # Detach tab, then Attach tab... is offered: local daemon, and --daemon-host through the fake ssh.

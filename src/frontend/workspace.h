@@ -86,6 +86,25 @@ public:
         }
         return nullptr;
     }
+    // Atomically exchange a prepared pane, retaining ID, split/focus and tab
+    // membership. The old owner is returned, never destroyed inside the tree.
+    std::unique_ptr<Pane> replacePaneAnywhere(
+        PaneId id, std::unique_ptr<Pane> &replacement) {
+        if (!replacement)
+            return {};
+        for (auto &tab : tabs_)
+            if (tab.tree.contains(id))
+                return tab.tree.replace(id, replacement);
+        for (auto &parked : parked_) {
+            if (parked.id != id)
+                continue;
+            auto old = std::move(parked.pane);
+            parked.pane = std::move(replacement);
+            return old;
+        }
+        return {};
+    }
+
     // Index of the tab holding a pane, or -1 (parked or unknown).
     int tabOfPane(PaneId id) const {
         for (std::size_t i = 0; i < tabs_.size(); ++i) {

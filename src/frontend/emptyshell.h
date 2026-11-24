@@ -24,9 +24,10 @@ struct ShellFacts {
         false; // The owner is in copy mode or has a selection there.
 };
 
-inline bool isEmptyShell(const ShellFacts &facts) {
-    return facts.panesInTab == 1 && facts.inputBytes == 0 && facts.probeKnown &&
-           !facts.busy && facts.scrollbackRows == 0 && !facts.selecting;
+inline bool isEmptyShell(const ShellFacts &facts, bool wholeTab = true) {
+    return (!wholeTab || facts.panesInTab == 1) && facts.inputBytes == 0 &&
+           facts.probeKnown && !facts.busy && facts.scrollbackRows == 0 &&
+           !facts.selecting;
 }
 
 } // namespace frontend

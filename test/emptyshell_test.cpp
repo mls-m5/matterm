@@ -50,4 +50,16 @@ TEST_CASE("Only a tab with a single pane can be an empty shell") {
     EXPECT(!isEmptyShell(f));
 }
 
+TEST_CASE("Pane-scope emptiness permits a split without weakening typed, unknown or busy guards") {
+    auto facts = fresh();
+    facts.panesInTab = 3;
+    EXPECT(!isEmptyShell(facts));
+    EXPECT(isEmptyShell(facts, false));
+    facts.inputBytes = 1;
+    EXPECT(!isEmptyShell(facts, false));
+    facts.inputBytes = 0; facts.probeKnown = false;
+    EXPECT(!isEmptyShell(facts, false));
+    facts.probeKnown = true; facts.busy = true;
+    EXPECT(!isEmptyShell(facts, false));
+}
 TEST_SUIT_END

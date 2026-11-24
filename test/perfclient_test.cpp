@@ -46,4 +46,24 @@ TEST_CASE("A client run shorter than one second writes a partial interval and "
     EXPECT(text.find("summary") != std::string::npos);
     EXPECT(text.find("verdict") != std::string::npos);
 }
+TEST_CASE("Client forwards only audited Settings startup timing phases") {
+    char path[] = "/tmp/matterm-settingsphase-XXXXXX";
+    const int fd = ::mkstemp(path);
+    EXPECT(fd >= 0); ::close(fd);
+    {
+        ClientPerf meter(path, "settings-phase-test");
+        meter.phase("settings_factory", 0, true, true);
+        meter.phase("settings_factory", 12.5);
+        meter.phase("settings_first_parsed_output", 20);
+        meter.phase("settings_first_present", 25);
+        meter.phase("not-a-trusted-phase", 4);
+    }
+    std::ifstream input(path);
+    const std::string text((std::istreambuf_iterator<char>(input)), {});
+    ::unlink(path);
+    EXPECT(text.find("phase=settings_factory phase_ms=12.5 status=ok") != std::string::npos);
+    EXPECT(text.find("phase=settings_first_parsed_output") != std::string::npos);
+    EXPECT(text.find("phase=settings_first_present") != std::string::npos);
+    EXPECT(text.find("not-a-trusted-phase") == std::string::npos);
+}
 TEST_SUIT_END

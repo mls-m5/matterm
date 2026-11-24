@@ -283,7 +283,7 @@ TEST_CASE("The wheel scrolls the list") {
         EXPECT(!d.click(1, 1).close);
     }
 
-    TEST_CASE("Window detach requires every live pane to survive; cancel stays default") {
+    TEST_CASE("Scoped detach requires every live target pane to survive; cancel stays default") {
         EXPECT(!windowDetachAvailable({}));
         EXPECT(windowDetachAvailable({{false, true}, {true, false}, {true, true}}));
         EXPECT(!windowDetachAvailable({{false, true}, {false, false}}));
@@ -303,9 +303,11 @@ TEST_CASE("The wheel scrolls the list") {
         EXPECT(dialog.key({keys::Enter, false, false, false}).action == "close.detach");
         EXPECT(dialog.key({keys::Escape, false, false, false}).action == "close.cancel");
         request.scope = CloseScope::Tab;
-        EXPECT(request.buttons().size() == 2);
+        EXPECT(request.buttons().size() == 3);
+        EXPECT(request.cancelIndex() == 2);
         request.scope = CloseScope::Pane;
-        EXPECT(request.buttons().size() == 2);
+        EXPECT(request.buttons().size() == 3);
+        EXPECT(request.cancelIndex() == 2);
         request.scope = CloseScope::Window;
         request.backgroundAvailable = false;
         EXPECT(request.buttons().size() == 2);

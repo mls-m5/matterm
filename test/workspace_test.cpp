@@ -420,4 +420,41 @@ TEST_CASE("foldTabs gives every tab's shape in tab order") {
     EXPECT(!w.setParentRatio(77, 0.3));
 }
 
+TEST_CASE("Atomic pane replacement preserves ID, split, focus and old ownership until commit") {
+    Maker maker;
+    Space w(maker.factory());
+    w.setLayoutSpec(bigSpec());
+    w.apply(Command::NewTab);
+    w.apply(Command::SplitSideBySide);
+    const auto target = w.focusedPaneId();
+    auto *original = w.pane(target);
+    const auto before = w.layoutActive();
+    const auto tab = w.activeTab()->id;
+    std::unique_ptr<Fake> absent;
+    EXPECT(!w.replacePaneAnywhere(target, absent));
+    EXPECT(w.pane(target) == original);
+    auto staged = std::make_unique<Fake>("staged-ready");
+    EXPECT(!w.replacePaneAnywhere(999999, staged));
+    EXPECT(staged && w.pane(target) == original);
+    auto old = w.replacePaneAnywhere(target, staged);
+    EXPECT(old.get() == original && !staged);
+    EXPECT(w.pane(target)->title == "staged-ready");
+    EXPECT(w.focusedPaneId() == target && w.activeTab()->id == tab);
+    const auto after = w.layoutActive();
+    EXPECT(after.panes.size() == before.panes.size());
+    for (std::size_t i = 0; i < before.panes.size(); ++i) {
+        EXPECT(after.panes[i].pane == before.panes[i].pane);
+        EXPECT(after.panes[i].rect.x == before.panes[i].rect.x);
+        EXPECT(after.panes[i].rect.w == before.panes[i].rect.w);
+    }
+    // Hidden and parked targets use the same stable-ID operation.
+    w.apply(Command::NewTab);
+    auto hidden = std::make_unique<Fake>("hidden-ready");
+    EXPECT(w.replacePaneAnywhere(target, hidden) != nullptr);
+    EXPECT(w.activeIndex() == 1);
+    w.park(target);
+    auto parked = std::make_unique<Fake>("parked-ready");
+    EXPECT(w.replacePaneAnywhere(target, parked) != nullptr);
+    EXPECT(w.pane(target)->title == "parked-ready");
+}
 TEST_SUIT_END

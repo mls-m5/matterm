@@ -14,9 +14,8 @@ namespace frontend {
 
 enum class CloseScope { Pane, Tab, Window };
 
-// Workspace close answers remain destructive close/cancel. Window detach uses
-// the existing application's keep-terminals shutdown path, not a workspace
-// close.
+// Workspace close answers remain destructive close/cancel. Detach uses the
+// application's existing terminal, layout or whole-window keep actions.
 enum class CloseAnswer { Close, Cancel };
 
 struct RunningProgram {
@@ -47,20 +46,20 @@ struct CloseRequest {
     PaneId pane = 0; // Scope Pane: the pane.
     std::vector<RunningProgram> running;
     bool backgroundAvailable =
-        false; // Window only: all live panes can survive detach.
+        false; // All live panes in this request can survive detach.
 
     struct Button {
         std::string label, action;
     };
     std::vector<Button> buttons() const {
         std::vector<Button> result = {{"Close", "close.confirm"}};
-        if (scope == CloseScope::Window && backgroundAvailable)
+        if (backgroundAvailable)
             result.push_back({"Detach", "close.detach"});
         result.push_back({"Cancel", "close.cancel"});
         return result;
     }
     std::size_t cancelIndex() const {
-        return scope == CloseScope::Window && backgroundAvailable ? 2 : 1;
+        return backgroundAvailable ? 2 : 1;
     }
 
     static constexpr std::size_t kMaxShown = 3;       // Programs named in the question.

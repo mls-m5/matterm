@@ -1,7 +1,8 @@
 #include "ptyfrontend.h"
+#include "attachreplacement.h"
 #include "daemonconnect.h"
-#include "restorecwd.h"
 #include "emptyshell.h"
+#include "restorecwd.h"
 #include "restoreprograms.h"
 #include "ui/programlist.h"
 
@@ -283,6 +284,9 @@ struct NativePane {
     std::unique_ptr<TapLink> tap;
     TerminalView v;
     bool endInDaemon = true; // Closing the pane ends its terminal; false: leave it running.
+    double settingsStartedAt =
+        0; // Opt-in diagnostics only, no callbacks retaining this pane.
+    bool settingsParsed = false, settingsPresented = false;
     std::unique_ptr<perf::EchoMeter> perfEcho;
     perf::Second *perfSecond = nullptr;
     double perfProbeAt = 0;
@@ -377,24 +381,6 @@ struct NativePane {
     }
     bool inDaemon() const {
         return !link;
-    }
-    // Shows another daemon terminal in this pane. The old one is ended when `endOld`, else it
-    // keeps running in the daemon, detached.
-    void swapTerminal(const std::string &sessionId, bool endOld) {
-        if (perfEcho)
-            *perfEcho = {};
-        v.detach();
-        if (daemon && endOld && !v.ended()) {
-            daemon->close();
-        }
-        daemon.reset();
-        v.resetForReplay();
-        daemon = attachToDaemon(v, socket, sessionId, 0, daemonClock);
-        endInDaemon = true;
-        shared = false;
-        name.clear();
-        hinted = false;
-        takeoverReported = false;
     }
     // Serves the process or the connection; says what Enter will do when the terminal is not live.
     void pump() {
@@ -571,6 +557,9 @@ int runPtyFrontend(const char *font,
     int hintColumns = 80, hintRows = 24; // size of a new pane until the layout says
     // Folder the next pane's shell should start in (a restored session), else empty.
     std::string nextCwd;
+    bool failEmptyProbeForTest =
+        false; // Layout smoke only: metadata unavailable.
+    double nextSettingsStartedAt = 0;
     bool nextSettings = false; // Settings always runs on this client, never in
                                // its remote daemon.
     bool failNextSettingsForTest =
@@ -598,6 +587,8 @@ int runPtyFrontend(const char *font,
         // Consume before anything can throw: a failed Settings launch must
         // never redirect the next ordinary tab or split to local Settings.
         const bool settingsPane = std::exchange(nextSettings, false);
+        const double settingsStartedAt =
+            std::exchange(nextSettingsStartedAt, 0.0);
         if (settingsPane && std::exchange(failNextSettingsForTest, false))
             throw std::runtime_error("injected Settings factory failure");
         std::function<void(std::string_view)> record;
@@ -626,6 +617,8 @@ int runPtyFrontend(const char *font,
                                                hintRows)
                 : std::make_unique<NativePane>(
                       command, term, hintColumns, hintRows, std::move(record));
+        if (settingsPane)
+            pane->settingsStartedAt = settingsStartedAt;
         pane->v.glide() = CursorGlide([&] {
             CursorGlide::Config c;
             c.enabled = smoothCursor;
@@ -1109,18 +1102,41 @@ int runPtyFrontend(const char *font,
         });
         return ids;
     };
-    const auto canDetachWindow = [&] {
+    const auto canDetachClose = [&](const CloseRequest &request) {
+        std::vector<PaneId> ids;
+        if (request.scope == CloseScope::Tab) {
+            const int index = workspace.indexOfTab(request.tab);
+            if (index < 0)
+                return false;
+            ids = workspace.tab(std::size_t(index))->tree.ids();
+        }
+        else if (request.scope == CloseScope::Pane) {
+            if (!workspace.pane(request.pane))
+                return false;
+            ids.push_back(request.pane);
+        }
+        else {
+            workspace.forEachPane(
+                [&](PaneId id, NativePane &, bool) { ids.push_back(id); });
+        }
         std::vector<ClosePaneState> panes;
-        workspace.forEachPane([&](PaneId, NativePane &pane, bool) {
-            panes.push_back({pane.v.ended(),
-                             pane.daemon && !pane.link &&
-                                 !pane.daemon->sessionId().empty()});
-        });
+        for (const auto id : ids) {
+            const auto *pane = workspace.pane(id);
+            if (!pane)
+                return false;
+            panes.push_back({pane->v.ended(),
+                             pane->daemon && !pane->link &&
+                                 !pane->daemon->sessionId().empty()});
+        }
         return windowDetachAvailable(panes);
     };
+    const auto canDetachWindow = [&] {
+        CloseRequest request;
+        request.scope = CloseScope::Window;
+        return canDetachClose(request);
+    };
     const auto showCloseDialog = [&](CloseRequest request) {
-        request.backgroundAvailable =
-            request.scope == CloseScope::Window && canDetachWindow();
+        request.backgroundAvailable = canDetachClose(request);
         std::vector<ui::ConfirmDialog::Button> buttons;
         for (const auto &button : request.buttons())
             buttons.push_back({button.label, button.action});
@@ -1314,7 +1330,7 @@ int runPtyFrontend(const char *font,
         PaneId pane = 0;
         std::size_t tabs = 0; // The tabs of the window before.
     };
-    const auto emptyShellNow = [&]() -> EmptyShell {
+    const auto emptyShellNow = [&](bool paneScope = false) -> EmptyShell {
         NativePane *pane = workspace.focusedPane();
         if (!pane || pane->v.ended()) {
             return {};
@@ -1327,9 +1343,12 @@ int runPtyFrontend(const char *font,
         if (pane->daemon) {
             std::string error;
             const auto reply =
-                pane->daemon->sessionId().empty()
+                (failEmptyProbeForTest || pane->daemon->sessionId().empty())
                     ? std::nullopt
-                    : askDaemon(daemonPath, mtd::GetSessionInfo{pane->daemon->sessionId()}, error, 500);
+                    : askDaemon(daemonPath,
+                                mtd::GetSessionInfo{pane->daemon->sessionId()},
+                                error,
+                                500);
             if (const auto *info = reply ? std::get_if<mtd::SessionInfo>(&*reply) : nullptr) {
                 facts.probeKnown = true;
                 facts.busy = info->busy;
@@ -1339,7 +1358,9 @@ int runPtyFrontend(const char *font,
             facts.probeKnown = true;
             facts.busy = paneState(*pane).busy;
         }
-        return isEmptyShell(facts) ? EmptyShell{workspace.focusedPaneId(), workspace.tabCount()} : EmptyShell{};
+        return isEmptyShell(facts, !paneScope)
+                   ? EmptyShell{workspace.focusedPaneId(), workspace.tabCount()}
+                   : EmptyShell{};
     };
     // After the attach worked (a new tab exists): the empty shell goes, and its fresh terminal ends in the
     // daemon (closing a pane ends its terminal). True when it was closed.
@@ -1433,10 +1454,74 @@ int runPtyFrontend(const char *font,
         wv.pushLayer(
             std::make_unique<ui::CommandPalette>(buildCommandRegistry(viewConfig.prefix, paletteExtra()), true));
     };
+    struct PendingReplacement {
+        PaneId pane = 0;
+        NativePane *original = nullptr; // Compared for identity only; never
+                                        // dereferenced after removal.
+        std::string originalSession, target;
+        std::unique_ptr<NativePane> staged;
+        std::int64_t deadline = 0;
+        bool endOld = false;
+    };
+    std::vector<PendingReplacement> pendingReplacements;
+    const auto cancelReplacement = [&](PaneId id) {
+        const auto before = pendingReplacements.size();
+        pendingReplacements.erase(std::remove_if(pendingReplacements.begin(),
+                                                 pendingReplacements.end(),
+                                                 [&](const auto &pending) {
+                                                     return pending.pane == id;
+                                                 }),
+                                  pendingReplacements.end());
+        return before != pendingReplacements.size();
+    };
+    const auto stageReplacement = [&](const std::string &target, bool endOld) {
+        auto *here = workspace.focusedPane();
+        if (!here || !here->daemon || here->v.ended() || target.empty())
+            return false;
+        cancelReplacement(workspace.focusedPaneId());
+        PendingReplacement pending;
+        pending.pane = workspace.focusedPaneId();
+        pending.original = here;
+        pending.originalSession = here->daemon->sessionId();
+        pending.target = target;
+        pending.endOld = endOld;
+        pending.deadline = std::int64_t(SDL_GetTicks64()) + 5000;
+        pending.staged =
+            std::make_unique<NativePane>(here->socket,
+                                         target,
+                                         "",
+                                         int(here->v.model().columns()),
+                                         int(here->v.model().rows()));
+        // A cancelled/failed staging connection must NEVER end the target.
+        pending.staged->endInDaemon = false;
+        pendingReplacements.push_back(std::move(pending));
+        notify("attaching terminal... Esc cancels; the current terminal stays "
+               "until attached");
+        return true;
+    };
     const auto handleAction = [&](const std::string &action) {
         const auto colon = action.find(':');
-        const std::string id = action.substr(0, colon);
+        std::string id = action.substr(0, colon);
         const std::string argument = colon == std::string::npos ? std::string() : action.substr(colon + 1);
+        if (id == "close.detach") {
+            const auto pending = wv.pendingClose();
+            wv.answerClose(CloseAnswer::Cancel);
+            // Recheck the exact dialog target, not whatever was focused later.
+            if (!pending || !canDetachClose(*pending))
+                return;
+            if (pending->scope == CloseScope::Window) {
+                id = daemonaction::quitKeep;
+            }
+            else if (pending->scope == CloseScope::Tab) {
+                workspace.apply(Command::SelectTab,
+                                workspace.indexOfTab(pending->tab));
+                id = daemonaction::detachTab;
+            }
+            else {
+                workspace.focusPane(pending->pane);
+                id = daemonaction::detachPane;
+            }
+        }
         if (id == "window.close") {
             requestQuit(); // The same question as the window's own close button.
         }
@@ -1445,18 +1530,6 @@ int runPtyFrontend(const char *font,
         }
         else if (id == "window.maximize") {
             borderless::toggleMaximize(window.get());
-        }
-        else if (id == "close.detach") {
-            const auto pending = wv.pendingClose();
-            // Recheck at activation: local panes may have been opened since the
-            // dialog was painted. Never turn a mixed window into silent kills.
-            wv.answerClose(CloseAnswer::Cancel);
-            if (pending && pending->scope == CloseScope::Window &&
-                canDetachWindow()) {
-                keepTerminals =
-                    true; // Same shutdown policy as daemonaction::quitKeep.
-                running = false;
-            }
         }
         else if (id == "close.confirm" || id == "close.cancel") {
             const auto pending = wv.pendingClose();
@@ -1490,8 +1563,27 @@ int runPtyFrontend(const char *font,
         }
         else if (id == "settings.open") {
             nextSettings = true;
-            const auto result = workspace.apply(Command::NewTab);
+            const double startedAt = perfLog.enabled() ? perfClockMs() : 0;
+            nextSettingsStartedAt = startedAt;
+            perfLog.phase("settings_factory", 0, true, true);
+            Outcome result;
+            try {
+                result = workspace.apply(Command::NewTab);
+            }
+            catch (...) {
+                nextSettings = false;
+                nextSettingsStartedAt = 0;
+                if (perfLog.enabled())
+                    perfLog.phase(
+                        "settings_factory", perfClockMs() - startedAt, false);
+                throw;
+            }
             nextSettings = false;
+            nextSettingsStartedAt = 0;
+            if (perfLog.enabled())
+                perfLog.phase("settings_factory",
+                              perfClockMs() - startedAt,
+                              result != Outcome::Ignored);
             if (result == Outcome::Ignored)
                 notify("no room for a settings tab");
             else
@@ -1673,19 +1765,43 @@ int runPtyFrontend(const char *font,
             else if (found->attached && !force) {
                 wv.pushLayer(takeOverDialog(sessionId, shortFolder(found->cwd), daemonaction::attachHereGo));
             }
+            else if (emptyShellNow(true).pane != 0) {
+                stageReplacement(sessionId, true);
+            }
             else {
                 const auto state = paneState(*here);
-                wv.pushLayer(replaceTerminalDialog(sessionId, state.busy ? commandLine(state.command) : std::string()));
+                wv.pushLayer(replaceTerminalDialog(
+                    sessionId + (force ? ":force" : ""),
+                    state.busy ? commandLine(state.command) : std::string()));
             }
         }
         else if (id == daemonaction::attachHereDo) {
             const auto colon2 = argument.rfind(':');
-            const std::string sessionId = colon2 == std::string::npos ? argument : argument.substr(0, colon2);
+            std::string sessionId = colon2 == std::string::npos
+                                        ? argument
+                                        : argument.substr(0, colon2);
             const bool endOld = colon2 == std::string::npos || argument.substr(colon2 + 1) == "end";
-            if (NativePane *here = workspace.focusedPane(); here && here->daemon) {
-                here->swapTerminal(sessionId, endOld);
-                notify(endOld ? "terminal replaced" : "terminal replaced; the old one keeps running in the daemon");
-            }
+            const bool force =
+                sessionId.size() > 6 &&
+                sessionId.compare(sessionId.size() - 6, 6, ":force") == 0;
+            if (force)
+                sessionId.resize(sessionId.size() - 6);
+            const auto sessions = daemonSessions(false);
+            const auto found = std::find_if(
+                sessions.begin(), sessions.end(), [&](const auto &entry) {
+                    return entry.id == sessionId;
+                });
+            if (found == sessions.end())
+                notify(
+                    "that terminal is gone; the current terminal is unchanged");
+            else if (found->thisTerminal || found->inThisWindow)
+                notify("that terminal cannot replace this pane");
+            else if (found->attached && !force)
+                wv.pushLayer(takeOverDialog(sessionId,
+                                            shortFolder(found->cwd),
+                                            daemonaction::attachHereGo));
+            else
+                stageReplacement(sessionId, endOld);
         }
         else if (id == daemonaction::killPane) {
             if (NativePane *here = workspace.focusedPane(); here && here->daemon) {
@@ -1979,6 +2095,11 @@ int runPtyFrontend(const char *font,
     // --pty-layout-smoke-test: Detach tab, then the palette offers Attach tab... (docs/tasks/daemon-versioning.md).
     std::string smokeAttachId;
     std::size_t smokeCount = 0;
+    std::size_t smokeTabsBefore = 1;
+    PaneId smokeOtherPane = 0, smokeDetachedPane = 0;
+    std::string smokeOriginalSession;
+    NativePane *smokeOriginalObject = nullptr;
+    std::unique_ptr<NativePane> smokePeer;
     const auto layoutScript = [&] {
         const auto later = [&](Uint64 ms) { scriptDue = SDL_GetTicks64() + ms; };
         const auto connected = [](const NativePane *p) { return p && p->daemon && !p->daemon->sessionId().empty(); };
@@ -1992,7 +2113,19 @@ int runPtyFrontend(const char *font,
             break;
         case 1:
             expectThat(connected(workspace.focusedPane()), "the first terminal is attached to the daemon");
-            if (variant == "window-detach") {
+            if (variant.compare(0, 11, "attachhere-") == 0) {
+                workspace.apply(Command::SplitSideBySide);
+                scriptStep = 160;
+                later(1500);
+            }
+            else if (variant == "pane-detach" || variant == "tab-detach") {
+                smokeOtherPane = workspace.focusedPaneId();
+                workspace.apply(Command::NewTab);
+                workspace.apply(Command::SplitSideBySide);
+                scriptStep = 140;
+                later(2000);
+            }
+            else if (variant == "window-detach") {
                 expectThat(workspace.apply(Command::NewTab) != Outcome::Ignored,
                            "a second daemon tab opens for window detach");
                 scriptStep = 120;
@@ -2001,17 +2134,42 @@ int runPtyFrontend(const char *font,
             else if (variant == "window-reattach") {
                 const char *text = std::getenv("MATTERM_DETACH_IDS");
                 std::string ids = text ? text : "";
-                const auto comma = ids.find(',');
-                expectThat(comma != std::string::npos,
-                           "the earlier window supplied both terminal IDs");
-                expectThat(attachSession(ids.substr(0, comma)),
-                           "reattach the first retained terminal");
-                expectThat(attachSession(ids.substr(comma + 1)),
-                           "reattach the second retained terminal");
+                expectThat(!ids.empty(),
+                           "the earlier window supplied retained terminal IDs");
+                smokeCount =
+                    std::size_t(std::count(ids.begin(), ids.end(), ',')) + 1;
+                if (const char *layout =
+                        std::getenv("MATTERM_REATTACH_LAYOUT")) {
+                    handleAction(std::string(daemonaction::attachLayout) + ":" +
+                                 layout);
+                }
+                else {
+                    std::size_t begin = 0;
+                    do {
+                        const auto comma = ids.find(',', begin);
+                        expectThat(
+                            attachSession(ids.substr(begin,
+                                                     comma == std::string::npos
+                                                         ? comma
+                                                         : comma - begin)),
+                            "reattach a retained terminal");
+                        if (comma == std::string::npos)
+                            break;
+                        begin = comma + 1;
+                    } while (begin < ids.size());
+                }
                 scriptStep = 122;
                 later(2000);
             }
-            else if (variant == "settings") {
+            else if (variant == "settings" || variant == "settings-palette") {
+                if (variant == "settings-palette") {
+                    workspace.apply(Command::SplitSideBySide);
+                    workspace.apply(Command::NewTab);
+                    workspace.apply(Command::SplitStacked);
+                    workspace.apply(Command::NewTab);
+                    workspace.apply(Command::SplitSideBySide);
+                    smokeTabsBefore = workspace.tabCount();
+                }
                 expectThat(paletteEntryNamed(paletteExtra(), "Settings"),
                            "the palette offers Settings");
                 std::string error;
@@ -2032,7 +2190,18 @@ int runPtyFrontend(const char *font,
                 expectThat(
                     rejected && !nextSettings,
                     "a failed settings factory clears its local-only override");
-                handleAction("settings.open");
+                if (variant == "settings-palette") {
+                    openPalette();
+                    SDL_Event search{};
+                    search.type = SDL_TEXTINPUT;
+                    SDL_strlcpy(
+                        search.text.text, "Settings", sizeof search.text.text);
+                    SDL_PushEvent(&search);
+                    pushKey(SDLK_RETURN, KMOD_NONE);
+                }
+                else {
+                    handleAction("settings.open");
+                }
                 later(1500);
                 scriptStep = 110;
             }
@@ -2077,6 +2246,237 @@ int runPtyFrontend(const char *font,
                 later(2000);
             }
             break;
+        case 160: {
+            smokeDetachedPane = workspace.focusedPaneId();
+            smokeOriginalObject = workspace.focusedPane();
+            smokeOriginalSession = smokeOriginalObject->daemon->sessionId();
+            mtd::CreateTerminal request;
+            request.command = {"sh", "-c", "echo ATTACH-HERE-TARGET; sleep 60"};
+            std::string error;
+            const auto target = createTerminal(daemonPath, request, error);
+            expectThat(target.has_value(),
+                       "create an independent attach-here target");
+            smokeAttachId = *target;
+            if (variant == "attachhere-typed")
+                smokeOriginalObject->v.sendInput("x\x7f");
+            if (variant == "attachhere-busy")
+                smokeOriginalObject->v.sendInput("sleep 60\n");
+            if (variant == "attachhere-takeover") {
+                smokePeer = std::make_unique<NativePane>(
+                    daemonPath, smokeAttachId, "", 80, 24);
+                smokePeer->endInDaemon = false;
+            }
+            scriptStep = 161;
+            later(1500);
+            break;
+        }
+        case 161: {
+            if (smokePeer)
+                smokePeer->pump();
+            if (variant == "attachhere-fail") {
+                smokeOriginalObject->v.selection =
+                    Selection::all(smokeOriginalObject->v.model());
+                stageReplacement("nonexistent-test-terminal", true);
+            }
+            else if (variant == "attachhere-cancel" ||
+                     variant == "attachhere-timeout" ||
+                     variant == "attachhere-stale" ||
+                     variant == "attachhere-closed") {
+                stageReplacement(smokeAttachId, true);
+                if (variant == "attachhere-cancel")
+                    pushKey(SDLK_ESCAPE, KMOD_NONE); // Real event path cancels
+                                                     // before the next pump.
+                else if (variant == "attachhere-timeout")
+                    pendingReplacements.back().deadline =
+                        std::int64_t(SDL_GetTicks64());
+            }
+            else {
+                failEmptyProbeForTest = variant == "attachhere-unknown";
+                handleAction(std::string(daemonaction::attachHereGo) + ":" +
+                             smokeAttachId);
+                failEmptyProbeForTest = false;
+                if (variant == "attachhere-typed" ||
+                    variant == "attachhere-busy" ||
+                    variant == "attachhere-unknown") {
+                    expectThat(wv.hasLayer() && pendingReplacements.empty(),
+                               "typed/deleted or busy panes still ask before "
+                               "replacement");
+                    afterLayout(wv.key({keys::Escape, false, false, false},
+                                       std::int64_t(SDL_GetTicks64())));
+                }
+                else if (variant == "attachhere-takeover") {
+                    expectThat(wv.hasLayer() && pendingReplacements.empty(),
+                               "even an untouched pane requires confirmation "
+                               "before taking another client's terminal");
+                    wv.closeLayers();
+                    handleAction(std::string(daemonaction::attachHereGo) + ":" +
+                                 smokeAttachId + ":force");
+                    expectThat(pendingReplacements.size() == 1,
+                               "confirmed takeover can stage an unused split "
+                               "without a redundant replace question");
+                }
+                else {
+                    expectThat(!wv.hasLayer() &&
+                                   pendingReplacements.size() == 1,
+                               "unused split bypasses Replace but preserves "
+                               "the old owner while attaching");
+                }
+            }
+            expectThat(workspace.pane(smokeDetachedPane) ==
+                               smokeOriginalObject &&
+                           smokeOriginalObject->daemon->sessionId() ==
+                               smokeOriginalSession,
+                       "starting an attachment never destroys the original "
+                       "synchronously");
+            if (variant == "attachhere-stale") {
+                auto newer = std::make_unique<NativePane>(
+                    daemonPath, smokeOriginalSession, "", 80, 24);
+                auto old =
+                    workspace.replacePaneAnywhere(smokeDetachedPane, newer);
+                old->endInDaemon = false;
+                old.reset();
+                smokeOriginalObject = workspace.pane(smokeDetachedPane);
+            }
+            else if (variant == "attachhere-closed") {
+                smokeOriginalObject->endInDaemon = false;
+                workspace.closePaneAnywhere(smokeDetachedPane);
+            }
+            scriptStep = 162;
+            later(1500);
+            break;
+        }
+        case 162: {
+            if (variant == "attachhere-closed") {
+                expectThat(!workspace.pane(smokeDetachedPane) &&
+                               workspace.paneCount() == 1 &&
+                               pendingReplacements.empty(),
+                           "closing the original pane aborts its pending "
+                           "attach without affecting another split");
+                expectThat(
+                    daemonSessions().size() == 3,
+                    "stale closed-target staging ends neither daemon terminal");
+                scriptDone = true;
+                keepTerminals = true;
+                running = false;
+                break;
+            }
+            const bool success = variant == "attachhere-empty" ||
+                                 variant == "attachhere-takeover";
+            auto *pane = workspace.pane(smokeDetachedPane);
+            expectThat(pane && workspace.paneCount() == 2 &&
+                           workspace.tabCount() == 1 &&
+                           workspace.focusedPaneId() == smokeDetachedPane,
+                       "replacement keeps the pane ID, split count and focus");
+            expectThat(pendingReplacements.empty(),
+                       "staging finished or aborted within its bound");
+            const auto sessions = daemonSessions();
+            if (success) {
+                expectThat(pane != smokeOriginalObject &&
+                               pane->daemon->sessionId() == smokeAttachId &&
+                               !pane->v.ended(),
+                           "a verified live new attachment atomically replaces "
+                           "the original owner");
+                expectThat(
+                    visibleText(pane->v.model()).find("ATTACH-HERE-TARGET") !=
+                        std::string::npos,
+                    "the attached program replays in the same split");
+                expectThat(
+                    sessions.size() == 2,
+                    "the old terminal ends only after successful attachment");
+            }
+            else {
+                expectThat(pane == smokeOriginalObject &&
+                               pane->daemon->sessionId() ==
+                                   smokeOriginalSession &&
+                               !pane->v.ended(),
+                           "failure, timeout, cancel and safe refusal preserve "
+                           "the original terminal");
+                expectThat(
+                    sessions.size() == 3,
+                    "failure/refusal does not end either daemon terminal");
+                if (variant == "attachhere-fail")
+                    expectThat(
+                        pane->v.selection.has_value(),
+                        "failed attachment retains the original selection");
+            }
+            smokePeer.reset();
+            scriptDone = true;
+            keepTerminals = true;
+            running = false;
+            break;
+        }
+        case 140: {
+            expectThat(workspace.tabCount() == 2 && workspace.paneCount() == 3,
+                       "scoped detach starts with an unrelated tab and two "
+                       "target splits");
+            smokeDetachedPane = workspace.focusedPaneId();
+            std::string ids;
+            for (const auto paneId : workspace.activeTab()->tree.ids()) {
+                if (variant == "pane-detach" && paneId != smokeDetachedPane)
+                    continue;
+                if (!ids.empty())
+                    ids += ',';
+                ids += workspace.pane(paneId)->daemon->sessionId();
+            }
+            std::printf("window-detach-ids:%s\n", ids.c_str());
+            workspace.forEachPane([&](PaneId, NativePane &pane, bool) {
+                expectThat(
+                    pane.v.sendInput("echo WINDOW-DETACH-ALIVE; sleep 60\n"),
+                    "start a busy program for scoped detach");
+            });
+            scriptStep = 141;
+            later(2000);
+            break;
+        }
+        case 141: {
+            const bool tab = variant == "tab-detach";
+            const auto ask = [&] {
+                afterLayout(wv.key({'w', tab, true, !tab},
+                                   std::int64_t(SDL_GetTicks64())));
+                expectThat(
+                    wv.pendingClose() &&
+                        wv.pendingClose()->scope ==
+                            (tab ? CloseScope::Tab : CloseScope::Pane),
+                    "the scoped close key asks before ending busy programs");
+                expectThat(canDetachClose(*wv.pendingClose()),
+                           "all live target panes can survive detach");
+            };
+            ask();
+            afterLayout(wv.key({keys::Escape, false, false, false},
+                               std::int64_t(SDL_GetTicks64())));
+            expectThat(
+                !wv.pendingClose() && workspace.tabCount() == 2 &&
+                    workspace.paneCount() == 3,
+                "Escape cancels scoped close without changing tabs or panes");
+            ask();
+            workspace.focusPane(smokeOtherPane); // Confirmation must retain its
+                                                 // original target.
+            wv.closeLayers();
+            handleAction("close.detach");
+            expectThat(running && workspace.pane(smokeOtherPane) &&
+                           workspace.tabCount() == (tab ? 1u : 2u),
+                       "scoped detach preserves the unrelated tab and window");
+            expectThat(!workspace.pane(smokeDetachedPane) &&
+                           workspace.paneCount() == (tab ? 1u : 2u),
+                       "only the requested pane or tab leaves the workspace");
+            expectThat(daemonSessions().size() == 3,
+                       "scoped detach sends no terminal-ending request");
+            if (tab) {
+                const auto layouts = layoutFiles.list();
+                expectThat(layouts.size() == 1 && layouts.front().panes == 2,
+                           "tab detach saves both splits as a reusable layout");
+                std::printf("scoped-detach-layout:%s\n",
+                            layouts.front().name.c_str());
+            }
+            else {
+                expectThat(layoutFiles.list().empty(),
+                           "pane detach does not create a tab layout");
+            }
+            scriptDone = true;
+            keepTerminals = true;
+            running = false;
+            break;
+        }
         case 120: {
             std::string ids;
             workspace.forEachPane([&](PaneId, NativePane &pane, bool) {
@@ -2136,9 +2536,12 @@ int runPtyFrontend(const char *font,
                                "daemon, not just stale replay");
                 }
             });
-            expectThat(retained == 2,
-                       "both programs survived window detach and replay after "
+            expectThat(retained == int(smokeCount),
+                       "all scoped programs survived detach and replay after "
                        "reattachment");
+            if (std::getenv("MATTERM_REATTACH_LAYOUT"))
+                expectThat(workspace.activeTab()->tree.size() == smokeCount,
+                           "tab reattachment restores the saved split layout");
             scriptDone = true;
             running = false;
             break;
@@ -2146,7 +2549,7 @@ int runPtyFrontend(const char *font,
         case 110: {
             NativePane *pane = workspace.focusedPane();
             const bool local = pane && pane->link && !pane->daemon;
-            expectThat(workspace.tabCount() == 2 && local,
+            expectThat(workspace.tabCount() == smokeTabsBefore + 1 && local,
                        "Settings opens a LOCAL tab, also with --daemon-host");
             if (!local) {
                 scriptDone = true;
@@ -2159,10 +2562,26 @@ int runPtyFrontend(const char *font,
             expectThat(
                 !canDetachWindow(),
                 "a live local Settings PTY prevents whole-window detach");
+            CloseRequest localPane;
+            localPane.scope = CloseScope::Pane;
+            localPane.pane = workspace.focusedPaneId();
+            expectThat(!canDetachClose(localPane),
+                       "a local Settings pane does not offer Detach");
+            CloseRequest localTab;
+            localTab.scope = CloseScope::Tab;
+            localTab.tab = workspace.activeTab()->id;
+            expectThat(!canDetachClose(localTab),
+                       "a tab containing local Settings does not offer Detach");
+            localTab.tab = workspace.tab(0)->id;
+            expectThat(canDetachClose(localTab),
+                       "an unrelated daemon-only tab remains eligible despite "
+                       "local Settings elsewhere");
             requestQuit();
             expectThat(wv.pendingClose().has_value(),
                        "the mixed window asks before closing");
             handleAction("close.detach");
+            wv.closeLayers(); // The direct test action bypassed the dialog's
+                              // normal pop.
             expectThat(running && !keepTerminals && !pane->v.ended(),
                        "even a stale detach action cannot kill a mixed "
                        "local/daemon window");
@@ -2203,6 +2622,80 @@ int runPtyFrontend(const char *font,
                 "off bypasses only the draw hold policy during a flood");
             if (auto *pane = workspace.focusedPane())
                 pane->v.sendInput("\x11");
+            if (variant == "settings-palette") {
+                scriptStep = 113;
+                later(1000);
+            }
+            else {
+                scriptDone = true;
+                running = false;
+            }
+            break;
+        }
+        case 113: {
+            expectThat(
+                workspace.tabCount() == smokeTabsBefore,
+                "closing Settings through its own quit leaves the other tabs");
+            openPalette();
+            SDL_Event search{};
+            search.type = SDL_TEXTINPUT;
+            SDL_strlcpy(search.text.text, "Settings", sizeof search.text.text);
+            SDL_PushEvent(&search);
+            pushKey(SDLK_RETURN, KMOD_NONE);
+            scriptStep = 114;
+            later(1500);
+            break;
+        }
+        case 114: {
+            auto *pane = workspace.focusedPane();
+            expectThat(workspace.tabCount() == smokeTabsBefore + 1 && pane &&
+                           pane->link && !pane->daemon,
+                       "Settings reopens from the palette in the same multitab "
+                       "process");
+            expectThat(visibleText(pane->v.model()).find("Settings") !=
+                           std::string::npos,
+                       "the reopened local Settings TUI has drawn");
+            pane->v.sendInput("theme\r\x1b[B\r");
+            scriptStep = 115;
+            later(1500);
+            break;
+        }
+        case 115: {
+            expectThat(settingsWatch.settings().choice("theme") == "green",
+                       "the reopened Settings process can save another change");
+            afterLayout(wv.key({'w', true, true, false},
+                               std::int64_t(SDL_GetTicks64())));
+            expectThat(wv.pendingClose() &&
+                           wv.pendingClose()->scope == CloseScope::Tab,
+                       "closing the local Settings tab asks before killing its "
+                       "process");
+            wv.closeLayers();
+            handleAction("close.confirm");
+            expectThat(
+                running && workspace.tabCount() == smokeTabsBefore,
+                "confirmed local Settings close preserves the other tabs");
+            scriptStep = 116;
+            later(500);
+            break;
+        }
+        case 116: {
+            openPalette();
+            SDL_Event search{};
+            search.type = SDL_TEXTINPUT;
+            SDL_strlcpy(search.text.text, "Settings", sizeof search.text.text);
+            SDL_PushEvent(&search);
+            pushKey(SDLK_RETURN, KMOD_NONE);
+            scriptStep = 117;
+            later(1500);
+            break;
+        }
+        case 117: {
+            auto *pane = workspace.focusedPane();
+            expectThat(workspace.tabCount() == smokeTabsBefore + 1 && pane &&
+                           pane->link && !pane->daemon && !pane->v.ended(),
+                       "Settings reopens again after confirmed tab close "
+                       "without terminating the native window");
+            pane->v.sendInput("\x11");
             scriptDone = true;
             running = false;
             break;
@@ -2780,6 +3273,12 @@ int runPtyFrontend(const char *font,
             }
             else if (event.type == SDL_KEYDOWN) {
                 const auto key = event.key.keysym.sym;
+                if (key == SDLK_ESCAPE && !wv.hasLayer() &&
+                    cancelReplacement(workspace.focusedPaneId())) {
+                    notify("attachment cancelled; the original terminal is "
+                           "unchanged");
+                    continue;
+                }
                 const bool waiting = wv.prefixWaiting();
                 const int code = keyCodeOf(key);
                 const bool printable = key >= 32 && key < 127;
@@ -2993,6 +3492,12 @@ int runPtyFrontend(const char *font,
         workspace.forEachPane([&](PaneId id, NativePane &pane, bool visible) {
             const double pumpAt = perfLog.enabled() ? perfClockMs() : 0;
             pane.pump();
+            if (perfLog.enabled() && pane.settingsStartedAt != 0 &&
+                !pane.settingsParsed && pane.v.outputBytes() > 0) {
+                pane.settingsParsed = true;
+                perfLog.phase("settings_first_parsed_output",
+                              perfClockMs() - pane.settingsStartedAt);
+            }
             if (perfLog.enabled()) {
                 auto &samples = id == workspace.focusedPaneId()
                                     ? perfLog.second.guiPumpFocused
@@ -3013,6 +3518,52 @@ int runPtyFrontend(const char *font,
         });
         if (perfLog.enabled())
             perfLog.second.guiPumpRound.add(perfClockMs() - pumpRoundAt);
+        for (auto it = pendingReplacements.begin();
+             it != pendingReplacements.end();) {
+            auto *original = workspace.pane(it->pane);
+            AttachReplacementState state;
+            state.originalSame =
+                original == it->original && original && original->daemon &&
+                original->daemon->sessionId() == it->originalSession;
+            state.originalLive = original && !original->v.ended();
+            if (state.originalSame && state.originalLive)
+                it->staged->pump();
+            const auto *link = it->staged->daemon.get();
+            state.failed =
+                !link ||
+                link->session().state() == ClientSession::State::Failed ||
+                link->session().state() == ClientSession::State::Exited;
+            state.targetLive = !it->staged->v.ended();
+            state.running = link && link->session().state() ==
+                                        ClientSession::State::Running;
+            state.targetMatches =
+                !state.running || link->sessionId() == it->target;
+            const auto decision = replacementDecision(
+                state, std::int64_t(SDL_GetTicks64()), it->deadline);
+            if (decision == ReplacementDecision::Wait) {
+                ++it;
+                continue;
+            }
+            if (decision == ReplacementDecision::Commit) {
+                auto old = workspace.replacePaneAnywhere(it->pane, it->staged);
+                if (old) {
+                    workspace.pane(it->pane)->endInDaemon = true;
+                    old->endInDaemon = it->endOld;
+                    // The tree already owns the verified live new pane. Only
+                    // now may destruction send Close for the old daemon
+                    // terminal.
+                    old.reset();
+                    notify(it->endOld ? "terminal replaced"
+                                      : "terminal replaced; the old one keeps "
+                                        "running in the daemon");
+                }
+            }
+            else {
+                notify("attachment failed or cancelled; the original terminal "
+                       "is unchanged");
+            }
+            it = pendingReplacements.erase(it);
+        }
         for (auto it = deliveries.begin(); it != deliveries.end();) {
             NativePane *pane = workspace.pane(it->pane);
             const bool up = pane && (!pane->daemon || pane->daemon->session().state() == ClientSession::State::Running);
@@ -3298,6 +3849,15 @@ int runPtyFrontend(const char *font,
             }
             backend.present();
             if (perfLog.enabled()) {
+                for (const auto &d : drawn) {
+                    if (auto *pane = workspace.pane(d.plan->id);
+                        pane && pane->settingsStartedAt != 0 &&
+                        pane->settingsParsed && !pane->settingsPresented) {
+                        pane->settingsPresented = true;
+                        perfLog.phase("settings_first_present",
+                                      perfClockMs() - pane->settingsStartedAt);
+                    }
+                }
                 perfLog.second.counters.drawMs += perfClockMs() - drawAt;
             }
             ++framesDrawn;

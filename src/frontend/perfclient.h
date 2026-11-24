@@ -32,6 +32,12 @@ public:
     const std::string &error() const {
         return writer_.error();
     }
+    void phase(std::string_view name,
+               double elapsedMs,
+               bool success = true,
+               bool begin = false) {
+        writer_.phase(name, elapsedMs, success, begin);
+    }
     void tick() {
         if (enabled() && perfClockMs() - at_ >= 1000) {
             flush();

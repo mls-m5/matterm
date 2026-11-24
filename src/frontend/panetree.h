@@ -93,6 +93,19 @@ public:
     }
     Pane *focusedPane() const { return pane(focus_); }
 
+    // Commit a prepared pane without changing its leaf identity or geometry.
+    // On a miss/null the caller retains replacement; on success the caller
+    // receives the old owner and decides when/how to retire it.
+    std::unique_ptr<Pane> replace(PaneId id,
+                                  std::unique_ptr<Pane> &replacement) {
+        auto *slot = findSlot(root_, id);
+        if (!slot || !replacement)
+            return {};
+        auto old = std::move((*slot)->pane);
+        (*slot)->pane = std::move(replacement);
+        return old;
+    }
+
     // Ids in tree order.
     std::vector<PaneId> ids() const {
         std::vector<PaneId> out;
