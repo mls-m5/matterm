@@ -383,6 +383,11 @@ if(BUILD_TESTING)
     target_compile_features(jsonreaders_test PRIVATE cxx_std_20) # fast-json needs C++20 (the client code is C++17)
     add_test(NAME json_readers COMMAND jsonreaders_test)
 
+    add_executable(splitdecoration_test splitdecoration_test.cpp)
+    target_link_libraries(splitdecoration_test PRIVATE mls_unit_test_main palette)
+    target_include_directories(splitdecoration_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)
+    add_test(NAME split_decoration COMMAND splitdecoration_test)
+
     add_executable(attachreplacement_test attachreplacement_test.cpp)
     target_link_libraries(attachreplacement_test PRIVATE mls_unit_test_main)
     target_include_directories(attachreplacement_test PRIVATE ${PROJECT_SOURCE_DIR}/src/frontend)

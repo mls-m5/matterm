@@ -316,4 +316,9 @@ TEST_CASE("The frame is the system frame unless borderless works") {
     EXPECT(fell.note.back() != '\n');
 }
 
+TEST_CASE("Fullscreen has no extra own-frame inset or border just like maximized") {
+    const auto inset = windowInset(true, false, true);
+    EXPECT(inset.left == 0 && inset.right == 0 && inset.top == 0 && inset.bottom == 0);
+    EXPECT(borderRects(800, 600, false, kBorderWidth, true).empty());
+}
 TEST_SUIT_END

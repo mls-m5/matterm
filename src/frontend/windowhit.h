@@ -127,8 +127,10 @@ struct WindowInset {
     int left = 0, right = 0, top = 0, bottom = 0;
 };
 
-inline WindowInset windowInset(bool ownFrame, bool maximized) {
-    if (!ownFrame || maximized) {
+inline WindowInset windowInset(bool ownFrame,
+                               bool maximized,
+                               bool fullscreen = false) {
+    if (!ownFrame || maximized || fullscreen) {
         return {};
     }
     return {kBorderWidth, kBorderWidth, 0, kBorderWidth};
@@ -136,8 +138,13 @@ inline WindowInset windowInset(bool ownFrame, bool maximized) {
 
 // The border: left, right and bottom, kBorderWidth wide, exactly the pixels windowInset takes. The
 // rectangles cover them once (the bottom ones run into the corners, the sides stop above them).
-inline std::vector<BorderRect> borderRects(int width, int height, bool maximized, int thickness = kBorderWidth) {
-    if (maximized || width <= 0 || height <= 0 || thickness <= 0) {
+inline std::vector<BorderRect> borderRects(int width,
+                                           int height,
+                                           bool maximized,
+                                           int thickness = kBorderWidth,
+                                           bool fullscreen = false) {
+    if (maximized || fullscreen || width <= 0 || height <= 0 ||
+        thickness <= 0) {
         return {};
     }
     const int bottom = std::max(0, height - thickness);

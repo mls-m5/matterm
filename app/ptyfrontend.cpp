@@ -26,6 +26,7 @@
 #include "sessionfiles.h"
 #include "sessionrestore.h"
 #include "settingswatch.h"
+#include "splitdecoration.h"
 #include "sshtunnel.h"
 #include "terminalmodel.h"
 #include "terminalview.h"
@@ -748,7 +749,10 @@ int runPtyFrontend(const char *font,
     // The border of --borderless is outside the view: the strip, panes and layers are laid out
     // inside it, so it never covers content (left, right and bottom only; none when maximised).
     const auto insetNow = [&] {
-        return frontend::windowInset(ownFrame, (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MAXIMIZED) != 0);
+        const auto flags = SDL_GetWindowFlags(window.get());
+        return frontend::windowInset(ownFrame,
+                                     (flags & SDL_WINDOW_MAXIMIZED) != 0,
+                                     (flags & SDL_WINDOW_FULLSCREEN) != 0);
     };
     // The view's own pixels: coordinates relative to its top left corner, inside the border.
     const auto toDrawable = [&](int x, int y) {
@@ -3817,6 +3821,21 @@ int runPtyFrontend(const char *font,
                 backend.render(*stripFrame,
                                PaneArea{{plan.stripRect.x + ox, plan.stripRect.y, plan.stripRect.w, plan.stripRect.h}, {}});
             }
+            const auto flags = SDL_GetWindowFlags(window.get());
+            const int stripHeight = plan.stripRect.h;
+            const auto decoration =
+                splitDecoration(plan.dividers,
+                                {0,
+                                 stripHeight,
+                                 wv.window().width,
+                                 std::max(0, wv.window().height - stripHeight)},
+                                ownFrame,
+                                (flags & SDL_WINDOW_MAXIMIZED) != 0,
+                                (flags & SDL_WINDOW_FULLSCREEN) != 0);
+            const auto paintDecoration = [&](PixelRect r, Rgb8 color) {
+                backend.drawRect({r.x + ox, r.y, r.w, r.h}, color);
+            };
+            paintSplitGutters(decoration, stripPalette, paintDecoration);
             for (const auto &d : drawn) {
                 const auto &pp = *d.plan;
                 backend.render(d.frame,
@@ -3832,9 +3851,8 @@ int runPtyFrontend(const char *font,
                     backend.drawRect({pp.rect.x + ox + pp.rect.w - side - 2, pp.rect.y + 2, side, side}, Rgb8{210, 40, 40});
                 }
             }
-            for (const auto &d : plan.dividers) {
-                backend.drawRect({d.rect.x + ox, d.rect.y, d.rect.w, d.rect.h}, Rgb8{46, 51, 60});
-            }
+            for (const auto &edge : decoration.outer)
+                paintDecoration(edge, splitEdgeColor(stripPalette));
             for (std::size_t i = 0; i < layerFrames.size(); ++i) {
                 const auto &layer = plan.layers[i];
                 backend.render(layerFrames[i], PaneArea{{layer.rect.x + ox, layer.rect.y, layer.rect.w, layer.rect.h}, {}});
@@ -3843,7 +3861,10 @@ int runPtyFrontend(const char *font,
                 int w = 0, h = 0;
                 SDL_GetRendererOutputSize(SDL_GetRenderer(window.get()), &w, &h);
                 const bool maximized = (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MAXIMIZED) != 0;
-                for (const auto &edge : frontend::borderRects(w, h, maximized)) {
+                const bool fullscreen = (SDL_GetWindowFlags(window.get()) &
+                                         SDL_WINDOW_FULLSCREEN) != 0;
+                for (const auto &edge : frontend::borderRects(
+                         w, h, maximized, frontend::kBorderWidth, fullscreen)) {
                     backend.drawRect({edge.x, edge.y, edge.w, edge.h}, frontend::borderColor(stripPalette));
                 }
             }

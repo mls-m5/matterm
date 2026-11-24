@@ -2,6 +2,8 @@
 #include "mls-unit-test/unittest.h"
 #include "sdlbackend.h"
 #include "terminalmemory.h"
+#include "../src/frontend/splitdecoration.h"
+#include "../src/frontend/themes.h"
 
 #include <SDL.h>
 #include <SDL_ttf.h>
@@ -63,6 +65,37 @@ struct Fixture {
 } // namespace
 
 TEST_SUIT_BEGIN(SdlBackend)
+
+TEST_CASE("Themed split junctions survive pane rendering while external scrollbar stays visible") {
+    using namespace frontend;
+    Fixture fixture;
+    const std::vector<DividerBox> dividers = {
+        {{100, 0, 12, 160}, SplitDirection::SideBySide},
+        {{112, 70, 100, 12}, SplitDirection::Stacked}};
+    const auto decoration = splitDecoration(dividers, {0, 0, 320, 160}, true, false, false);
+    CellBuffer cells(1, 1);
+    RenderFrame frame;
+    frame.cells = cells.view();
+    frame.cursor.visible = false;
+    frame.scrollbar = {true, 0.0f, 0.25f};
+    frame.wrapMarks = {true};
+    const auto packed = [](Rgb8 c) { return (Uint32(c.r) << 16) | (Uint32(c.g) << 8) | c.b; };
+    for (const auto *theme : {"blue", "green"}) {
+        const auto palette = themes::stripPalette(themes::theme(theme));
+        fixture.backend->beginFrame(palette.background);
+        paintSplitGutters(decoration, palette, [&](PixelRect r, Rgb8 c) { fixture.backend->drawRect({r.x, r.y, r.w, r.h}, c); });
+        fixture.backend->render(frame, {{0, 0, 100, 160}, {100, 0, 6, 160}});
+        EXPECT(fixture.pixel(109, 30) == packed(splitMiddleColor(palette)));
+        EXPECT(fixture.pixel(111, 75) == packed(splitMiddleColor(palette))); // T seam stays solid.
+        EXPECT(fixture.pixel(120, 71) == packed(splitMiddleColor(palette)));
+        EXPECT(fixture.pixel(120, 70) == packed(splitEdgeColor(palette)));
+        EXPECT(fixture.pixel(102, 10) == Uint32(0x6e7a8e)); // Existing thumb not painted over.
+        EXPECT(fixture.pixel(107, fixture.backend->cellHeight() / 2) ==
+               Uint32(0x6e7a8e)); // Wrap marker remains visible too.
+        fixture.backend->present();
+    }
+}
+
 
 TEST_CASE("Backend renders independent rows and per-cell backgrounds") {
     Fixture fixture;
