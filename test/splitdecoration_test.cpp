@@ -86,7 +86,8 @@ TEST_CASE("Own-frame dark pixels use existing frame and skip scrollbar edges") {
             plan.outer = ownFrameDarkEdges(
                 content, dividers, {}, true, state == 1, state == 2);
             EXPECT(pixel(plan, -1, 12) == -1 && pixel(plan, 20, 30) == -1);
-            EXPECT(pixel(plan, 15, 4) == -1);
+            EXPECT(pixel(plan, 15, 4) == -1 && pixel(plan, 5, 4) == 0);
+            EXPECT(pixel(plan, 0, 5) == -1);
         }
     }
 }

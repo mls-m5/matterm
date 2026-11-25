@@ -66,16 +66,19 @@ inline std::vector<PixelRect> ownFrameDarkEdges(
     bool ownFrame,
     bool maximized,
     bool fullscreen) {
-    if (!ownFrame || maximized || fullscreen || content.x < 0 ||
+    if (!ownFrame || content.x < 0 ||
         content.y < 0 || content.w <= 0 || content.h <= 0 ||
         std::int64_t(content.x) + content.w >=
             std::numeric_limits<int>::max() ||
         std::int64_t(content.y) + content.h >= std::numeric_limits<int>::max())
         return {};
     const int right = content.x + content.w, bottom = content.y + content.h;
-    std::vector<PixelRect> edges{{content.x - 1, content.y, 1, content.h + 1},
-                                 {right, content.y, 1, content.h + 1},
-                                 {content.x, bottom, content.w, 1}};
+    std::vector<PixelRect> edges;
+    if (!maximized && !fullscreen) {
+        edges = {{content.x - 1, content.y, 1, content.h + 1},
+                 {right, content.y, 1, content.h + 1},
+                 {content.x, bottom, content.w, 1}};
+    }
     if (content.y > 0)
         edges.push_back({content.x, content.y - 1, content.w, 1});
     for (const auto &d : dividers) {
