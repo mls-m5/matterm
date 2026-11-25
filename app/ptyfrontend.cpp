@@ -2019,6 +2019,56 @@ int runPtyFrontend(const char *font,
             }
         }
         else if (id == daemonaction::quitKeep) {
+            bool allIdentified = true;
+            auto snapshot = captureSession(
+                workspace, "layout", std::int64_t(std::time(nullptr)), [&](PaneId, const NativePane &pane) {
+                    SavedPane saved;
+                    const auto state = paneState(const_cast<NativePane &>(pane));
+                    saved.cwd = state.cwd;
+                    saved.command = state.command;
+                    if (pane.daemon && LayoutSnapshot::validId(pane.daemon->sessionId()))
+                        saved.terminal = pane.daemon->sessionId();
+                    else
+                        allIdentified = false;
+                    return saved;
+                });
+            if (!snapshot || !allIdentified) {
+                notify("layouts not saved: a terminal has no reusable daemon session");
+                return;
+            }
+            for (auto &tab : snapshot->tabs) {
+                const std::string base = tab.title.empty() ? "layout" : SessionPolicy("layout").suggestion(tab.title);
+                std::string name;
+                for (int n = 1; n <= 9999; ++n) {
+                    const std::string suffix = n == 1 ? "" : "-" + std::to_string(n);
+                    const std::string candidate = base.substr(0, SessionSnapshot::kMaxName - suffix.size()) + suffix;
+                    std::error_code ec;
+                    const auto status = std::filesystem::symlink_status(
+                        std::filesystem::path(layoutFiles.directory()) / (candidate + ".json"), ec);
+                    if (ec && ec != std::errc::no_such_file_or_directory) {
+                        notify("layouts not saved: " + ec.message());
+                        return;
+                    }
+                    if (status.type() == std::filesystem::file_type::not_found) {
+                        name = candidate;
+                        break;
+                    }
+                }
+                if (name.empty()) {
+                    notify("layouts not saved: no free layout name");
+                    return;
+                }
+                SessionSnapshot one;
+                one.name = name;
+                one.saved = snapshot->saved;
+                one.active = 0;
+                one.tabs.push_back(std::move(tab));
+                std::string error;
+                if (!layoutFiles.save(one, &error)) {
+                    notify("layouts not saved: " + error + "; window remains open");
+                    return;
+                }
+            }
             keepTerminals = true;
             running = false;
         }
@@ -2528,6 +2578,8 @@ int runPtyFrontend(const char *font,
             expectThat(!running && keepTerminals,
                        "Window Detach selects the existing keep-terminals "
                        "shutdown policy");
+            const auto layouts = layoutFiles.list();
+            expectThat(layouts.size() == 2, "Window Detach saves both tab layouts");
             scriptDone = true;
             break;
         }
