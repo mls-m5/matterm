@@ -785,6 +785,8 @@ int runPtyFrontend(const char *font,
         hintRows = std::clamp(rows, 1, 65535);
     };
     updateWindow();
+    const char *mouseDebugEnv = std::getenv("MATTERM_DEBUG_WINDOW_MOUSE");
+    const bool mouseDebug = mouseDebugEnv && *mouseDebugEnv && std::string_view(mouseDebugEnv) != "0";
 
     SDL_StartTextInput();
     bool running = true;
@@ -3024,6 +3026,13 @@ int runPtyFrontend(const char *font,
                 // the start of this iteration. Refresh before processing any
                 // mouse events queued behind a resize or maximize.
                 updateWindow();
+                if (mouseDebug) {
+                    const auto flags = SDL_GetWindowFlags(window.get());
+                    const auto &size = wv.window();
+                    std::fprintf(stderr, "[window-mouse] window event=%u data=%d,%d flags=0x%x view=%dx%d\n",
+                                 unsigned(event.window.event), event.window.data1, event.window.data2,
+                                 unsigned(flags), size.width, size.height);
+                }
                 forceRedraw = true; // Exposed, resized, shown: the window's contents may be gone.
             }
             const std::int64_t now = std::int64_t(SDL_GetTicks64());
@@ -3119,6 +3128,14 @@ int runPtyFrontend(const char *font,
                 }
                 MouseResult r;
                 guarded([&] { r = wv.mouse(in, now); });
+                if (mouseDebug && !motion) {
+                    const auto flags = SDL_GetWindowFlags(window.get());
+                    const auto &size = wv.window();
+                    std::fprintf(stderr, "[window-mouse] %s button=%u clicks=%u raw=%d,%d viewpos=%d,%d view=%dx%d flags=0x%x consumed=%d action=%s pane=%d\n",
+                                 down ? "down" : "up", unsigned(event.button.button), unsigned(event.button.clicks),
+                                 rawX, rawY, x, y, size.width, size.height, unsigned(flags), int(r.consumed),
+                                 r.action.empty() ? "-" : r.action.c_str(), int(r.pane.has_value()));
+                }
                 if (r.empty) {
                     running = false;
                 }
