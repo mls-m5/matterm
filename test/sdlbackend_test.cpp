@@ -310,7 +310,7 @@ TEST_CASE("A viewport confines sizes and drawing to one pane") {
     // A scrollbar sits at the pane's right edge.
     frame.scrollbar = {true, 0.0f, 1.0f};
     fixture.backend->render(frame);
-    EXPECT_EQ(fixture.pixel(100 + 85, 30), Uint32(0x191d24));
+    EXPECT_EQ(fixture.pixel(100 + 85, 30), Uint32(0x1e1e1e));
     EXPECT_EQ(fixture.pixel(100 + 90, 30), Uint32(0x6e7a8e));
     EXPECT_EQ(fixture.pixel(100 + 96, 30), gap);
     // Another pane next to it, without disturbing the first.
@@ -386,16 +386,16 @@ TEST_CASE("Fractional rows are clipped to text bounds and cannot cover the "
     EXPECT_EQ(fixture.pixel(0, 0), Uint32(0xc81e28));
     EXPECT_EQ(fixture.pixel(0, h - shift), Uint32(0x14b432));
     EXPECT_EQ(fixture.pixel(0, h + 1), Uint32(0x1e1e1e));
-    EXPECT_EQ(fixture.pixel(312, 1), Uint32(0x191d24));
-    EXPECT_EQ(fixture.pixel(312, 130), Uint32(0x6e7a8e));
-    EXPECT_EQ(fixture.pixel(319, 130), Uint32(0x191d24));
+    EXPECT_EQ(fixture.pixel(314, 1), Uint32(0x1e1e1e));
+    EXPECT_EQ(fixture.pixel(314, 130), Uint32(0x6e7a8e));
+    EXPECT_EQ(fixture.pixel(319, 130), Uint32(0x1e1e1e));
     frame.scrollbar.position = 0;
     fixture.backend->render(frame);
-    EXPECT_EQ(fixture.pixel(312, 1), Uint32(0x6e7a8e));
-    EXPECT_EQ(fixture.pixel(312, 130), Uint32(0x191d24));
+    EXPECT_EQ(fixture.pixel(314, 1), Uint32(0x6e7a8e));
+    EXPECT_EQ(fixture.pixel(314, 130), Uint32(0x1e1e1e));
     frame.scrollbar.size = 1;
     fixture.backend->render(frame);
-    EXPECT_EQ(fixture.pixel(312, 130), Uint32(0x6e7a8e));
+    EXPECT_EQ(fixture.pixel(314, 130), Uint32(0x6e7a8e));
     frame.textHeightPixels = 0;
     fixture.backend->render(frame);
     EXPECT_EQ(fixture.pixel(0, 0), Uint32(0x1e1e1e));
@@ -455,13 +455,14 @@ TEST_CASE("Marks and the scrollbar share the strip: the thumb moves right, the "
     const int strip = 320 - 12;
     EXPECT_EQ(fixture.pixel(strip + 2, h / 2), Uint32(0x6e7a8e)); // the mark
     EXPECT_EQ(fixture.pixel(strip + 2, 2 * h),
-              Uint32(0x191d24)); // the track beside the thumb
+              Uint32(0xc81e28)); // the neighbouring cell background
     EXPECT_EQ(fixture.pixel(strip + 9, 2 * h),
               Uint32(0x6e7a8e)); // the thumb, narrower and to the right
-    // Without marks the thumb is where it always was.
+    // Without marks the thumb stays the same narrow width.
     frame.wrapMarks.clear();
     fixture.backend->render(frame);
-    EXPECT_EQ(fixture.pixel(strip + 2, 2 * h), Uint32(0x6e7a8e));
+    EXPECT_EQ(fixture.pixel(strip + 2, 2 * h), Uint32(0xc81e28));
+    EXPECT_EQ(fixture.pixel(strip + 7, 2 * h), Uint32(0x6e7a8e));
 }
 
 TEST_CASE("A pane beside a divider: the scrollbar in the near half, the mark "
@@ -484,7 +485,7 @@ TEST_CASE("A pane beside a divider: the scrollbar in the near half, the mark "
         frame,
         PaneArea{{x, y, paneWidth, 3 * h}, {x + paneWidth, y, 6, 3 * h}});
     // Near half: the scrollbar as before, no mark there.
-    EXPECT_EQ(fixture.pixel(x + paneWidth, y + h / 2), Uint32(0x191d24));
+    EXPECT_EQ(fixture.pixel(x + paneWidth, y + h / 2), gap);
     // Far half: the mark on the wrapped row's middle, nothing on the next row,
     // the gap elsewhere.
     EXPECT_EQ(fixture.pixel(x + paneWidth + 6 + 1, y + h / 2),
@@ -536,7 +537,7 @@ TEST_CASE(
     EXPECT_EQ(fixture.pixel(319, h + 1), Uint32(0x14b432));
     frame.scrollbar = {true, 0.0f, 0.5f};
     fixture.backend->render(frame);
-    EXPECT_EQ(fixture.pixel(319, 0), Uint32(0x191d24)); // The track wins.
+    EXPECT_EQ(fixture.pixel(319, 0), Uint32(0xc81e28)); // Cell background continues.
 }
 
 TEST_CASE(
@@ -838,7 +839,7 @@ TEST_CASE("A frame of several panes: clear once, leftovers like the neighbour "
     fixture.backend->render(withBar,
                             PaneArea{{0, 100, 2 * w, h}, {2 * w, 100, 4, h}});
     EXPECT_EQ(fixture.pixel(2 * w - 1, 101), Uint32(0x5a5046)); // Text intact.
-    EXPECT_EQ(fixture.pixel(2 * w, 101), Uint32(0x191d24));     // Track.
+    EXPECT_EQ(fixture.pixel(2 * w, 101), gap);                   // Divider background.
     EXPECT_EQ(fixture.pixel(2 * w + 1, 105), Uint32(0x6e7a8e)); // Thumb.
     EXPECT_EQ(fixture.pixel(2 * w + 4, 101), gap);
     // Without a gutter strip the legacy strip inside the pane is used.

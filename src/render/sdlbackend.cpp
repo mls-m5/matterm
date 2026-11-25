@@ -324,10 +324,9 @@ void SdlBackend::render(const RenderFrame &frame) {
                     columnEdge[x] = edge;
                 }
             }
-            if (s.reserveStrip && !external && !frame.scrollbar.visible &&
-                x + 1 == columns) {
+            if (s.reserveStrip && !external && x + 1 == columns) {
                 // The reserved scrollbar strip (and any remainder) looks like
-                // the cell beside it while there is no scrollbar. A cursor
+                // the cell beside it, including behind a scrollbar. A cursor
                 // block is not extended; a selection is.
                 const bool selected =
                     frame.selectionBegin < frame.selectionEnd &&
@@ -441,8 +440,9 @@ void SdlBackend::render(const RenderFrame &frame) {
     else {
         check(SDL_RenderClear(s.renderer.get()));
     }
+    const SDL_Rect backgroundClip{0, 0, s.reserveStrip && !external ? width : textWidth, textHeight};
     const SDL_Rect textClip{0, 0, textWidth, textHeight};
-    check(SDL_RenderSetClipRect(s.renderer.get(), &textClip));
+    check(SDL_RenderSetClipRect(s.renderer.get(), &backgroundClip));
     // Restore clipping even if a draw fails. The backend owns the renderer.
     struct ClipReset {
         SDL_Renderer *renderer;
@@ -451,6 +451,7 @@ void SdlBackend::render(const RenderFrame &frame) {
         }
     } clipReset{s.renderer.get()};
     s.backgrounds.draw(*s.renderer, nullptr);
+    check(SDL_RenderSetClipRect(s.renderer.get(), &textClip));
     s.glyphs.draw(*s.renderer, s.atlas->texture());
     s.decorations.draw(*s.renderer, nullptr);
 
@@ -509,8 +510,6 @@ void SdlBackend::render(const RenderFrame &frame) {
         }
         const int stripWidth = track.w;
         const int trackHeight = track.h;
-        check(SDL_SetRenderDrawColor(s.renderer.get(), 25, 29, 36, 255));
-        check(SDL_RenderFillRect(s.renderer.get(), &track));
         const float thumbHeight = std::clamp(
             float(trackHeight) * std::clamp(frame.scrollbar.size, 0.0f, 1.0f),
             float(std::min(16, trackHeight)),
@@ -522,11 +521,10 @@ void SdlBackend::render(const RenderFrame &frame) {
         // (docs/tasks/wrap-marker.md).
         const auto strip = wrapmark::stripLayout(
             stripWidth, !external && !frame.wrapMarks.empty());
-        const SDL_FRect thumb{
-            float(track.x + (external ? 1 : strip.thumbX)),
-            thumbY,
-            float(external ? std::max(0, stripWidth - 2) : strip.thumbWidth),
-            thumbHeight};
+        const int thumbWidth = external ? std::max(0, stripWidth - 2)
+                                        : std::min(strip.thumbWidth, std::max(0, stripWidth / 2 - 2));
+        const int thumbX = external ? 1 : (strip.hasMarks() ? strip.thumbX : stripWidth - thumbWidth - 2);
+        const SDL_FRect thumb{float(track.x + thumbX), thumbY, float(thumbWidth), thumbHeight};
         check(SDL_SetRenderDrawColor(s.renderer.get(), 110, 122, 142, 255));
         check(SDL_RenderFillRectF(s.renderer.get(), &thumb));
     }
