@@ -3020,6 +3020,10 @@ int runPtyFrontend(const char *font,
             activeUntil = SDL_GetTicks64() + kActiveMs;
             lastActivity = SDL_GetTicks64();
             if (event.type == SDL_WINDOWEVENT) {
+                // SDL_PollEvent pumps window-system changes after the update at
+                // the start of this iteration. Refresh before processing any
+                // mouse events queued behind a resize or maximize.
+                updateWindow();
                 forceRedraw = true; // Exposed, resized, shown: the window's contents may be gone.
             }
             const std::int64_t now = std::int64_t(SDL_GetTicks64());
@@ -3080,6 +3084,9 @@ int runPtyFrontend(const char *font,
             else if (event.type == SDL_MOUSEBUTTONDOWN ||
                      event.type == SDL_MOUSEBUTTONUP ||
                      event.type == SDL_MOUSEMOTION) {
+                // Geometry and pointer coordinates must use the same current
+                // drawable size even if a resize was pumped with this event.
+                updateWindow();
                 const bool motion = event.type == SDL_MOUSEMOTION;
                 const bool down = event.type == SDL_MOUSEBUTTONDOWN;
                 const int rawX = motion ? event.motion.x : event.button.x;
