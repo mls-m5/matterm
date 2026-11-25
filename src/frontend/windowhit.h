@@ -161,6 +161,14 @@ inline std::vector<BorderRect> borderRects(int width,
     return rects;
 }
 
+// One physical pixel around the outside of our own frame; never draw over text.
+inline std::vector<BorderRect> outerFrameEdges(int width, int height, bool maximized, bool fullscreen) {
+    auto edges = borderRects(width, height, maximized, 1, fullscreen);
+    if (!edges.empty() && width > 2 && height > 1)
+        edges.push_back({1, 0, width - 2, 1});
+    return edges;
+}
+
 // Exactly the colour of the strip, where the window is dragged (the gaps between the tabs): the
 // border then looks like the edge of the strip going round the window. Not a guessed shade.
 inline Rgb8 borderColor(const Palette &palette) {

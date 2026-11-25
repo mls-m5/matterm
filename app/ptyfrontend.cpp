@@ -3892,6 +3892,8 @@ int runPtyFrontend(const char *font,
                          maximized,
                          fullscreen))
                     paintDecoration(edge, splitEdgeColor(stripPalette));
+                for (const auto &edge : frontend::outerFrameEdges(w, h, maximized, fullscreen))
+                    backend.drawRect({edge.x, edge.y, edge.w, edge.h}, splitEdgeColor(stripPalette));
             }
             backend.present();
             if (perfLog.enabled()) {

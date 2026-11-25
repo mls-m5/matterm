@@ -23,6 +23,18 @@ WindowGeometry window() {
 
 TEST_SUIT_BEGIN(WindowHit)
 
+TEST_CASE("Own frame outer edge is one pixel and absent when maximized or fullscreen") {
+    const auto edges = outerFrameEdges(100, 60, false, false);
+    EXPECT(edges.size() == 4);
+    for (const auto &edge : edges) {
+        EXPECT(edge.w == 1 || edge.h == 1);
+        EXPECT(edge.x == 0 || edge.y == 0 || edge.x + edge.w == 100 || edge.y + edge.h == 60);
+    }
+    EXPECT(outerFrameEdges(100, 60, true, false).empty());
+    EXPECT(outerFrameEdges(100, 60, false, true).empty());
+    EXPECT(outerFrameEdges(0, 0, false, false).empty());
+}
+
 TEST_CASE("The edges and corners resize, the inside does not") {
     const WindowGeometry g = window();
     EXPECT(classifyWindowPoint(g, 500, 300) == Zone::Normal);
