@@ -1480,12 +1480,14 @@ int runPtyFrontend(const char *font,
         frontend::ServerWindow process;
         PaneId pane = 0;
         std::string incoming;
+        std::string installQuestion;
         Uint64 readyAt = 0;
         bool opened = false;
         bool failed = false;
         bool exited = false;
     };
     std::vector<StartingServer> serverWindows;
+    std::optional<pid_t> installDialogPid;
     const auto serverStatus = [&](PaneId id, const std::string &text) {
         if (NativePane *pane = workspace.pane(id)) {
             std::string cleaned;
@@ -1673,6 +1675,26 @@ int runPtyFrontend(const char *font,
                 settingsWatch.error().empty() &&
                 settingsWatch.warnings().empty()) {
                 notify(""); // Read again, nothing to say.
+            }
+        }
+        else if (id == "server.install.y" || id == "server.install.n") {
+            for (auto &server : serverWindows) {
+                if (server.process.pid != 0 && argument == std::to_string(server.process.pid) &&
+                    installDialogPid == server.process.pid) {
+                    if (!frontend::answerServerConfirmation(server.process.statusFd,
+                                                            id == "server.install.y")) {
+                        ::close(server.process.statusFd);
+                        server.process.statusFd = -1; // EOF denies the copy.
+                    }
+                    else {
+                        serverStatus(server.pane, id == "server.install.y"
+                                                      ? "Copy approved; installing on remote host...\n"
+                                                      : "Copy declined.\n");
+                    }
+                    server.installQuestion.clear();
+                    installDialogPid.reset();
+                    break;
+                }
             }
         }
         else if (id == "server.connect" && colon == std::string::npos) {
@@ -3185,6 +3207,12 @@ int runPtyFrontend(const char *font,
                             if (line[0] == 'P')
                                 serverStatus(server.pane,
                                              line.substr(2) + "\n");
+                            if (line[0] == 'I') {
+                                server.installQuestion = line.substr(2);
+                                serverStatus(server.pane,
+                                             "Waiting for installation approval: " +
+                                                 server.installQuestion + "\n");
+                            }
                             if (line[0] == 'E') {
                                 serverStatus(server.pane,
                                              "Connection failed: " +
@@ -3241,6 +3269,35 @@ int runPtyFrontend(const char *font,
                                                       s.process.statusFd < 0;
                                            }),
                             serverWindows.end());
+        if (installDialogPid && !wv.hasLayer()) {
+            for (auto &server : serverWindows) {
+                if (server.process.pid == *installDialogPid &&
+                    server.process.statusFd >= 0) {
+                    if (!frontend::answerServerConfirmation(server.process.statusFd, false)) {
+                        ::close(server.process.statusFd); // EOF denies the copy.
+                        server.process.statusFd = -1;
+                    }
+                    server.installQuestion.clear();
+                    break;
+                }
+            }
+            installDialogPid.reset();
+        }
+        if (!installDialogPid && !wv.hasLayer()) {
+            for (auto &server : serverWindows) {
+                if (server.installQuestion.empty() || server.exited ||
+                    server.process.statusFd < 0) continue;
+                installDialogPid = server.process.pid;
+                const auto pid = std::to_string(server.process.pid);
+                wv.pushLayer(std::make_unique<ui::ConfirmDialog>(
+                    server.installQuestion,
+                    std::vector<ui::ConfirmDialog::Button>{
+                        {"Copy and start", "server.install.y:" + pid},
+                        {"Cancel", "server.install.n:" + pid}},
+                    1, 1)); // Explicit consent: Enter and Escape both decline.
+                break;
+            }
+        }
         if (perfLog.enabled()) {
             const double loopAt = perfClockMs();
             perfLog.tick();

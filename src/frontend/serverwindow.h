@@ -21,11 +21,11 @@ struct ServerWindow {
     int statusFd = -1;
 };
 
-inline void sendServerStatus(int fd,
+inline bool sendServerStatus(int fd,
                              char kind,
                              const std::string &message = {}) {
     if (fd < 0)
-        return;
+        return false;
     std::string line(1, kind);
     if (!message.empty())
         line += ' ';
@@ -36,7 +36,28 @@ inline void sendServerStatus(int fd,
             line += char(c);
     }
     line += '\n';
-    ::send(fd, line.data(), line.size(), MSG_NOSIGNAL);
+    return ::send(fd, line.data(), line.size(), MSG_NOSIGNAL) ==
+           static_cast<ssize_t>(line.size());
+}
+
+// Only a visible decision in the original GUI may authorize a remote copy.
+// If the GUI closes while waiting, recv returns EOF and installation is denied.
+inline bool requestServerConfirmation(int fd, const std::string &question) {
+    if (fd < 0)
+        return false;
+    if (!sendServerStatus(fd, 'I', question))
+        return false;
+    char answer = 0;
+    ssize_t count;
+    do {
+        count = ::recv(fd, &answer, 1, 0);
+    } while (count < 0 && errno == EINTR);
+    return count == 1 && answer == 'y';
+}
+
+inline bool answerServerConfirmation(int fd, bool yes) {
+    const char answer = yes ? 'y' : 'n';
+    return fd >= 0 && ::send(fd, &answer, 1, MSG_NOSIGNAL) == 1;
 }
 
 inline bool spawnServerWindow(const std::string &executable,

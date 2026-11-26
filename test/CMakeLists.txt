@@ -594,6 +594,12 @@ if(BUILD_TESTING)
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/server_status_native.py"
                         $<TARGET_FILE:matterm>)
             set_tests_properties(server_status_native PROPERTIES TIMEOUT 30)
+            if(TARGET matterm-daemon)
+                add_test(NAME server_install_prompt_native
+                    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/server_install_prompt_native.py"
+                            $<TARGET_FILE:matterm> "${CMAKE_CURRENT_SOURCE_DIR}/fakessh.py")
+                set_tests_properties(server_install_prompt_native PROPERTIES TIMEOUT 50)
+            endif()
         endif()
 
         # Detach tab, then Attach tab... is offered: local daemon, and --daemon-host through the fake ssh.

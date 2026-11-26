@@ -34,4 +34,43 @@ TEST_CASE("Startup messages are bounded to one line and ignore closed peers") {
                                'R'); // Must not SIGPIPE on parent exit.
     ::close(ends[0]);
 }
+TEST_CASE("Remote copy requires explicit GUI approval; disconnect denies it") {
+    int ends[2];
+    EXPECT(::socketpair(AF_UNIX, SOCK_STREAM, 0, ends) == 0);
+    const pid_t child = ::fork();
+    if (child == 0) {
+        ::close(ends[1]);
+        _exit(
+            frontend::requestServerConfirmation(ends[0], "Copy remote daemon?")
+                ? 0
+                : 1);
+    }
+    EXPECT(child > 0);
+    ::close(ends[0]);
+    char question[128]{};
+    const auto count = ::read(ends[1], question, sizeof(question));
+    EXPECT(std::string(question, std::size_t(count)) ==
+           "I Copy remote daemon?\n");
+    EXPECT(frontend::answerServerConfirmation(ends[1], true));
+    int status = -1;
+    EXPECT(::waitpid(child, &status, 0) == child);
+    EXPECT(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    ::close(ends[1]);
+
+    EXPECT(::socketpair(AF_UNIX, SOCK_STREAM, 0, ends) == 0);
+    const pid_t denied = ::fork();
+    if (denied == 0) {
+        ::close(ends[1]);
+        _exit(
+            frontend::requestServerConfirmation(ends[0], "Copy remote daemon?")
+                ? 1
+                : 0);
+    }
+    EXPECT(denied > 0);
+    ::close(ends[0]);
+    EXPECT(::read(ends[1], question, sizeof(question)) > 0);
+    ::close(ends[1]); // Parent window closed without approving.
+    EXPECT(::waitpid(denied, &status, 0) == denied);
+    EXPECT(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
 TEST_SUIT_END

@@ -69,15 +69,18 @@ inline std::unique_ptr<frontend::SshTunnel> openDaemonTunnel(
             std::cerr << "matterm: " << line << "\n";
             frontend::sendServerStatus(fd, 'P', line);
         };
-    tunnelOptions.confirm = [](const std::string &question) {
-        if (!::isatty(0) || !::isatty(2)) {
-            return false; // Nobody to ask: --yes says yes in advance.
-        }
-        std::cerr << "matterm: " << question << " [y/N] " << std::flush;
-        std::string answer;
-        std::getline(std::cin, answer);
-        return answer == "y" || answer == "Y" || answer == "yes";
-    };
+    tunnelOptions.confirm =
+        [fd = options.serverReadyFd](const std::string &question) {
+            if (fd >= 0)
+                return frontend::requestServerConfirmation(fd, question);
+            if (!::isatty(0) || !::isatty(2)) {
+                return false; // Nobody to ask: --yes says yes in advance.
+            }
+            std::cerr << "matterm: " << question << " [y/N] " << std::flush;
+            std::string answer;
+            std::getline(std::cin, answer);
+            return answer == "y" || answer == "Y" || answer == "yes";
+        };
     std::string error;
     auto tunnel = frontend::SshTunnel::open(tunnelOptions, error);
     if (!tunnel) {
