@@ -124,7 +124,7 @@ struct MouseInput {
 // A mouse event for a pane: position relative to the pane's rect, plus the cell.
 struct PaneMouse {
     PaneId pane = 0;
-    double x = 0, y = 0;                       // relative to the pane's rect origin
+    double x = 0, y = 0;                       // relative to the pane's text-cell origin
     std::optional<TerminalModel::TextCell> cell; // under the pointer, none outside the text
     TerminalModel::TextCell clamped{};         // nearest cell (for drags that left the text)
     bool focusedByThis = false;                // this press moved the focus here
@@ -190,6 +190,9 @@ public:
     const WindowMetrics &window() const { return metrics_; }
     // The native window is maximised: the middle window button shows "restore" (borderless only).
     void setWindowMaximized(bool maximized) { windowMaximized_ = maximized; }
+    void setAlignBottom(bool bottom) {
+        alignBottom_ = bottom;
+    }
 
     // The frame to draw now (applies nothing; call sync() first).
     FramePlan plan(bool withLayers = true) const {
@@ -1036,7 +1039,11 @@ private:
         PaneMouse m;
         m.pane = pp.id;
         m.x = in.x - pp.rect.x;
-        m.y = in.y - pp.rect.y;
+        const int inset =
+            alignBottom_
+                ? std::max(0, pp.rect.h - pp.rows * metrics_.cellHeight)
+                : 0;
+        m.y = in.y - pp.rect.y - inset;
         if (Pane *pane = workspace_.pane(pp.id)) {
             const TerminalModel &model = pane->view().model();
             const double w = static_cast<double>(pp.columns) * metrics_.cellWidth;
@@ -1071,6 +1078,7 @@ private:
     PixelRect dragTrack_;
     int stripFirst_ = 0;
     bool windowMaximized_ = false;
+    bool alignBottom_ = false;
     std::int64_t lastSyncMs_ = -1000000;
     bool pending_ = false;
     bool flush_ = false;

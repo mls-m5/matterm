@@ -98,6 +98,7 @@ struct SdlBackend::Impl {
     // Set while drawing a pane of a multi-pane frame: the scrollbar goes to
     // this rectangle (window pixels) and the leftover pixels are painted.
     bool paneMode = false;
+    bool alignBottom = false;
     std::optional<SDL_Rect> externalTrack;
 
     // The size drawing and the cell counts work on: the viewport or the whole
@@ -141,7 +142,8 @@ void drawWrapMarks(const Impl &s,
                    int textHeight,
                    int width,
                    int height,
-                   bool external) {
+                   bool external,
+                   float verticalInset) {
     if (frame.wrapMarks.empty() || rows == 0) {
         return;
     }
@@ -181,7 +183,8 @@ void drawWrapMarks(const Impl &s,
         if (!frame.wrapMarks[y]) {
             continue;
         }
-        const float top = float(y) * s.cellHeight + frame.verticalOffsetPixels;
+        const float top = float(y) * s.cellHeight + frame.verticalOffsetPixels +
+                          verticalInset;
         if (top + float(s.cellHeight) <= 0 || top >= float(textHeight)) {
             continue;
         }
@@ -225,9 +228,15 @@ void SdlBackend::render(const RenderFrame &frame) {
     const int textWidth = frame.scrollbar.visible && !external
                               ? std::max(0, width - scrollbarWidth)
                               : width;
-    const int textHeight = frame.textHeightPixels < 0
-                               ? height
-                               : std::min(height, frame.textHeightPixels);
+    const int verticalInset =
+        s.paneMode && s.alignBottom && frame.textHeightPixels >= 0
+            ? std::max(0, height - frame.textHeightPixels)
+            : 0;
+    const int textHeight =
+        frame.textHeightPixels < 0
+            ? height
+            : std::min(height - verticalInset, frame.textHeightPixels);
+    const int fillHeight = s.paneMode ? height : textHeight;
     const auto columns = std::min(
         frame.cells.columns(),
         std::size_t(textWidth / s.cellWidth + (textWidth % s.cellWidth != 0)));
@@ -240,7 +249,7 @@ void SdlBackend::render(const RenderFrame &frame) {
                                          double(frame.verticalOffsetPixels)) /
                                         s.cellHeight)));
     // The edge cells' backgrounds, to paint the leftover pixels like them.
-    std::vector<Rgb8> rowEdge(rows), columnEdge(columns);
+    std::vector<Rgb8> rowEdge(rows), columnEdge(columns), topEdge(columns);
     s.backgrounds.clear();
     s.glyphs.clear();
     s.decorations.clear();
@@ -265,8 +274,8 @@ void SdlBackend::render(const RenderFrame &frame) {
         for (std::size_t x = 0; x < columns; ++x) {
             const auto &cell = row.data()[x];
             const float left = float(x) * s.cellWidth;
-            const float top =
-                float(y) * s.cellHeight + frame.verticalOffsetPixels;
+            const float top = float(y) * s.cellHeight +
+                              frame.verticalOffsetPixels + verticalInset;
             auto colors = palette.resolve(cell);
             const auto baseBackground = colors.background;
             if (filledBlock && std::size_t(frame.cursor.column) == x &&
@@ -322,6 +331,9 @@ void SdlBackend::render(const RenderFrame &frame) {
                 }
                 if (y + 1 == rows) {
                     columnEdge[x] = edge;
+                }
+                if (y == 0) {
+                    topEdge[x] = edge;
                 }
             }
             if (s.reserveStrip && !external && x + 1 == columns) {
@@ -387,32 +399,49 @@ void SdlBackend::render(const RenderFrame &frame) {
         // Pixels right of and below the last whole cell look like the cell
         // beside them, as the reserved scrollbar strip does.
         const float cellsRight = float(columns) * s.cellWidth;
-        const float cellsBottom =
-            float(rows) * s.cellHeight + frame.verticalOffsetPixels;
+        const float cellsBottom = float(rows) * s.cellHeight +
+                                  frame.verticalOffsetPixels + verticalInset;
         auto color = [](Rgb8 c) { return SDL_Color{c.r, c.g, c.b, 255}; };
+        if (verticalInset > 0) {
+            for (std::size_t x = 0; x < columns; ++x) {
+                s.backgrounds.quad(float(x) * s.cellWidth,
+                                   0,
+                                   float(s.cellWidth),
+                                   float(verticalInset),
+                                   color(topEdge[x]));
+            }
+            if (float(textWidth) > cellsRight) {
+                s.backgrounds.quad(cellsRight,
+                                   0,
+                                   float(textWidth) - cellsRight,
+                                   float(verticalInset),
+                                   color(topEdge[columns - 1]));
+            }
+        }
         if (float(textWidth) > cellsRight) {
             for (std::size_t y = 0; y < rows; ++y) {
                 s.backgrounds.quad(cellsRight,
                                    float(y) * s.cellHeight +
-                                       frame.verticalOffsetPixels,
+                                       frame.verticalOffsetPixels +
+                                       verticalInset,
                                    float(textWidth) - cellsRight,
                                    float(s.cellHeight),
                                    color(rowEdge[y]));
             }
         }
-        if (float(textHeight) > cellsBottom) {
+        if (float(fillHeight) > cellsBottom) {
             for (std::size_t x = 0; x < columns; ++x) {
                 s.backgrounds.quad(float(x) * s.cellWidth,
                                    cellsBottom,
                                    float(s.cellWidth),
-                                   float(textHeight) - cellsBottom,
+                                   float(fillHeight) - cellsBottom,
                                    color(columnEdge[x]));
             }
             if (float(textWidth) > cellsRight) {
                 s.backgrounds.quad(cellsRight,
                                    cellsBottom,
                                    float(textWidth) - cellsRight,
-                                   float(textHeight) - cellsBottom,
+                                   float(fillHeight) - cellsBottom,
                                    color(columnEdge[columns - 1]));
             }
         }
@@ -440,8 +469,9 @@ void SdlBackend::render(const RenderFrame &frame) {
     else {
         check(SDL_RenderClear(s.renderer.get()));
     }
-    const SDL_Rect backgroundClip{0, 0, s.reserveStrip && !external ? width : textWidth, textHeight};
-    const SDL_Rect textClip{0, 0, textWidth, textHeight};
+    const SDL_Rect backgroundClip{
+        0, 0, s.reserveStrip && !external ? width : textWidth, fillHeight};
+    const SDL_Rect textClip{0, verticalInset, textWidth, textHeight};
     check(SDL_RenderSetClipRect(s.renderer.get(), &backgroundClip));
     // Restore clipping even if a draw fails. The backend owns the renderer.
     struct ClipReset {
@@ -462,7 +492,7 @@ void SdlBackend::render(const RenderFrame &frame) {
         SDL_FRect rect{(float(cursor.column) + cursor.columnOffset) *
                            s.cellWidth,
                        (float(cursor.row) + cursor.rowOffset) * s.cellHeight +
-                           frame.verticalOffsetPixels,
+                           frame.verticalOffsetPixels + verticalInset,
                        float(s.cellWidth),
                        float(s.cellHeight)};
         check(SDL_SetRenderDrawColor(s.renderer.get(),
@@ -521,14 +551,27 @@ void SdlBackend::render(const RenderFrame &frame) {
         // (docs/tasks/wrap-marker.md).
         const auto strip = wrapmark::stripLayout(
             stripWidth, !external && !frame.wrapMarks.empty());
-        const int thumbWidth = external ? std::max(0, stripWidth - 2)
-                                        : std::min(strip.thumbWidth, std::max(0, stripWidth / 2 - 2));
-        const int thumbX = external ? 1 : (strip.hasMarks() ? strip.thumbX : stripWidth - thumbWidth - 2);
-        const SDL_FRect thumb{float(track.x + thumbX), thumbY, float(thumbWidth), thumbHeight};
+        const int thumbWidth =
+            external
+                ? std::max(0, stripWidth - 2)
+                : std::min(strip.thumbWidth, std::max(0, stripWidth / 2 - 2));
+        const int thumbX =
+            external ? 1
+                     : (strip.hasMarks() ? strip.thumbX
+                                         : stripWidth - thumbWidth - 2);
+        const SDL_FRect thumb{
+            float(track.x + thumbX), thumbY, float(thumbWidth), thumbHeight};
         check(SDL_SetRenderDrawColor(s.renderer.get(), 110, 122, 142, 255));
         check(SDL_RenderFillRectF(s.renderer.get(), &thumb));
     }
-    drawWrapMarks(s, frame, rows, textHeight, width, height, external);
+    drawWrapMarks(s,
+                  frame,
+                  rows,
+                  textHeight + verticalInset,
+                  width,
+                  height,
+                  external,
+                  float(verticalInset));
 }
 
 void SdlBackend::beginFrame(Rgb8 background) {
@@ -552,11 +595,13 @@ void SdlBackend::render(const RenderFrame &frame, const PaneArea &area) {
         ~Restore() {
             s.viewport = viewport;
             s.paneMode = false;
+            s.alignBottom = false;
             s.externalTrack.reset();
         }
     } restore{s, s.viewport};
     s.viewport = SDL_Rect{r.x, r.y, r.w, r.h};
     s.paneMode = true;
+    s.alignBottom = area.alignBottom;
     if (!sb.empty()) {
         s.externalTrack = SDL_Rect{sb.x, sb.y, sb.w, sb.h};
     }

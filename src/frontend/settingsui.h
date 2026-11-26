@@ -50,6 +50,7 @@ public:
                 std::string(d.key) == "scrollbackRows" ||
                         std::string(d.key) == "confirmClose" ||
                         std::string(d.key) == "terminalListPreview" ||
+                        std::string(d.key) == "cellVerticalAlignment" ||
                         std::string(d.key) == "drawBatching" ||
                         std::string(d.key) == "copyJoinFullTuiRows"
                     ? 1

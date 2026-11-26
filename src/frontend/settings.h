@@ -84,6 +84,12 @@ inline const std::vector<Definition> &definitions() {
          100,
          100000,
          true},
+        {"cellVerticalAlignment",
+         "Vertical cell alignment",
+         "Place the unused pixels at the bottom or top of each terminal pane.",
+         Type::Choice,
+         {"top", "bottom"},
+         "top"},
         {"computerNamePlacement",
          "Computer name in the tab strip",
          "Where the name of another computer is written in the strip's gap: in "

@@ -537,7 +537,8 @@ TEST_CASE(
     EXPECT_EQ(fixture.pixel(319, h + 1), Uint32(0x14b432));
     frame.scrollbar = {true, 0.0f, 0.5f};
     fixture.backend->render(frame);
-    EXPECT_EQ(fixture.pixel(319, 0), Uint32(0xc81e28)); // Cell background continues.
+    EXPECT_EQ(fixture.pixel(319, 0),
+              Uint32(0xc81e28)); // Cell background continues.
 }
 
 TEST_CASE(
@@ -809,8 +810,10 @@ TEST_CASE("A frame of several panes: clear once, leftovers like the neighbour "
     CellBuffer a(2, 1);
     a.at(0, 0) = FChar{U' ', {}, {200, 30, 40}};
     a.at(1, 0) = FChar{U' ', {}, {20, 180, 50}};
-    fixture.backend->render(RenderFrame{a.view(), {}},
-                            PaneArea{{0, 0, 2 * w + 5, h + 7}, {}});
+    RenderFrame paneFrame{a.view(), {}};
+    paneFrame.textHeightPixels =
+        h; // A terminal model clips at its full-cell height.
+    fixture.backend->render(paneFrame, PaneArea{{0, 0, 2 * w + 5, h + 7}, {}});
     EXPECT_EQ(fixture.pixel(1, 1), Uint32(0xc81e28));
     EXPECT_EQ(fixture.pixel(w + 1, 1), Uint32(0x14b432));
     EXPECT_EQ(fixture.pixel(2 * w + 2, 1), Uint32(0x14b432)); // Right.
@@ -819,6 +822,21 @@ TEST_CASE("A frame of several panes: clear once, leftovers like the neighbour "
     EXPECT_EQ(fixture.pixel(2 * w + 2, h + 3), Uint32(0x14b432)); // Corner.
     EXPECT_EQ(fixture.pixel(2 * w + 6, 1), gap); // Not beyond the pane.
     EXPECT_EQ(fixture.pixel(1, h + 8), gap);
+    // Bottom alignment shifts the cells, but paints the small gap above them
+    // from the first row and keeps the last row flush with the pane's bottom.
+    fixture.backend->render(paneFrame,
+                            PaneArea{{0, 0, 2 * w + 5, h + 7}, {}, true});
+    EXPECT_EQ(fixture.pixel(1, 0), Uint32(0xc81e28));
+    EXPECT_EQ(fixture.pixel(w + 1, 0), Uint32(0x14b432));
+    EXPECT_EQ(fixture.pixel(w + 1, h + 6), Uint32(0x14b432));
+    paneFrame.cursor.visible = true;
+    paneFrame.cursor.focused = false;
+    paneFrame.cursor.color = {255, 255, 255};
+    fixture.backend->render(paneFrame,
+                            PaneArea{{0, 0, 2 * w + 5, h + 7}, {}, true});
+    EXPECT_EQ(fixture.pixel(0, 0), Uint32(0xc81e28)); // No cursor in the inset.
+    EXPECT_EQ(fixture.pixel(0, 7),
+              Uint32(0xffffff)); // The cursor moved with the cells.
     // Pane B elsewhere does not disturb A (no second clear).
     CellBuffer b(2, 1);
     b.clear(FChar{U' ', {}, {10, 20, 210}});
@@ -839,7 +857,7 @@ TEST_CASE("A frame of several panes: clear once, leftovers like the neighbour "
     fixture.backend->render(withBar,
                             PaneArea{{0, 100, 2 * w, h}, {2 * w, 100, 4, h}});
     EXPECT_EQ(fixture.pixel(2 * w - 1, 101), Uint32(0x5a5046)); // Text intact.
-    EXPECT_EQ(fixture.pixel(2 * w, 101), gap);                   // Divider background.
+    EXPECT_EQ(fixture.pixel(2 * w, 101), gap); // Divider background.
     EXPECT_EQ(fixture.pixel(2 * w + 1, 105), Uint32(0x6e7a8e)); // Thumb.
     EXPECT_EQ(fixture.pixel(2 * w + 4, 101), gap);
     // Without a gutter strip the legacy strip inside the pane is used.

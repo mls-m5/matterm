@@ -87,10 +87,30 @@ TEST_CASE("One pane fills the window below the strip, keeping the scrollbar stri
     EXPECT_EQ(a.scrollbar.w, 0); // edge pane: strip inside
     EXPECT(a.focused);
     // sync() gave the program that size.
-    EXPECT_EQ(r.space.focusedPane()->view().model().columns(), std::size_t(a.columns));
-    EXPECT_EQ(r.space.focusedPane()->view().model().rows(), std::size_t(a.rows));
+    EXPECT_EQ(r.space.focusedPane()->view().model().columns(),
+              std::size_t(a.columns));
+    EXPECT_EQ(r.space.focusedPane()->view().model().rows(),
+              std::size_t(a.rows));
     EXPECT(!r.view.sync(1)); // nothing more to do
     EXPECT(!r.space.focusedPane()->link.resizes.empty());
+}
+
+TEST_CASE("Bottom-aligned pane cells use the same offset for pointer hits") {
+    Rig r(1200, 807);
+    const auto p = r.view.plan();
+    const auto &pane = p.panes.front();
+    const int inset = pane.rect.h - pane.rows * 16;
+    EXPECT(inset > 0);
+    const auto top = r.view.pointerPane(4, pane.rect.y);
+    EXPECT(top && top->cell);
+    r.view.setAlignBottom(true);
+    const auto padding = r.view.pointerPane(4, pane.rect.y);
+    EXPECT(padding && !padding->cell);
+    const auto first = r.view.pointerPane(4, pane.rect.y + inset);
+    EXPECT(first && first->cell);
+    EXPECT_EQ(first->cell->column, std::size_t(0));
+    EXPECT_EQ(first->cell->row,
+              r.space.focusedPane()->view().model().firstRetainedRow());
 }
 
 TEST_CASE("A theme colours the strip, and the other computer's name is in the "

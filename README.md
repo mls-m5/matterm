@@ -66,7 +66,11 @@ applies. Changes are saved immediately and the window follows within about one
 second. Esc cancels the current edit, not earlier saves; Ctrl+Q exits. Themes,
 per-computer overrides, computer-name placement (center/left/right), tab activity,
 window frame, scrollback, copy behaviour and close confirmation are available.
-Frame/scrollback changes apply to new windows/terminals. By default,
+Frame/scrollback changes apply to new windows/terminals. The
+`cellVerticalAlignment` setting is `"top"` by default; choose `"bottom"` to
+place the spare pixels above each terminal pane instead of below it. Either
+way, the outermost cell backgrounds extend into those spare pixels without
+covering terminal text or the resize border. By default,
 `copyJoinFullTuiRows` is `true`: when copying from a full-screen TUI, trailing
 spaces are removed and a line reaching the right edge (including up to two
 trailing spaces) is joined with the next nonblank line. Set it to `false` in

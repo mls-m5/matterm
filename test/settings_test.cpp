@@ -26,6 +26,17 @@ TEST_CASE("The definitions: unique keys, a default that is allowed, a text for "
            keys.count("computerNamePlacement"));
 }
 
+TEST_CASE("Cell vertical alignment defaults to top and saves bottom") {
+    Settings settings;
+    EXPECT_EQ(settings.choice("cellVerticalAlignment"), std::string("top"));
+    std::string error;
+    EXPECT(settings.set("cellVerticalAlignment", "bottom", error));
+    const auto loaded = Settings::fromText(settings.toText());
+    EXPECT(loaded.ok());
+    EXPECT_EQ(loaded.settings.choice("cellVerticalAlignment"),
+              std::string("bottom"));
+}
+
 TEST_CASE("Joining full TUI lines is configurable and on by default") {
     Settings settings;
     EXPECT(settings.flag("copyJoinFullTuiRows"));
@@ -137,6 +148,7 @@ TEST_CASE(
                                  "  \"tabActivity\": \"icon\",\n"
                                  "  \"windowFrame\": \"own\",\n"
                                  "  \"scrollbackRows\": 1000,\n"
+                                 "  \"cellVerticalAlignment\": \"top\",\n"
                                  "  \"computerNamePlacement\": \"center\",\n"
                                  "  \"confirmClose\": true,\n"
                                  "  \"copyJoinFullTuiRows\": true,\n"

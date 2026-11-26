@@ -24,6 +24,7 @@ struct PixelBox {
 struct PaneArea {
     PixelBox rect;
     PixelBox scrollbar;
+    bool alignBottom = false; // Put leftover vertical pixels above the cells.
 };
 
 // Owns the SDL renderer and atlas. The borrowed window must outlive this

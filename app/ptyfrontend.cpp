@@ -974,6 +974,7 @@ int runPtyFrontend(const char *font,
         return ec ? std::string() : here.string();
     };
     bool confirmCloseBusy = true; // settings.json "confirmClose"
+    bool alignCellsBottom = false; // settings.json "cellVerticalAlignment"
     {
         // Closing a pane, tab or the window asks when a program other than the shell runs there.
         wv.setBusyProbe([&](PaneId id) -> std::optional<std::string> {
@@ -1036,6 +1037,8 @@ int runPtyFrontend(const char *font,
         wv.setTabActivity(mode);
         gScrollbackRows = std::size_t(current.integer("scrollbackRows"));
         confirmCloseBusy = current.flag("confirmClose");
+        alignCellsBottom = current.choice("cellVerticalAlignment") == "bottom";
+        wv.setAlignBottom(alignCellsBottom);
         copyJoinFullTuiRows = current.flag("copyJoinFullTuiRows");
     };
     const auto reportSettings = [&](settings::SettingsWatcher::Event event,
@@ -3850,6 +3853,7 @@ int runPtyFrontend(const char *font,
             addInput(layerFrames[i], &stripPalette, plan.layers[i].rect, PixelRect{}, layerFrames[i].cursor.visible);
         }
         std::uint64_t extra = std::hash<std::string>{}(title);
+        extra = extra * 31 + (alignCellsBottom ? 1u : 0u);
         for (const auto &d : drawn) {
             extra = extra * 31 + (d.plan->shared ? 1u : 0u);
         }
@@ -3916,9 +3920,11 @@ int runPtyFrontend(const char *font,
             paintSplitGutters(decoration, stripPalette, paintDecoration);
             for (const auto &d : drawn) {
                 const auto &pp = *d.plan;
-                backend.render(d.frame,
-                               PaneArea{{pp.rect.x + ox, pp.rect.y, pp.rect.w, pp.rect.h},
-                                        {pp.scrollbar.x + ox, pp.scrollbar.y, pp.scrollbar.w, pp.scrollbar.h}});
+                backend.render(
+                    d.frame,
+                    PaneArea{{pp.rect.x + ox, pp.rect.y, pp.rect.w, pp.rect.h},
+                             {pp.scrollbar.x + ox, pp.scrollbar.y, pp.scrollbar.w, pp.scrollbar.h},
+                             alignCellsBottom});
                 if (d.badge && d.badgeRect.w > 0) {
                     backend.render(d.badgeFrame,
                                    PaneArea{{d.badgeRect.x + ox, d.badgeRect.y, d.badgeRect.w, d.badgeRect.h}, {}});
