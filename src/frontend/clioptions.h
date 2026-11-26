@@ -101,6 +101,7 @@ inline const std::vector<Program> &programs() {
               "",
               "Extra argument for ssh",
               false},
+             {"--server-ready-fd", "", Value::Number, "", "Internal startup feedback", true},
              {"--snap-scroll",
               "",
               Value::None,

@@ -588,6 +588,14 @@ if(BUILD_TESTING)
             set_tests_properties(attach_here_native PROPERTIES TIMEOUT 180)
         endif()
 
+        # Native startup failure reaches the GUI status protocol without a display or real SSH.
+        if(Python3_Interpreter_FOUND AND TARGET matterm)
+            add_test(NAME server_status_native
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/server_status_native.py"
+                        $<TARGET_FILE:matterm>)
+            set_tests_properties(server_status_native PROPERTIES TIMEOUT 30)
+        endif()
+
         # Detach tab, then Attach tab... is offered: local daemon, and --daemon-host through the fake ssh.
         if(Python3_Interpreter_FOUND AND TARGET matterm)
             foreach(mode local remote)

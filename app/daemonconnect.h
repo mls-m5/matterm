@@ -7,6 +7,7 @@
 #include "daemonchoice.h"
 #include "perflog.h"
 #include "ptyfrontend.h"
+#include "serverwindow.h"
 #include "sshtunnel.h"
 
 #include <iostream>
@@ -52,6 +53,9 @@ inline frontend::SshPhaseCallback sshStartupTiming(const std::string &path) {
 inline std::unique_ptr<frontend::SshTunnel> openDaemonTunnel(
     DaemonOptions &options) {
     std::cerr << "matterm: connecting to " << options.host << " ...\n";
+    frontend::sendServerStatus(options.serverReadyFd,
+                               'P',
+                               "Connecting to " + options.host + " via SSH...");
     frontend::SshTunnelOptions tunnelOptions;
     tunnelOptions.host = options.host;
     tunnelOptions.timing = sshStartupTiming(options.perfLog);
@@ -60,9 +64,11 @@ inline std::unique_ptr<frontend::SshTunnel> openDaemonTunnel(
                                 ? frontend::DaemonInstall::Always
                                 : frontend::DaemonInstall::Auto;
     tunnelOptions.assumeYes = options.assumeYes;
-    tunnelOptions.progress = [](const std::string &line) {
-        std::cerr << "matterm: " << line << "\n";
-    };
+    tunnelOptions.progress =
+        [fd = options.serverReadyFd](const std::string &line) {
+            std::cerr << "matterm: " << line << "\n";
+            frontend::sendServerStatus(fd, 'P', line);
+        };
     tunnelOptions.confirm = [](const std::string &question) {
         if (!::isatty(0) || !::isatty(2)) {
             return false; // Nobody to ask: --yes says yes in advance.

@@ -80,8 +80,12 @@ purposeful newline at the right edge.
 
 The **Connect to server...** palette entry lists saved SSH destinations and
 **New host...**. Enter `user@host`, then choose **Save and connect** or
-**Connect once**. A new independent window uses `--daemon-host`; closing it
-does not close this window or stop the remote daemon. Saved destinations can
+**Connect once**. A temporary local tab shows SSH startup progress and errors;
+it closes shortly after the separate window draws its first frame, but remains
+open on failure. A new independent window uses `--daemon-host`; closing it does
+not close this window or stop the remote daemon. The palette does not ask
+installation questions in an invisible terminal: when an installation needs
+approval, the status tab explains why the connection could not start. Saved destinations can
 also be added, edited, or removed in Settings under Computers (clear a host
 to remove it). They are stored in `servers` separately from the `computers`
 colour overrides, e.g. `"servers": ["user@host", "lab-alias"]`.

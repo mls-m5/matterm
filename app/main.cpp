@@ -3,6 +3,9 @@
 #include "fontpath.h"
 #include "render/sdlbackend.h"
 #include "settingswatch.h"
+#ifdef MATTERM_HAS_PTY
+#include "serverwindow.h"
+#endif
 #include "tabtypes.h"
 #include "terminal/terminalmodel.h"
 #include "terminal/vt/vtparser.h"
@@ -26,6 +29,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#ifdef MATTERM_HAS_PTY
+#include <fcntl.h>
+#endif
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -516,6 +522,9 @@ int main(int argc, char **argv) {
     std::vector<std::string> sshArguments;
     bool daemonInstall = false;
     bool assumeYes = false;
+#ifdef MATTERM_HAS_PTY
+    int serverReadyFd = -1;
+#endif
     bool showcase = false;
     std::string term = "xterm-256color";
     std::vector<std::string> command;
@@ -630,6 +639,13 @@ int main(int argc, char **argv) {
         else if (arg == "--yes") {
             assumeYes = true;
         }
+#ifdef MATTERM_HAS_PTY
+        else if (arg == "--server-ready-fd" && i + 1 < argc &&
+                 std::string_view(argv[i + 1]) == "3") {
+            ++i;
+            serverReadyFd = 3;
+        }
+#endif
         else if (arg == "--ssh-arg" && i + 1 < argc) {
             sshArguments.emplace_back(argv[++i]);
         }
@@ -676,6 +692,12 @@ int main(int argc, char **argv) {
                      "command, --input, --showcase or the smoke tests\n";
         return 1;
     }
+#ifdef MATTERM_HAS_PTY
+    if (serverReadyFd >= 0) {
+        const int flags = ::fcntl(serverReadyFd, F_GETFD);
+        if (flags >= 0) ::fcntl(serverReadyFd, F_SETFD, flags | FD_CLOEXEC);
+    }
+#endif
     if ((daemonInstall || assumeYes) && daemonHost.empty()) {
         std::cerr << "--daemon-install and --yes are for --daemon-host\n";
         return 1;
@@ -837,6 +859,7 @@ int main(int argc, char **argv) {
             const auto font = applicationFontPath(fontOverride);
             DaemonOptions daemonOptions{useDaemon, daemonSocket, daemonExplicit, snapScroll, daemonHost, sshArguments, daemonInstall, assumeYes, tabActivity, frontend::wantsOwnFrame(frameRequest)};
             daemonOptions.perfLog = perfLog;
+            daemonOptions.serverReadyFd = serverReadyFd;
             daemonOptions.layoutSmoke = ptyLayoutSmokeTest;
             return runPtyFrontend(font.c_str(),
                                   fontSize,
@@ -849,6 +872,7 @@ int main(int argc, char **argv) {
                                   daemonOptions);
         }
         catch (const std::exception &error) {
+            frontend::sendServerStatus(serverReadyFd, 'E', error.what());
             std::cerr << error.what() << '\n';
             return 1;
         }

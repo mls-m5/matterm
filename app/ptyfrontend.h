@@ -42,6 +42,8 @@ struct DaemonOptions {
     std::vector<std::string> attachCommand;
     bool layoutSmoke = false; // --pty-layout-smoke-test (hidden): Detach tab,
                               // then Attach tab... is offered
+    int serverReadyFd =
+        -1; // Private startup acknowledgement for a palette-launched window.
 };
 
 // Native entry-point adapter; owns SDL lifecycle after starting the PTY.

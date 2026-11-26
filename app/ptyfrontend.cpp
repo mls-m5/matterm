@@ -29,6 +29,7 @@
 #include "settingswatch.h"
 #include "splitdecoration.h"
 #include "sshtunnel.h"
+#include "tty/utf8.h"
 #include "terminalmodel.h"
 #include "terminalview.h"
 #include "themes.h"
@@ -290,6 +291,7 @@ struct NativePane {
     double settingsStartedAt =
         0; // Opt-in diagnostics only, no callbacks retaining this pane.
     bool settingsParsed = false, settingsPresented = false;
+    bool startupStatusPane = false;
     std::unique_ptr<perf::EchoMeter> perfEcho;
     perf::Second *perfSecond = nullptr;
     double perfProbeAt = 0;
@@ -551,6 +553,8 @@ int runPtyFrontend(const char *font,
             daemonFallbackReason = error;
         }
     }
+    if (remoteDaemon)
+        frontend::sendServerStatus(daemonOptions.serverReadyFd, 'P', "Remote daemon ready; creating window...");
     const std::string daemonPath = daemonSocket(daemonOptions.socketPath);
     Uint64 lastSharedPoll = 0;
     bool keepTerminals = false;           // Leave the programs running in the daemon when we go.
@@ -565,6 +569,7 @@ int runPtyFrontend(const char *font,
     double nextSettingsStartedAt = 0;
     bool nextSettings = false; // Settings always runs on this client, never in
                                // its remote daemon.
+    bool nextServerStatus = false; // A local, disposable startup-log tab.
     bool failNextSettingsForTest =
         false; // Layout smoke: inject a factory failure.
     // A daemon terminal the next pane should show instead of making a new one
@@ -590,6 +595,7 @@ int runPtyFrontend(const char *font,
         // Consume before anything can throw: a failed Settings launch must
         // never redirect the next ordinary tab or split to local Settings.
         const bool settingsPane = std::exchange(nextSettings, false);
+        const bool statusPane = std::exchange(nextServerStatus, false);
         const double settingsStartedAt =
             std::exchange(nextSettingsStartedAt, 0.0);
         if (settingsPane && std::exchange(failNextSettingsForTest, false))
@@ -602,17 +608,17 @@ int runPtyFrontend(const char *font,
             };
         }
         std::vector<std::string> command =
-            settingsPane
-                ? std::vector<std::string>{"/proc/self/exe", "--settings"}
-                : arguments;
-        if (!settingsPane && !nextCwd.empty()) {
+            settingsPane ? std::vector<std::string>{"/proc/self/exe", "--settings"}
+            : statusPane ? std::vector<std::string>{"/bin/sleep", "86400"}
+                         : arguments;
+        if (!settingsPane && !statusPane && !nextCwd.empty()) {
             // cd, then become the usual command (the pane's process stays the shell, so /proc
             // and the close question see the shell). A folder that vanished was checked before.
             command = {"/bin/sh", "-c", "cd -- \"$1\" 2>/dev/null; shift; exec \"$@\"", "sh", nextCwd};
             command.insert(command.end(), arguments.begin(), arguments.end());
         }
         auto pane =
-            daemonOptions.enabled && !settingsPane
+            daemonOptions.enabled && !settingsPane && !statusPane
                 ? std::make_unique<NativePane>(daemonPath,
                                                nextAttachId,
                                                daemonCwd(),
@@ -622,6 +628,7 @@ int runPtyFrontend(const char *font,
                       command, term, hintColumns, hintRows, std::move(record));
         if (settingsPane)
             pane->settingsStartedAt = settingsStartedAt;
+        pane->startupStatusPane = statusPane;
         pane->v.glide() = CursorGlide([&] {
             CursorGlide::Config c;
             c.enabled = smoothCursor;
@@ -981,7 +988,7 @@ int runPtyFrontend(const char *font,
         // Closing a pane, tab or the window asks when a program other than the shell runs there.
         wv.setBusyProbe([&](PaneId id) -> std::optional<std::string> {
             NativePane *pane = workspace.pane(id);
-            if (!pane || pane->finished() || !confirmCloseBusy) {
+            if (!pane || pane->finished() || pane->startupStatusPane || !confirmCloseBusy) {
                 return std::nullopt;
             }
             if (smokeBusy) {
@@ -1469,7 +1476,57 @@ int runPtyFrontend(const char *font,
         }
         return extra;
     };
-    std::vector<pid_t> serverWindows;
+    struct StartingServer {
+        frontend::ServerWindow process;
+        PaneId pane = 0;
+        std::string incoming;
+        Uint64 readyAt = 0;
+        bool opened = false;
+        bool failed = false;
+        bool exited = false;
+    };
+    std::vector<StartingServer> serverWindows;
+    const auto serverStatus = [&](PaneId id, const std::string &text) {
+        if (NativePane *pane = workspace.pane(id)) {
+            std::string cleaned;
+            for (unsigned char c : text) {
+                if (c == '\n')
+                    cleaned += "\r\n";
+                else if (c >= 32 && c < 127)
+                    cleaned += char(c);
+                else if (c == '\t')
+                    cleaned += ' ';
+            }
+            pane->v.model().write(tty::decodeUtf8(cleaned));
+        }
+    };
+    const auto startServerWindow = [&](const std::string &host) {
+        nextServerStatus = true;
+        Outcome created;
+        try {
+            created = workspace.apply(Command::NewTab);
+        }
+        catch (...) {
+            nextServerStatus = false;
+            throw;
+        }
+        nextServerStatus = false;
+        if (created == Outcome::Ignored) {
+            notify("No room for a connection status tab");
+            return;
+        }
+        const PaneId pane = workspace.focusedPaneId();
+        workspace.setUserTitle(workspace.activeIndex(), "Connecting: " + host);
+        serverStatus(pane, "Opening a separate window for " + host + "...\n");
+        frontend::ServerWindow process;
+        std::string error;
+        if (!spawnServerWindow("/proc/self/exe", host, process, error)) {
+            serverStatus(pane, "Could not start: " + error + "\n");
+            notify(error);
+            return;
+        }
+        serverWindows.push_back({process, pane});
+    };
     const auto openPalette = [&] {
         wv.pushLayer(
             std::make_unique<ui::CommandPalette>(buildCommandRegistry(viewConfig.prefix, paletteExtra()), true));
@@ -1665,22 +1722,12 @@ int runPtyFrontend(const char *font,
                     notify("Cannot save server: " + error);
                 }
                 else {
-                    pid_t child = -1;
-                    if (spawnServerWindow(
-                            "/proc/self/exe", argument, child, error))
-                        serverWindows.push_back(child);
-                    else
-                        notify(error);
+                    startServerWindow(argument);
                 }
             }
         }
         else if (id == "server.connect.go") {
-            pid_t child = -1;
-            std::string error;
-            if (spawnServerWindow("/proc/self/exe", argument, child, error))
-                serverWindows.push_back(child);
-            else
-                notify(error);
+            startServerWindow(argument);
         }
         else if (id == "session.open" && colon == std::string::npos) {
             std::vector<ui::PickList::Item> items;
@@ -3112,13 +3159,88 @@ int runPtyFrontend(const char *font,
     const Uint64 loopStarted = SDL_GetTicks64();
     double previousGuiLoopAt = 0;
     while (running) {
-        serverWindows.erase(
-            std::remove_if(serverWindows.begin(),
-                           serverWindows.end(),
-                           [](pid_t pid) {
-                               return ::waitpid(pid, nullptr, WNOHANG) != 0;
-                           }),
-            serverWindows.end());
+        for (auto &server : serverWindows) {
+            if (server.process.statusFd >= 0) {
+                char bytes[1024];
+                ssize_t n;
+                while ((n = ::read(server.process.statusFd,
+                                   bytes,
+                                   sizeof(bytes))) > 0) {
+                    server.incoming.append(bytes, std::size_t(n));
+                    if (server.incoming.size() > 8192)
+                        server.incoming.clear();
+                    std::size_t end;
+                    while ((end = server.incoming.find('\n')) !=
+                           std::string::npos) {
+                        const std::string line = server.incoming.substr(0, end);
+                        server.incoming.erase(0, end + 1);
+                        if (line == "R") {
+                            serverStatus(server.pane,
+                                         "Window opened successfully. Closing "
+                                         "this tab shortly...\n");
+                            server.opened = true;
+                            server.readyAt = SDL_GetTicks64();
+                        }
+                        else if (line.size() > 2 && line[1] == ' ') {
+                            if (line[0] == 'P')
+                                serverStatus(server.pane,
+                                             line.substr(2) + "\n");
+                            if (line[0] == 'E') {
+                                serverStatus(server.pane,
+                                             "Connection failed: " +
+                                                 line.substr(2) + "\n");
+                                notify("Connection failed: " + line.substr(2));
+                                server.failed = true;
+                                server.readyAt = 0;
+                            }
+                        }
+                    }
+                }
+                if (n == 0 || (n < 0 && errno != EAGAIN && errno != EINTR)) {
+                    ::close(server.process.statusFd);
+                    server.process.statusFd = -1;
+                }
+            }
+            if (!server.exited) {
+                int status = 0;
+                const pid_t done =
+                    ::waitpid(server.process.pid, &status, WNOHANG);
+                if (done == server.process.pid ||
+                    (done < 0 && errno == ECHILD)) {
+                    server.exited = true;
+                    if (server.opened && server.readyAt &&
+                        (done < 0 || !WIFEXITED(status) ||
+                         WEXITSTATUS(status) != 0)) {
+                        server.readyAt = 0;
+                        server.failed = true;
+                        serverStatus(server.pane,
+                                     "The new window closed unexpectedly.\n");
+                        notify("The new server window closed unexpectedly");
+                    }
+                    else if (!server.opened && !server.failed &&
+                             server.process.statusFd < 0) {
+                        serverStatus(
+                            server.pane,
+                            "The new window exited before it opened.\n");
+                        notify("The new window exited before it opened");
+                        server.failed = true;
+                    }
+                }
+            }
+            if (server.readyAt && SDL_GetTicks64() - server.readyAt >= 1500) {
+                if (workspace.pane(server.pane))
+                    workspace.closePaneAnywhere(server.pane);
+                server.pane = 0;
+                server.readyAt = 0;
+            }
+        }
+        serverWindows.erase(std::remove_if(serverWindows.begin(),
+                                           serverWindows.end(),
+                                           [](const StartingServer &s) {
+                                               return s.exited &&
+                                                      s.process.statusFd < 0;
+                                           }),
+                            serverWindows.end());
         if (perfLog.enabled()) {
             const double loopAt = perfClockMs();
             perfLog.tick();
@@ -4060,6 +4182,11 @@ int runPtyFrontend(const char *font,
                     backend.drawRect({edge.x, edge.y, edge.w, edge.h}, splitEdgeColor(stripPalette));
             }
             backend.present();
+            if (daemonOptions.serverReadyFd >= 0) {
+                frontend::sendServerStatus(daemonOptions.serverReadyFd, 'R');
+                ::close(daemonOptions.serverReadyFd);
+                daemonOptions.serverReadyFd = -1;
+            }
             if (perfLog.enabled()) {
                 for (const auto &d : drawn) {
                     if (auto *pane = workspace.pane(d.plan->id);
