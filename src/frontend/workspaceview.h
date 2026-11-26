@@ -235,17 +235,9 @@ public:
                 for (const auto &d : layout.dividers) {
                     if (d.direction != SplitDirection::SideBySide || d.rect.x != box.rect.x + box.rect.w) continue;
                     const int top = std::max(d.rect.y, box.rect.y);
-                    const int bottom =
-                        std::min(d.rect.y + d.rect.h, box.rect.y + box.rect.h);
-                    if (bottom <= top)
-                        continue;
+                    const int bottom = std::min(d.rect.y + d.rect.h, box.rect.y + box.rect.h);
+                    if (bottom <= top) continue;
                     p.scrollbar = {d.rect.x, top, d.rect.w / 2, bottom - top};
-                    // Wrap markers belong to this pane, not the divider.
-                    // Reserve their half-strip outside the terminal cells.
-                    p.columns =
-                        std::max(1,
-                                 (box.rect.w - config_.scrollbarStrip / 2) /
-                                     metrics_.cellWidth);
                     break;
                 }
             }
