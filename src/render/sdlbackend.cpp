@@ -133,8 +133,8 @@ SdlBackend::SdlBackend(SDL_Window &window,
 SdlBackend::~SdlBackend() = default;
 
 // One filled triangle per row that continues on the next
-// (docs/tasks/wrap-marker.md). In the strip at the pane's own right edge, or,
-// for a pane with its scrollbar in a divider, in the far half of that divider.
+// (docs/tasks/wrap-marker.md). Always inside the pane's own reserved right
+// edge, even when its scrollbar is in an external divider.
 template <class Impl>
 void drawWrapMarks(const Impl &s,
                    const RenderFrame &frame,
@@ -148,25 +148,19 @@ void drawWrapMarks(const Impl &s,
         return;
     }
     const auto &style = wrapmark::kStyle;
-    // The region (window coordinates when `external`, else relative to the
-    // pane's viewport) and its clip.
+    // Mark coordinates remain relative to the pane's viewport.
     float regionX = 0;
     int regionWidth = 0;
-    float originY = 0;
     SDL_Rect clip{0, 0, width, height};
     if (external) {
-        const auto &track = *s.externalTrack;
-        // The far half of the divider: as wide as the near half, which holds
-        // the scrollbar.
-        regionX = float(track.x + track.w + 1);
-        regionWidth = track.w - 1;
-        if (s.viewport) {
-            originY = float(
-                s.viewport
-                    ->y); // Rows are relative to the pane, the divider is not.
-        }
-        clip = SDL_Rect{track.x + track.w, track.y, track.w, track.h};
-        check(SDL_RenderSetViewport(s.renderer.get(), nullptr));
+        const int cellsRight = int(frame.cells.columns()) * s.cellWidth;
+        const int stripWidth = std::min(scrollbarWidth / 2, width - cellsRight);
+        if (stripWidth <= 0)
+            return; // Never draw over a terminal cell.
+        regionX = float(width - stripWidth);
+        regionWidth = stripWidth;
+        check(SDL_RenderSetViewport(s.renderer.get(),
+                                    s.viewport ? &*s.viewport : nullptr));
     }
     else {
         const bool strip = frame.scrollbar.visible || s.reserveStrip;
@@ -189,7 +183,7 @@ void drawWrapMarks(const Impl &s,
             continue;
         }
         if (const auto t = wrapmark::triangleFor(
-                regionX, originY + top, s.cellHeight, regionWidth, style)) {
+                regionX, top, s.cellHeight, regionWidth, style)) {
             for (const auto &p : {t->a, t->b, t->c}) {
                 vertices.push_back(SDL_Vertex{{p.x, p.y}, color, {0, 0}});
             }

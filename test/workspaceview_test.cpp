@@ -178,7 +178,7 @@ TEST_CASE("A split gives the left pane a scrollbar in the gutter and keeps ratio
     EXPECT_EQ(left.scrollbar.y, left.rect.y);
     EXPECT_EQ(left.scrollbar.h, left.rect.h);
     EXPECT_EQ(right.scrollbar.w, 0);
-    EXPECT_EQ(left.columns, left.rect.w / 8); // no strip taken from it
+    EXPECT_EQ(left.columns, (left.rect.w - 6) / 8); // marker strip stays inside the pane
     EXPECT_EQ(right.columns, (right.rect.w - 12) / 8);
     EXPECT(right.focused); // the new pane has the focus
     // The program sizes follow.

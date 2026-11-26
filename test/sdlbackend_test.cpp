@@ -99,7 +99,7 @@ TEST_CASE("Themed split junctions survive pane rendering while external "
         EXPECT(fixture.pixel(120, 70) == packed(splitEdgeColor(palette)));
         EXPECT(fixture.pixel(102, 10) ==
                Uint32(0x6e7a8e)); // Existing thumb not painted over.
-        EXPECT(fixture.pixel(107, fixture.backend->cellHeight() / 2) ==
+        EXPECT(fixture.pixel(94, fixture.backend->cellHeight() / 2) ==
                Uint32(0x6e7a8e)); // Wrap marker remains visible too.
         fixture.backend->present();
     }
@@ -148,10 +148,15 @@ TEST_CASE("Split decoration must not replace terminal right-strip background "
                                       DividerBox>{{{100, 20, 12, height - 20},
                                                    SplitDirection::SideBySide}}
                                 : std::vector<DividerBox>{};
+                        CellBuffer leftCells(
+                            std::size_t(94 / fixture.backend->cellWidth()), 4);
+                        leftCells.clear(FChar{U' ', {}, {60, 90, 120}});
+                        RenderFrame leftFrame = frame;
+                        leftFrame.cells = leftCells.view();
                         const auto renderPanes = [&] {
                             if (gutters)
                                 fixture.backend->render(
-                                    frame,
+                                    leftFrame,
                                     {{ox, 20, 100, height - 20},
                                      {ox + 100, 20, 6, height - 20}});
                             fixture.backend->render(
@@ -237,7 +242,7 @@ TEST_CASE("Split decoration must not replace terminal right-strip background "
                         if (gutters) {
                             EXPECT_EQ(
                                 fixture.pixel(
-                                    ox + 107,
+                                    ox + 94,
                                     20 + fixture.backend->cellHeight() / 2),
                                 Uint32(0x6e7a8e));
                             if (frame.scrollbar.visible)
@@ -465,14 +470,14 @@ TEST_CASE("Marks and the scrollbar share the strip: the thumb moves right, the "
     EXPECT_EQ(fixture.pixel(strip + 7, 2 * h), Uint32(0x6e7a8e));
 }
 
-TEST_CASE("A pane beside a divider: the scrollbar in the near half, the mark "
-          "in the far half") {
+TEST_CASE(
+    "A pane beside a divider keeps wrap marks inside its own reserved edge") {
     Fixture fixture; // 320x160
     const int w = fixture.backend->cellWidth();
     const int h = fixture.backend->cellHeight();
     const Uint32 gap = 0x0a141e;
     fixture.backend->beginFrame({10, 20, 30});
-    const int paneWidth = (96 / w) * w;
+    const int paneWidth = (96 / w) * w + 6;
     CellBuffer cells(std::size_t(96 / w), 3);
     cells.clear(FChar{U' ', {}, {200, 30, 40}});
     RenderFrame frame{cells.view(), {}};
@@ -486,19 +491,28 @@ TEST_CASE("A pane beside a divider: the scrollbar in the near half, the mark "
         PaneArea{{x, y, paneWidth, 3 * h}, {x + paneWidth, y, 6, 3 * h}});
     // Near half: the scrollbar as before, no mark there.
     EXPECT_EQ(fixture.pixel(x + paneWidth, y + h / 2), gap);
-    // Far half: the mark on the wrapped row's middle, nothing on the next row,
-    // the gap elsewhere.
-    EXPECT_EQ(fixture.pixel(x + paneWidth + 6 + 1, y + h / 2),
-              Uint32(0x6e7a8e));
+    // The mark belongs to the pane, not either half of the divider.
+    EXPECT_EQ(fixture.pixel(x + paneWidth - 6, y + h / 2), Uint32(0x6e7a8e));
+    EXPECT_EQ(fixture.pixel(x + paneWidth - 7, y + h / 2), Uint32(0xc81e28));
+    EXPECT_EQ(fixture.pixel(x + paneWidth + 6 + 1, y + h / 2), gap);
     EXPECT_EQ(fixture.pixel(x + paneWidth + 6 + 1, y + h + h / 2), gap);
     // Nothing leaks past the divider.
     EXPECT_EQ(fixture.pixel(x + paneWidth + 12 + 2, y + h / 2), gap);
-    // A scrollbar half too narrow for the mark: not drawn.
+    // Divider width does not affect the pane's mark.
     fixture.backend->beginFrame({10, 20, 30});
     fixture.backend->render(
         frame,
         PaneArea{{x, y, paneWidth, 3 * h}, {x + paneWidth, y, 4, 3 * h}});
     EXPECT_EQ(fixture.pixel(x + paneWidth + 4 + 1, y + h / 2), gap);
+    EXPECT_EQ(fixture.pixel(x + paneWidth - 6, y + h / 2), Uint32(0x6e7a8e));
+    // A caller without the reserved edge must not paint over a terminal cell
+    // or fall back to the divider.
+    fixture.backend->beginFrame({10, 20, 30});
+    fixture.backend->render(frame,
+                            PaneArea{{x, y, paneWidth - 6, 3 * h},
+                                     {x + paneWidth - 6, y, 6, 3 * h}});
+    EXPECT_EQ(fixture.pixel(x + paneWidth - 7, y + h / 2), Uint32(0xc81e28));
+    EXPECT_EQ(fixture.pixel(x + paneWidth + 1, y + h / 2), gap);
 }
 
 TEST_CASE("Without a reserved strip there is no room, so no mark") {
