@@ -57,7 +57,8 @@ public:
 
     Result key(const KeyChord &chord,
                TerminalModel &model,
-               std::optional<Selection> &selection) {
+               std::optional<Selection> &selection,
+               bool joinFullTuiRows = true) {
         Result result;
         clamp(model);
         message_.clear();
@@ -129,7 +130,7 @@ public:
             return leave(selection);
         }
         else if (plain && (k == keys::Enter || chord.key == 'y')) {
-            return copy(model, selection);
+            return copy(model, selection, joinFullTuiRows);
         }
         else if (plain && (k == keys::Left || chord.key == 'h')) {
             if (column_ > 0) {
@@ -651,7 +652,8 @@ private:
         return r;
     }
     Result copy(const TerminalModel &model,
-                std::optional<Selection> &selection) {
+                std::optional<Selection> &selection,
+                bool joinFullTuiRows) {
         Result r;
         r.changed = true;
         if (rect_ && selecting_) {
@@ -662,7 +664,8 @@ private:
             source =
                 Selection::at(model, cursor(), 3); // The line under the cursor.
         }
-        const auto text = source->text(model);
+        const auto text =
+            source->text(model, Selection::copyLimit, joinFullTuiRows);
         selection.reset();
         selecting_ = false;
         if (!text) {

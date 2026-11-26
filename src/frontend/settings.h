@@ -97,6 +97,14 @@ inline const std::vector<Definition> &definitions() {
          Type::Bool,
          {},
          "true"},
+        {"copyJoinFullTuiRows",
+         "Join full TUI rows when copying",
+         "When copying from a full-screen program, join adjacent lines if "
+         "text reaches the right edge; turn off if those breaks are "
+         "intentional.",
+         Type::Bool,
+         {},
+         "true"},
         {"drawBatching",
          "Draw batching",
          "Limit redraws during heavy output to ten per second. Turn off to "

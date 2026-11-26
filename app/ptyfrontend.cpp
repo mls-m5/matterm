@@ -792,6 +792,7 @@ int runPtyFrontend(const char *font,
     bool running = true;
     bool rejectedInput = false;
     std::string clipboardError;
+    bool copyJoinFullTuiRows = true; // settings.json "copyJoinFullTuiRows"
     std::string linkError;
     std::optional<PtyProcess::ExitStatus> lastExit;
     PaneId selectingPane = 0;
@@ -854,7 +855,7 @@ int runPtyFrontend(const char *font,
     const auto copyFrom = [&](NativePane &pane) {
         auto &model = pane.v.model();
         if (pane.v.selection && pane.v.selection->valid(model)) {
-            const auto text = pane.v.selection->text(model);
+            const auto text = pane.v.selection->text(model, Selection::copyLimit, copyJoinFullTuiRows);
             if (!text) {
                 clipboardError = "copy failed: selection exceeds 1 MiB";
             }
@@ -873,7 +874,7 @@ int runPtyFrontend(const char *font,
         }
     };
     const auto copyKey = [&](NativePane &pane, const KeyChord &chord) {
-        const auto r = pane.v.copyMode->key(chord, pane.v.model(), pane.v.selection);
+        const auto r = pane.v.copyMode->key(chord, pane.v.model(), pane.v.selection, copyJoinFullTuiRows);
         if (r.action == CopyMode::Action::Copy) {
             clipboardError = SDL_SetClipboardText(r.text.c_str()) == 0 ? "" : "clipboard copy failed";
         }
@@ -1035,6 +1036,7 @@ int runPtyFrontend(const char *font,
         wv.setTabActivity(mode);
         gScrollbackRows = std::size_t(current.integer("scrollbackRows"));
         confirmCloseBusy = current.flag("confirmClose");
+        copyJoinFullTuiRows = current.flag("copyJoinFullTuiRows");
     };
     const auto reportSettings = [&](settings::SettingsWatcher::Event event,
                                     bool explicitReload) {

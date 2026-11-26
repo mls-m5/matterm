@@ -65,8 +65,14 @@ Type to search; Tab switches sections/controls, arrows select, and Enter edits o
 applies. Changes are saved immediately and the window follows within about one
 second. Esc cancels the current edit, not earlier saves; Ctrl+Q exits. Themes,
 per-computer overrides, computer-name placement (center/left/right), tab activity,
-window frame, scrollback and close confirmation are available. Frame/scrollback
-changes apply to new windows/terminals.
+window frame, scrollback, copy behaviour and close confirmation are available.
+Frame/scrollback changes apply to new windows/terminals. By default,
+`copyJoinFullTuiRows` is `true`: when copying from a full-screen TUI, trailing
+spaces are removed and a line reaching the right edge (including up to two
+trailing spaces) is joined with the next nonblank line. Set it to `false` in
+Settings to keep those line breaks; rectangular copies always keep their rows.
+The terminal cannot always distinguish a TUI's artificial break from a
+purposeful newline at the right edge.
 
 The file is `$XDG_CONFIG_HOME/matterm/settings.json` (otherwise
 `~/.config/matterm/settings.json`): strict JSON, always formatted with defaults

@@ -26,6 +26,15 @@ TEST_CASE("The definitions: unique keys, a default that is allowed, a text for "
            keys.count("computerNamePlacement"));
 }
 
+TEST_CASE("Joining full TUI lines is configurable and on by default") {
+    Settings settings;
+    EXPECT(settings.flag("copyJoinFullTuiRows"));
+    std::string error;
+    EXPECT(settings.set("copyJoinFullTuiRows", "false", error));
+    const auto loaded = Settings::fromText(settings.toText());
+    EXPECT(loaded.ok() && !loaded.settings.flag("copyJoinFullTuiRows"));
+}
+
 TEST_CASE("Draw batching is a default-on client bool and persists off") {
     auto settings = frontend::settings::Settings{};
     EXPECT(settings.flag("drawBatching"));
@@ -130,6 +139,7 @@ TEST_CASE(
                                  "  \"scrollbackRows\": 1000,\n"
                                  "  \"computerNamePlacement\": \"center\",\n"
                                  "  \"confirmClose\": true,\n"
+                                 "  \"copyJoinFullTuiRows\": true,\n"
                                  "  \"drawBatching\": true,\n"
                                  "  \"terminalListPreview\": true\n"
                                  "}\n";

@@ -189,6 +189,19 @@ TEST_CASE("TUI copy trims trailing spaces on every logical line") {
     TerminalModel shell(10, 1);
     shell.write(U"one  ");
     EXPECT_EQ(text(Selection::all(shell), shell), "one       ");
+
+    TerminalModel full(12, 4);
+    full.setAlternateScreen(true);
+    full.write(U"1234567890  \r\nnext\r\nshort\r\nlast");
+    const auto all = Selection::all(full);
+    EXPECT_EQ(text(all, full), "1234567890next\nshort\nlast");
+    EXPECT_EQ(all.text(full, Selection::copyLimit, false).value_or("error"),
+              "1234567890\nnext\nshort\nlast");
+
+    TerminalModel mainScreen(12, 2);
+    mainScreen.write(U"1234567890  \r\nnext");
+    EXPECT_EQ(text(Selection::all(mainScreen), mainScreen),
+              "1234567890\nnext        ");
 }
 
 TEST_CASE(

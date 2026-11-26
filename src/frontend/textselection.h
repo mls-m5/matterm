@@ -90,7 +90,8 @@ struct Selection {
     }
 
     std::optional<std::string> text(const TerminalModel &model,
-                                    std::size_t limit = copyLimit) const {
+                                    std::size_t limit = copyLimit,
+                                    bool joinFullTuiRows = true) const {
         if (!valid(model)) {
             return std::nullopt;
         }
@@ -99,24 +100,60 @@ struct Selection {
             return copied;
         }
         // Full-screen TUIs often paint blank cells up to the edge. Strip
-        // those cells on each logical line, including the final selection
-        // row; do not alter internal spaces or join/split soft-wrapped rows.
+        // their padding on each logical line; when a line reaches the edge,
+        // join its artificial break.
         std::string trimmed;
         trimmed.reserve(copied->size());
         std::size_t begin = 0;
+        auto row = std::min(anchor.row, end.row);
         while (begin < copied->size()) {
             const auto newline = copied->find('\n', begin);
             const auto lineEnd =
                 newline == std::string::npos ? copied->size() : newline;
-            auto last = lineEnd;
-            while (last > begin && (*copied)[last - 1] == ' ') {
-                --last;
-            }
-            trimmed.append(*copied, begin, last - begin);
             if (newline == std::string::npos) {
+                auto last = lineEnd;
+                if (model.alternateScreen()) {
+                    while (last > begin && (*copied)[last - 1] == ' ') {
+                        --last;
+                    }
+                }
+                trimmed.append(*copied, begin, last - begin);
                 break;
             }
-            trimmed.push_back('\n');
+            // copyText already joins genuine terminal soft wraps. A TUI can
+            // also move its cursor instead of letting the terminal wrap.
+            while (model.textRowWrapped(row)) {
+                ++row;
+            }
+            bool join = false;
+            const auto nextText = copied->find_first_not_of(' ', newline + 1);
+            if (joinFullTuiRows && nextText != std::string::npos &&
+                (*copied)[nextText] != '\n') {
+                const auto columns = model.columns();
+                // One or two blank edge cells can be the TUI's padding; a
+                // short line is not enough evidence to discard its newline.
+                for (std::size_t offset = 0;
+                     offset < std::min(columns, std::size_t(3));
+                     ++offset) {
+                    const auto cp =
+                        model.textCodePoint({row, columns - offset - 1});
+                    if (cp && *cp != U' ') {
+                        join = true;
+                        break;
+                    }
+                }
+            }
+            auto last = lineEnd;
+            if (model.alternateScreen() || join) {
+                while (last > begin && (*copied)[last - 1] == ' ') {
+                    --last;
+                }
+            }
+            trimmed.append(*copied, begin, last - begin);
+            if (!join) {
+                trimmed.push_back('\n');
+            }
+            ++row;
             begin = newline + 1;
         }
         return trimmed;
