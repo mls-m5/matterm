@@ -134,7 +134,7 @@ SdlBackend::~SdlBackend() = default;
 
 // One filled triangle per row that continues on the next
 // (docs/tasks/wrap-marker.md). In the strip at the pane's own right edge, or,
-// for a pane with its scrollbar in a divider, in the far half of that divider.
+// for a pane with its scrollbar in a divider, at the divider's left edge.
 template <class Impl>
 void drawWrapMarks(const Impl &s,
                    const RenderFrame &frame,
@@ -156,16 +156,16 @@ void drawWrapMarks(const Impl &s,
     SDL_Rect clip{0, 0, width, height};
     if (external) {
         const auto &track = *s.externalTrack;
-        // The far half of the divider: as wide as the near half, which holds
-        // the scrollbar.
-        regionX = float(track.x + track.w + 1);
+        // Stay in the near (left) half, beside this pane, rather than the
+        // far half. No space is taken from the terminal's text area.
+        regionX = float(track.x + 1);
         regionWidth = track.w - 1;
         if (s.viewport) {
             originY = float(
                 s.viewport
                     ->y); // Rows are relative to the pane, the divider is not.
         }
-        clip = SDL_Rect{track.x + track.w, track.y, track.w, track.h};
+        clip = SDL_Rect{track.x, track.y, track.w, track.h};
         check(SDL_RenderSetViewport(s.renderer.get(), nullptr));
     }
     else {

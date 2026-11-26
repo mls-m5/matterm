@@ -99,7 +99,7 @@ TEST_CASE("Themed split junctions survive pane rendering while external "
         EXPECT(fixture.pixel(120, 70) == packed(splitEdgeColor(palette)));
         EXPECT(fixture.pixel(102, 10) ==
                Uint32(0x6e7a8e)); // Existing thumb not painted over.
-        EXPECT(fixture.pixel(107, fixture.backend->cellHeight() / 2) ==
+        EXPECT(fixture.pixel(101, fixture.backend->cellHeight() / 2) ==
                Uint32(0x6e7a8e)); // Wrap marker remains visible too.
         fixture.backend->present();
     }
@@ -237,7 +237,7 @@ TEST_CASE("Split decoration must not replace terminal right-strip background "
                         if (gutters) {
                             EXPECT_EQ(
                                 fixture.pixel(
-                                    ox + 107,
+                                    ox + 101,
                                     20 + fixture.backend->cellHeight() / 2),
                                 Uint32(0x6e7a8e));
                             if (frame.scrollbar.visible)
@@ -465,8 +465,8 @@ TEST_CASE("Marks and the scrollbar share the strip: the thumb moves right, the "
     EXPECT_EQ(fixture.pixel(strip + 7, 2 * h), Uint32(0x6e7a8e));
 }
 
-TEST_CASE("A pane beside a divider: the scrollbar in the near half, the mark "
-          "in the far half") {
+TEST_CASE("A pane beside a divider keeps wrap marks in the left half without "
+          "shrinking text") {
     Fixture fixture; // 320x160
     const int w = fixture.backend->cellWidth();
     const int h = fixture.backend->cellHeight();
@@ -484,12 +484,14 @@ TEST_CASE("A pane beside a divider: the scrollbar in the near half, the mark "
     fixture.backend->render(
         frame,
         PaneArea{{x, y, paneWidth, 3 * h}, {x + paneWidth, y, 6, 3 * h}});
-    // Near half: the scrollbar as before, no mark there.
+    // Keep the divider border and the last terminal cell intact.
     EXPECT_EQ(fixture.pixel(x + paneWidth, y + h / 2), gap);
-    // Far half: the mark on the wrapped row's middle, nothing on the next row,
-    // the gap elsewhere.
-    EXPECT_EQ(fixture.pixel(x + paneWidth + 6 + 1, y + h / 2),
-              Uint32(0x6e7a8e));
+    EXPECT_EQ(fixture.pixel(x + paneWidth - 1, y + h / 2), Uint32(0xc81e28));
+    // Wrapped row: the mark starts at the divider's left edge. The far half
+    // stays clear, and no extra strip was reserved inside the pane.
+    EXPECT_EQ(fixture.pixel(x + paneWidth + 1, y + h / 2), Uint32(0x6e7a8e));
+    EXPECT_EQ(fixture.pixel(x + paneWidth + 1, y + 2 * h + h / 2), gap);
+    EXPECT_EQ(fixture.pixel(x + paneWidth + 6 + 1, y + h / 2), gap);
     EXPECT_EQ(fixture.pixel(x + paneWidth + 6 + 1, y + h + h / 2), gap);
     // Nothing leaks past the divider.
     EXPECT_EQ(fixture.pixel(x + paneWidth + 12 + 2, y + h / 2), gap);
