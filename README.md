@@ -93,6 +93,16 @@ colour overrides, e.g. `"servers": ["user@host", "lab-alias"]`.
 Configure SSH keys/host aliases in `~/.ssh/config`; passwords are not stored
 here, and the remote connection uses non-interactive SSH.
 
+Named tabs whose panes all use a daemon are also checkpointed locally about
+once a second (only changed layouts are written). After a window crash or a
+SIGHUP/SIGTERM shutdown, **Attach tab...** offers **Recover named tab** entries
+for that same daemon/SSH host. Recovery reuses existing terminal IDs; missing
+terminals or terminals attached elsewhere cause refusal, not new shells or an
+automatic takeover. Live windows' checkpoints are hidden. Explicit normal
+Close/End retires these checkpoints; use Detach to keep terminals deliberately.
+Local `--no-daemon` programs cannot survive a window crash. Layouts, tab names,
+and IDs are saved, not screen contents or typed input.
+
 The file is `$XDG_CONFIG_HOME/matterm/settings.json` (otherwise
 `~/.config/matterm/settings.json`): strict JSON, always formatted with defaults
 included. Unknown members are retained. External changes are re-read before

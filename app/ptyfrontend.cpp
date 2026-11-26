@@ -25,6 +25,7 @@
 #include "sessioncommands.h"
 #include "sessionfiles.h"
 #include "sessionrestore.h"
+#include "recoverylayouts.h"
 #include "serverwindow.h"
 #include "settingswatch.h"
 #include "splitdecoration.h"
@@ -570,6 +571,7 @@ int runPtyFrontend(const char *font,
     bool nextSettings = false; // Settings always runs on this client, never in
                                // its remote daemon.
     bool nextServerStatus = false; // A local, disposable startup-log tab.
+    bool recoveryAttachOnly = false;
     bool failNextSettingsForTest =
         false; // Layout smoke: inject a factory failure.
     // A daemon terminal the next pane should show instead of making a new one
@@ -617,6 +619,8 @@ int runPtyFrontend(const char *font,
             command = {"/bin/sh", "-c", "cd -- \"$1\" 2>/dev/null; shift; exec \"$@\"", "sh", nextCwd};
             command.insert(command.end(), arguments.begin(), arguments.end());
         }
+        if (recoveryAttachOnly && nextAttachId.empty())
+            throw std::runtime_error("Recovery terminal is unavailable; no shell started");
         auto pane =
             daemonOptions.enabled && !settingsPane && !statusPane
                 ? std::make_unique<NativePane>(daemonPath,
@@ -944,6 +948,10 @@ int runPtyFrontend(const char *font,
     LinuxProcSource procSource;
     const SessionFiles sessionFiles(SessionFiles::defaultDirectory());
     const SessionFiles layoutFiles(SessionFiles::defaultLayoutDirectory()); // Detached tabs.
+    frontend::RecoveryLayouts recovery(layoutFiles.directory(),
+        remoteDaemon ? "ssh:" + daemonOptions.host : "local:" + daemonPath);
+    Uint64 recoveryPollAt = 0;
+    bool recoveryWriteFailed = false;
     SessionPolicy sessionPolicy;
     bool smokeBusy = false; // --pty-tabs-smoke-test: pretend every pane runs a program
     const auto paneState = [&](NativePane &pane) {
@@ -1456,6 +1464,8 @@ int runPtyFrontend(const char *font,
                 }
             }
             attach.layouts = layoutFiles.list().size();
+            for (const auto &info : recovery.files().list())
+                if (recovery.available(info.name)) ++attach.layouts;
             if (const auto *tab = workspace.activeTab()) {
                 for (const PaneId paneId : tab->tree.ids()) {
                     const NativePane *p = workspace.pane(paneId);
@@ -2027,24 +2037,53 @@ int runPtyFrontend(const char *font,
         }
         else if (id == daemonaction::attachLayout && colon == std::string::npos) {
             std::vector<ui::PickList::Item> items;
-            for (const auto &info : layoutFiles.list()) {
-                items.push_back({info.name,
-                                 std::to_string(info.panes) + (info.panes == 1 ? " terminal" : " terminals"),
-                                 std::string(daemonaction::attachLayout) + ":" + info.name});
+            for (const auto &info : recovery.files().list()) {
+                if (!recovery.available(info.name))
+                    continue;
+                const auto saved = recovery.files().load(info.name);
+                if (saved && !saved->tabs.empty())
+                    items.push_back({saved->tabs[0].title,
+                                     "Recover named tab",
+                                     std::string(daemonaction::attachLayout) +
+                                         ":recovery/" + info.name});
             }
-            wv.pushLayer(std::make_unique<ui::PickList>("Attach tab", std::move(items), "No detached tabs"));
+            for (const auto &info : layoutFiles.list()) {
+                items.push_back(
+                    {info.name,
+                     std::to_string(info.panes) +
+                         (info.panes == 1 ? " terminal" : " terminals"),
+                     std::string(daemonaction::attachLayout) + ":" +
+                         info.name});
+            }
+            wv.pushLayer(std::make_unique<ui::PickList>(
+                "Attach tab", std::move(items), "No detached tabs"));
         }
-        else if (id == daemonaction::attachLayout || id == daemonaction::attachLayoutGo) {
-            const bool force = id == daemonaction::attachLayoutGo && argument.size() > 6 &&
-                               argument.compare(argument.size() - 6, 6, ":force") == 0;
-            const std::string layoutName = force ? argument.substr(0, argument.size() - 6) : argument;
-            const auto snapshot = SessionSnapshot::validName(layoutName) ? layoutFiles.load(layoutName) : std::nullopt;
+        else if (id == daemonaction::attachLayout ||
+                 id == daemonaction::attachLayoutGo) {
+            const bool force =
+                id == daemonaction::attachLayoutGo && argument.size() > 6 &&
+                argument.compare(argument.size() - 6, 6, ":force") == 0;
+            const std::string layoutName =
+                force ? argument.substr(0, argument.size() - 6) : argument;
+            const bool recovering = layoutName.compare(0, 9, "recovery/") == 0;
+            const std::string storedName =
+                recovering ? layoutName.substr(9) : layoutName;
+            const SessionFiles &source =
+                recovering ? recovery.files() : layoutFiles;
+            const auto snapshot =
+                SessionSnapshot::validName(storedName) &&
+                        (!recovering || recovery.available(storedName))
+                    ? source.load(storedName)
+                    : std::nullopt;
             if (!snapshot || snapshot->tabs.empty()) {
                 notify("layout '" + layoutName + "' cannot be read");
             }
             else {
                 const auto plan = planLayoutAttach(snapshot->tabs[0], daemonSessions(false));
-                if (plan.takeOver > 0 && !force) {
+                if (recovering && (plan.takeOver > 0 || plan.fresh > 0)) {
+                    notify("Recovery refused: terminals are missing or attached elsewhere; no new shells started");
+                }
+                else if (plan.takeOver > 0 && !force) {
                     wv.pushLayer(takeOverLayoutDialog(layoutName, plan.takeOver));
                 }
                 else {
@@ -2054,14 +2093,33 @@ int runPtyFrontend(const char *font,
                     for (const auto &u : plan.use) {
                         if (!u.empty()) usable.insert(u);
                     }
-                    const auto report = restoreSession(workspace, *snapshot, [&](const SavedPane &saved) {
-                        nextAttachId.clear();
-                        if (!saved.terminal.empty() && usable.erase(saved.terminal) != 0) {
-                            nextAttachId = saved.terminal; // Once: a terminal named twice is shown once.
+                    struct RecoveryGuard {
+                        bool &flag;
+                        std::string &attach, &cwd;
+                        ~RecoveryGuard() {
+                            flag = false;
+                            attach.clear();
+                            cwd.clear();
                         }
-                        std::error_code ec;
-                        nextCwd = cwdToRequest(saved.cwd, remoteDaemon, !saved.cwd.empty() && std::filesystem::is_directory(saved.cwd, ec));
-                    });
+                    } recoveryGuard{recoveryAttachOnly, nextAttachId, nextCwd};
+                    recoveryAttachOnly = recovering;
+                    const auto report = restoreSession(
+                        workspace, *snapshot, [&](const SavedPane &saved) {
+                            nextAttachId.clear();
+                            if (!saved.terminal.empty() &&
+                                usable.erase(saved.terminal) != 0) {
+                                nextAttachId =
+                                    saved.terminal; // Once: a terminal named
+                                                    // twice is shown once.
+                            }
+                            std::error_code ec;
+                            nextCwd =
+                                cwdToRequest(saved.cwd,
+                                             remoteDaemon,
+                                             !saved.cwd.empty() &&
+                                                 std::filesystem::is_directory(
+                                                     saved.cwd, ec));
+                        });
                     nextAttachId.clear();
                     nextCwd.clear();
                     for (const auto &restored : report.panes) {
@@ -2078,7 +2136,8 @@ int runPtyFrontend(const char *font,
                         notify("no room for the layout");
                     }
                     else {
-                        layoutFiles.remove(layoutName); // It is attached now, no longer detached.
+                        if (!recovering || report.refused == 0)
+                            source.remove(storedName); // Keep incomplete recoveries for another attempt.
                         const bool closed = closeEmptyShell(empty);
                         notify("layout '" + layoutName + "' attached" + (closed ? "; empty shell closed" : ""));
                     }
@@ -2310,12 +2369,48 @@ int runPtyFrontend(const char *font,
         // window that must offer the layout; otherwise both in one window.
         const char *variantText = std::getenv("MATTERM_LAYOUT_SMOKE");
         const std::string variant = variantText ? variantText : "";
+        if (variant == "recovery-create" || variant == "recovery-check") {
+            if (!connected(workspace.focusedPane()))
+                return;
+            if (variant == "recovery-create") {
+                if (scriptStep == 0) {
+                    workspace.setUserTitle(workspace.activeIndex(),
+                                           "crash-work");
+                    workspace.apply(Command::SplitSideBySide);
+                    ++scriptStep;
+                }
+                return; // Parent test SIGKILLs only this window after the
+                        // checkpoint.
+            }
+            const auto checkpoints = recovery.files().list();
+            expectThat(checkpoints.size() == 1,
+                       "one named tab checkpoint survived");
+            const auto saved = recovery.files().load(checkpoints.front().name);
+            expectThat(saved && recovery.available(checkpoints.front().name),
+                       "dead window recovery is available");
+            const auto plan =
+                planLayoutAttach(saved->tabs[0], daemonSessions(false));
+            expectThat(plan.reused == 2 && plan.fresh == 0 &&
+                           plan.takeOver == 0,
+                       "both original daemon terminals survived SIGKILL");
+            handleAction(std::string(daemonaction::attachLayout) +
+                         ":recovery/" + checkpoints.front().name);
+            expectThat(workspace.userTitle(workspace.activeIndex()) ==
+                           "crash-work",
+                       "recovered tab name");
+            expectThat(activeTabPanes().size() == 2, "recovered split layout");
+            scriptDone = true;
+            keepTerminals = true;
+            running = false;
+            return;
+        }
         switch (scriptStep++) {
         case 0:
             later(2000); // The tunnel, the daemon and the first terminal.
             break;
         case 1:
-            expectThat(connected(workspace.focusedPane()), "the first terminal is attached to the daemon");
+            expectThat(connected(workspace.focusedPane()),
+                       "the first terminal is attached to the daemon");
             if (variant.compare(0, 11, "attachhere-") == 0) {
                 workspace.apply(Command::SplitSideBySide);
                 scriptStep = 160;
@@ -3310,6 +3405,36 @@ int runPtyFrontend(const char *font,
             });
         }
         ++iterations;
+        if (daemonOptions.enabled &&
+            SDL_GetTicks64() - recoveryPollAt >= 1000) {
+            recoveryPollAt = SDL_GetTicks64();
+            auto captured = captureSession(
+                workspace, "checkpoint", 0, [](PaneId, const NativePane &pane) {
+                    SavedPane saved;
+                    if (pane.daemon && !pane.v.ended())
+                        saved.terminal = pane.daemon->sessionId();
+                    return saved;
+                });
+            if (captured) {
+                std::set<std::string> current;
+                for (std::size_t i = 0; i < captured->tabs.size(); ++i) {
+                    auto &tab = captured->tabs[i];
+                    if (tab.title.empty() ||
+                        !frontend::recoverableNode(*tab.root))
+                        continue;
+                    std::string error;
+                    if (!recovery.checkpoint(workspace.tab(i)->id,
+                                             std::move(tab),
+                                             current,
+                                             error) &&
+                        !recoveryWriteFailed) {
+                        notify("Cannot save crash recovery: " + error);
+                        recoveryWriteFailed = true;
+                    }
+                }
+                recovery.retireExcept(current);
+            }
+        }
         skipText = false;
         reportSettings(settingsWatch.poll(), false);
         workspace.forEachPane(
@@ -4279,6 +4404,7 @@ int runPtyFrontend(const char *font,
     if (keepTerminals) {
         workspace.forEachPane([](PaneId, NativePane &pane, bool) { pane.endInDaemon = false; });
     }
+    if (!keepTerminals || gShutdownSignal == 0) recovery.retire();
     // A controlled shutdown (quit, the window's close button, SIGTERM, SIGHUP) writes the session
     // of a window the owner made persistent, with a checkpoint of what is on the screens. Nothing
     // is written for a window whose session was never saved, and nothing is ever restored on start.

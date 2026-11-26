@@ -160,6 +160,11 @@ if(BUILD_TESTING)
     target_link_libraries(passthrough_test PRIVATE matterm::transport matterm::vt matterm::terminal matterm::ttymatterm)
     add_test(NAME passthrough COMMAND passthrough_test)
 
+    add_executable(recoverylayouts_test recoverylayouts_test.cpp)
+    target_link_libraries(recoverylayouts_test PRIVATE mls_unit_test_main sessionfiles)
+    target_include_directories(recoverylayouts_test PRIVATE ../src/frontend ../src/platform/posix)
+    add_test(NAME recovery_layouts COMMAND recoverylayouts_test)
+
     add_executable(serverwindow_test serverwindow_test.cpp)
     target_link_libraries(serverwindow_test PRIVATE mls_unit_test_main)
     target_include_directories(serverwindow_test PRIVATE ../src/frontend)
@@ -576,6 +581,11 @@ if(BUILD_TESTING)
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/settings_native.py"
                     "$<TARGET_FILE:matterm>" "$<TARGET_FILE:matterm-daemon>")
             set_tests_properties(settings_native PROPERTIES TIMEOUT 100)
+
+            add_test(NAME recovery_native
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/recovery_native.py"
+                    $<TARGET_FILE:matterm> $<TARGET_FILE:matterm-daemon>)
+            set_tests_properties(recovery_native PROPERTIES TIMEOUT 60)
 
             add_test(NAME window_detach_native
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/window_detach_native.py"
