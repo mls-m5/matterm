@@ -26,6 +26,30 @@ TEST_CASE("The definitions: unique keys, a default that is allowed, a text for "
            keys.count("computerNamePlacement"));
 }
 
+TEST_CASE(
+    "Saved SSH servers are separate from theme names and reject options") {
+    Settings s;
+    std::string error;
+    EXPECT(s.serverHosts().empty());
+    EXPECT(!s.addServerHost("-oProxyCommand=bad", error));
+    EXPECT(!s.addServerHost("user@host;bad", error));
+    EXPECT(s.addServerHost("user@server", error));
+    EXPECT(s.addServerHost("user@server", error));
+    EXPECT_EQ(s.serverHosts().size(), std::size_t(1));
+    EXPECT(s.computerNames().empty());
+    EXPECT(!Settings().sameValues(s));
+    auto loaded = Settings::fromText(s.toText());
+    EXPECT(loaded.ok());
+    EXPECT_EQ(loaded.settings.serverHosts().front(),
+              std::string("user@server"));
+    EXPECT(loaded.settings.replaceServerHost("user@server", "other", error));
+    EXPECT_EQ(loaded.settings.serverHosts().front(), std::string("other"));
+    EXPECT(loaded.settings.removeServerHost("other", error));
+    EXPECT(loaded.settings.serverHosts().empty());
+    EXPECT(Settings::fromText(R"({"servers":["-bad","ok","ok",3]})")
+               .settings.serverHosts() == std::vector<std::string>{"ok"});
+}
+
 TEST_CASE("Cell vertical alignment defaults to top and saves bottom") {
     Settings settings;
     EXPECT_EQ(settings.choice("cellVerticalAlignment"), std::string("top"));

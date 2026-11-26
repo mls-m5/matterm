@@ -18,6 +18,8 @@ public:
         std::string key, label, value, description, computer;
         int section = 0;
         bool addComputer = false;
+        std::string server;
+        bool addServer = false;
     };
     explicit SettingsUI(SettingsWatcher &watcher)
         : watcher_(watcher) {
@@ -80,6 +82,25 @@ public:
              {},
              2,
              true});
+        for (const auto &host : settings.serverHosts())
+            all.push_back({"servers." + host,
+                           host,
+                           host,
+                           "Edit SSH destination; clear to remove it.",
+                           {},
+                           2,
+                           false,
+                           host,
+                           false});
+        all.push_back({"servers.add",
+                       "Add server...",
+                       "+",
+                       "Save an SSH destination (user@host).",
+                       {},
+                       2,
+                       false,
+                       {},
+                       true});
         std::vector<Row> result;
         if (query_.empty()) {
             for (const auto &r : all)
@@ -424,10 +445,11 @@ private:
         choices_.clear();
         choice_ = 0;
         hostStage_ = edit_.addComputer;
+        serverStage_ = edit_.addServer || !edit_.server.empty();
         replaceBuffer_ = true;
-        buffer_ = hostStage_ ? "" : edit_.value;
+        buffer_ = hostStage_ || edit_.addServer ? "" : edit_.value;
         before_ = edit_.value;
-        if (!hostStage_)
+        if (!hostStage_ && !serverStage_)
             fillChoices();
     }
     void fillChoices() {
@@ -450,10 +472,11 @@ private:
         if (key.is(K::Escape)) {
             editing_ = false;
             hostStage_ = false;
+            serverStage_ = false;
             message_ = "Edit cancelled; earlier changes remain saved";
             return;
         }
-        if (!choices_.empty() && !hostStage_) {
+        if (!choices_.empty() && !hostStage_ && !serverStage_) {
             if (key.is(K::Up) || key.is(K::Left))
                 choice_ = (choice_ + choices_.size() - 1) % choices_.size();
             else if (key.is(K::Down) || key.is(K::Right))
@@ -481,6 +504,36 @@ private:
         }
         if (!key.is(K::Enter))
             return;
+        if (serverStage_) {
+            if (buffer_.empty() && edit_.server.empty()) {
+                message_ = "Enter an SSH destination (user@host)";
+                return;
+            }
+            if (!buffer_.empty() && !frontend::safeSshHost(buffer_)) {
+                message_ = "Invalid SSH destination";
+                return;
+            }
+            if (watcher_.reloadNow() == SettingsWatcher::Event::Failed ||
+                !watcher_.error().empty()) {
+                message_ = "Cannot save: " + watcher_.error();
+                return;
+            }
+            auto changed = watcher_.settings();
+            std::string error;
+            const bool ok =
+                edit_.server.empty() ? changed.addServerHost(buffer_, error)
+                : buffer_.empty()
+                    ? changed.removeServerHost(edit_.server, error)
+                    : changed.replaceServerHost(edit_.server, buffer_, error);
+            if (!ok || !watcher_.save(changed, error)) {
+                message_ = "Cannot save: " + error;
+                return;
+            }
+            editing_ = serverStage_ = false;
+            message_ = "Server list saved";
+            clampSelection();
+            return;
+        }
         if (hostStage_) {
             if (!validComputerName(buffer_)) {
                 message_ = "Enter a valid computer name (1-128 bytes)";
@@ -526,7 +579,8 @@ private:
     Row edit_;
     std::size_t selected_ = 0, choice_ = 0;
     int section_ = 0;
-    bool sectionsFocus_ = false, editing_ = false, hostStage_ = false;
+    bool sectionsFocus_ = false, editing_ = false, hostStage_ = false,
+         serverStage_ = false;
     bool replaceBuffer_ = false, running_ = true, interactive_ = true;
 };
 } // namespace frontend::settings

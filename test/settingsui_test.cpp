@@ -104,6 +104,28 @@ TEST_CASE(
     ui.handle(key(tty::Key::Type::Enter));
     EXPECT(fs.writes == 0);
 }
+TEST_CASE("Servers can be added, edited and removed in local Settings") {
+    MemorySettings fs;
+    frontend::settings::SettingsWatcher watch(
+        fs, "settings.json", [] { return 0; });
+    frontend::settings::SettingsUI ui(watch);
+    ui.setQuery("Add server");
+    ui.handle(key(tty::Key::Type::Enter));
+    ui.handle(text("user@host"));
+    ui.handle(key(tty::Key::Type::Enter));
+    EXPECT_EQ(watch.settings().serverHosts().front(), std::string("user@host"));
+    ui.setQuery("user@host");
+    ui.handle(key(tty::Key::Type::Enter));
+    ui.handle(text("other"));
+    ui.handle(key(tty::Key::Type::Enter));
+    EXPECT_EQ(watch.settings().serverHosts().front(), std::string("other"));
+    ui.setQuery("other");
+    ui.handle(key(tty::Key::Type::Enter));
+    ui.handle(key(tty::Key::Type::Backspace));
+    ui.handle(key(tty::Key::Type::Enter));
+    EXPECT(watch.settings().serverHosts().empty());
+    EXPECT(fs.writes == 3);
+}
 TEST_CASE("Computer overrides can be added and switched back to automatic") {
     MemorySettings fs;
     frontend::settings::SettingsWatcher watch(
@@ -306,7 +328,8 @@ TEST_CASE("Mouse follows narrow scroll and resize layout, sections and search "
 
 TEST_CASE("Draw batching is in Terminal and searchable as a live bool") {
     MemorySettings fs;
-    frontend::settings::SettingsWatcher watch(fs, "settings.json", [] { return 0; });
+    frontend::settings::SettingsWatcher watch(
+        fs, "settings.json", [] { return 0; });
     frontend::settings::SettingsUI ui(watch);
     ui.setQuery("Draw batching");
     EXPECT(ui.rows().size() == 1);

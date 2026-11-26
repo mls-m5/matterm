@@ -78,6 +78,16 @@ Settings to keep those line breaks; rectangular copies always keep their rows.
 The terminal cannot always distinguish a TUI's artificial break from a
 purposeful newline at the right edge.
 
+The **Connect to server...** palette entry lists saved SSH destinations and
+**New host...**. Enter `user@host`, then choose **Save and connect** or
+**Connect once**. A new independent window uses `--daemon-host`; closing it
+does not close this window or stop the remote daemon. Saved destinations can
+also be added, edited, or removed in Settings under Computers (clear a host
+to remove it). They are stored in `servers` separately from the `computers`
+colour overrides, e.g. `"servers": ["user@host", "lab-alias"]`.
+Configure SSH keys/host aliases in `~/.ssh/config`; passwords are not stored
+here, and the remote connection uses non-interactive SSH.
+
 The file is `$XDG_CONFIG_HOME/matterm/settings.json` (otherwise
 `~/.config/matterm/settings.json`): strict JSON, always formatted with defaults
 included. Unknown members are retained. External changes are re-read before

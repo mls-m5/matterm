@@ -21,6 +21,7 @@
 #include "daemoninstall.h"
 #include "sha256.h"
 #include "sshphase.h"
+#include "sshhost.h"
 
 #include <algorithm>
 #include <atomic>
@@ -111,6 +112,7 @@ inline bool isStaticElf(const std::string &path) {
 // What may be handed to the remote shell or to ssh as a name: no spaces, quotes, `$`, `;` and so on,
 // and not starting with '-' (it would be an option).
 inline bool safeSshWord(const std::string &s, bool allowSlash) {
+    if (!allowSlash) return safeSshHost(s);
     if (s.empty() || s.size() > 1024 || s.front() == '-') {
         return false;
     }

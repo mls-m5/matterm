@@ -10,6 +10,7 @@
 // Pure: no files here (settingsfile.h), no clock (settingswatch.h), no colours
 // (themes.h).
 #include "jsonvalue.h"
+#include "sshhost.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -244,7 +245,83 @@ public:
         }
         return "auto";
     }
-    // Names that have an entry (valid or not), for a list.
+    // A separate list from per-computer themes. Only safe SSH destinations
+    // are offered; malformed entries in a hand-edited file are ignored.
+    std::vector<std::string> serverHosts() const {
+        std::vector<std::string> hosts;
+        const json::Value *servers = doc_.find("servers");
+        if (!servers || !servers->isArray())
+            return hosts;
+        for (const auto &entry : servers->items()) {
+            if (const auto host = entry.string();
+                host && frontend::safeSshHost(*host) &&
+                std::find(hosts.begin(), hosts.end(), *host) == hosts.end() &&
+                hosts.size() < 100) {
+                hosts.push_back(*host);
+            }
+        }
+        return hosts;
+    }
+    bool addServerHost(std::string host, std::string &error) {
+        if (!frontend::safeSshHost(host)) {
+            error = "SSH host must contain only safe name characters (no "
+                    "options or spaces)";
+            return false;
+        }
+        auto hosts = serverHosts();
+        if (std::find(hosts.begin(), hosts.end(), host) == hosts.end()) {
+            if (hosts.size() >= 100) {
+                error = "at most 100 servers can be saved";
+                return false;
+            }
+            hosts.push_back(std::move(host));
+        }
+        auto array = json::Value::array();
+        for (const auto &saved : hosts)
+            array.items().push_back(json::Value::text(saved));
+        doc_.set("servers", std::move(array));
+        return true;
+    }
+    bool removeServerHost(const std::string &host, std::string &error) {
+        auto hosts = serverHosts();
+        const auto old = std::find(hosts.begin(), hosts.end(), host);
+        if (old == hosts.end()) {
+            error = "server was changed externally";
+            return false;
+        }
+        hosts.erase(old);
+        auto array = json::Value::array();
+        for (const auto &saved : hosts)
+            array.items().push_back(json::Value::text(saved));
+        doc_.set("servers", std::move(array));
+        return true;
+    }
+    bool replaceServerHost(const std::string &oldHost,
+                           std::string host,
+                           std::string &error) {
+        if (!frontend::safeSshHost(host)) {
+            error = "invalid SSH host";
+            return false;
+        }
+        auto hosts = serverHosts();
+        const auto old = std::find(hosts.begin(), hosts.end(), oldHost);
+        if (old == hosts.end()) {
+            error = "server was changed externally";
+            return false;
+        }
+        if (host != oldHost &&
+            std::find(hosts.begin(), hosts.end(), host) != hosts.end()) {
+            error = "server is already saved";
+            return false;
+        }
+        *old = std::move(host);
+        auto array = json::Value::array();
+        for (const auto &saved : hosts)
+            array.items().push_back(json::Value::text(saved));
+        doc_.set("servers", std::move(array));
+        return true;
+    }
+    // Names that have a theme entry (valid or not), for the settings list.
     std::vector<std::string> computerNames() const {
         std::vector<std::string> names;
         const json::Value *computers = doc_.find("computers");
@@ -399,7 +476,7 @@ public:
             }
             }
         }
-        return true;
+        return serverHosts() == other.serverHosts();
     }
 
 private:

@@ -25,6 +25,7 @@
 #include "sessioncommands.h"
 #include "sessionfiles.h"
 #include "sessionrestore.h"
+#include "serverwindow.h"
 #include "settingswatch.h"
 #include "splitdecoration.h"
 #include "sshtunnel.h"
@@ -56,6 +57,7 @@
 #include <system_error>
 #include <tuple>
 #include <unistd.h>
+#include <sys/wait.h>
 #include <utility>
 
 namespace {
@@ -1410,6 +1412,12 @@ int runPtyFrontend(const char *font,
              std::nullopt,
              {},
              {}},
+            {"server.connect",
+             "Connect to server...",
+             "Open a separate matterm window on a saved SSH server",
+             std::nullopt,
+             {},
+             {}},
             {"settings.open",
              "Settings",
              "Edit this computer's settings in a new local tab",
@@ -1461,6 +1469,7 @@ int runPtyFrontend(const char *font,
         }
         return extra;
     };
+    std::vector<pid_t> serverWindows;
     const auto openPalette = [&] {
         wv.pushLayer(
             std::make_unique<ui::CommandPalette>(buildCommandRegistry(viewConfig.prefix, paletteExtra()), true));
@@ -1608,6 +1617,70 @@ int runPtyFrontend(const char *font,
                 settingsWatch.warnings().empty()) {
                 notify(""); // Read again, nothing to say.
             }
+        }
+        else if (id == "server.connect" && colon == std::string::npos) {
+            std::vector<ui::PickList::Item> items;
+            for (const auto &host : settingsWatch.settings().serverHosts()) {
+                items.push_back({host,
+                                 "SSH daemon in a new window",
+                                 "server.connect.go:" + host});
+            }
+            items.push_back({"New host...",
+                             "Enter an SSH destination",
+                             "server.connect.new"});
+            wv.pushLayer(std::make_unique<ui::PickList>("Connect to server",
+                                                        std::move(items)));
+        }
+        else if (id == "server.connect.new" && colon == std::string::npos) {
+            wv.pushLayer(std::make_unique<ui::TextPrompt>(
+                "SSH host (user@host)", "", "server.connect.new:", false, 128));
+        }
+        else if (id == "server.connect.new") {
+            if (!safeSshHost(argument)) {
+                notify("Invalid SSH host; use a host or user@host without "
+                       "spaces or options");
+            }
+            else {
+                wv.pushLayer(std::make_unique<ui::ConfirmDialog>(
+                    "Save " + argument + " in Settings?",
+                    std::vector<ui::ConfirmDialog::Button>{
+                        {"Save and connect", "server.connect.save:" + argument},
+                        {"Connect once", "server.connect.go:" + argument},
+                        {"Cancel", ""}},
+                    2,
+                    0));
+            }
+        }
+        else if (id == "server.connect.save") {
+            if (settingsWatch.reloadNow() ==
+                    settings::SettingsWatcher::Event::Failed ||
+                !settingsWatch.error().empty()) {
+                notify("Cannot save server: " + settingsWatch.error());
+            }
+            else {
+                auto changed = settingsWatch.settings();
+                std::string error;
+                if (!changed.addServerHost(argument, error) ||
+                    !settingsWatch.save(changed, error)) {
+                    notify("Cannot save server: " + error);
+                }
+                else {
+                    pid_t child = -1;
+                    if (spawnServerWindow(
+                            "/proc/self/exe", argument, child, error))
+                        serverWindows.push_back(child);
+                    else
+                        notify(error);
+                }
+            }
+        }
+        else if (id == "server.connect.go") {
+            pid_t child = -1;
+            std::string error;
+            if (spawnServerWindow("/proc/self/exe", argument, child, error))
+                serverWindows.push_back(child);
+            else
+                notify(error);
         }
         else if (id == "session.open" && colon == std::string::npos) {
             std::vector<ui::PickList::Item> items;
@@ -3039,6 +3112,13 @@ int runPtyFrontend(const char *font,
     const Uint64 loopStarted = SDL_GetTicks64();
     double previousGuiLoopAt = 0;
     while (running) {
+        serverWindows.erase(
+            std::remove_if(serverWindows.begin(),
+                           serverWindows.end(),
+                           [](pid_t pid) {
+                               return ::waitpid(pid, nullptr, WNOHANG) != 0;
+                           }),
+            serverWindows.end());
         if (perfLog.enabled()) {
             const double loopAt = perfClockMs();
             perfLog.tick();
