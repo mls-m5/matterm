@@ -94,7 +94,32 @@ struct Selection {
         if (!valid(model)) {
             return std::nullopt;
         }
-        return model.copyText(anchor, end, limit);
+        auto copied = model.copyText(anchor, end, limit);
+        if (!copied || !model.alternateScreen()) {
+            return copied;
+        }
+        // Full-screen TUIs often paint blank cells up to the edge. Strip
+        // those cells on each logical line, including the final selection
+        // row; do not alter internal spaces or join/split soft-wrapped rows.
+        std::string trimmed;
+        trimmed.reserve(copied->size());
+        std::size_t begin = 0;
+        while (begin < copied->size()) {
+            const auto newline = copied->find('\n', begin);
+            const auto lineEnd =
+                newline == std::string::npos ? copied->size() : newline;
+            auto last = lineEnd;
+            while (last > begin && (*copied)[last - 1] == ' ') {
+                --last;
+            }
+            trimmed.append(*copied, begin, last - begin);
+            if (newline == std::string::npos) {
+                break;
+            }
+            trimmed.push_back('\n');
+            begin = newline + 1;
+        }
+        return trimmed;
     }
 
     void apply(const TerminalModel &model, RenderFrame &frame) const {

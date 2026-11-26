@@ -171,6 +171,26 @@ TEST_CASE(
     EXPECT_EQ(text(selected, model), "abcdefghi ");
 }
 
+TEST_CASE("TUI copy trims trailing spaces on every logical line") {
+    TerminalModel model(10, 3);
+    model.setAlternateScreen(true);
+    model.write(U"one  \r\ntwo   \r\n    ");
+    const auto selected = Selection::all(model);
+    EXPECT_EQ(text(selected, model), "one\ntwo\n");
+    EXPECT_EQ(
+        *model.copyText(selected.anchor, selected.end, Selection::copyLimit),
+        "one\ntwo\n          ");
+
+    TerminalModel wrapped(6, 2);
+    wrapped.setAlternateScreen(true);
+    wrapped.write(U"abc  de");
+    EXPECT_EQ(text(Selection::all(wrapped), wrapped), "abc  de");
+
+    TerminalModel shell(10, 1);
+    shell.write(U"one  ");
+    EXPECT_EQ(text(Selection::all(shell), shell), "one       ");
+}
+
 TEST_CASE(
     "Select all spans retained history and the screen regardless of viewport") {
     TerminalModel model(4, 2, 10);
